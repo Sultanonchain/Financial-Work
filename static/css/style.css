@@ -544,6 +544,28 @@ tfoot td:first-child { text-align: left; position: sticky; left: 0; }
 
 @media (max-width: 640px) { .sc-grid { grid-template-columns: 1fr; } }
 
+/* ── Adaptive Moat Badge ───────────────────────────────────── */
+.moat-badge {
+  display: flex; align-items: flex-start; gap: 12px;
+  background: linear-gradient(135deg, rgba(196,154,60,0.10), rgba(196,154,60,0.05));
+  border: 1px solid rgba(196,154,60,0.40);
+  border-left: 3px solid var(--gold);
+  border-radius: var(--radius); padding: 12px 16px;
+  margin-bottom: 10px;
+}
+.moat-badge-icon {
+  color: var(--gold); font-size: 16px; line-height: 1.5;
+  flex-shrink: 0; margin-top: 1px;
+}
+.moat-badge-body { display: flex; flex-direction: column; gap: 3px; }
+.moat-badge-title {
+  font-size: 12px; font-weight: 700; color: var(--gold);
+  letter-spacing: 0.2px;
+}
+.moat-badge-sub {
+  font-size: 11px; color: var(--muted2); font-family: var(--mono);
+}
+
 /* ── Multiples Fallback Badge ──────────────────────────────── */
 .multiples-badge {
   display: flex; align-items: flex-start; gap: 10px;

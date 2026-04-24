@@ -241,6 +241,22 @@ function renderResults(d) {
   const warnEl = $('dcfWarning');
   const notes  = d.dcf_notes || [];
   let warnHtml = '';
+  // Moat badge — shown for any High-Moat/Backbone classification
+  if (d.moat_detected && d.moat_path) {
+    const reasonStr = (d.moat_reasons || []).join(' · ');
+    const waccLine  = d.moat_wacc_delta
+      ? `WACC reduced ${d.moat_wacc_delta.toFixed(1)}pp · ` : '';
+    const multLine  = d.moat_mult_premium
+      ? `Exit multiples +${d.moat_mult_premium}%` : '';
+    warnHtml += `<div class="moat-badge">
+      <span class="moat-badge-icon">◆</span>
+      <div class="moat-badge-body">
+        <span class="moat-badge-title">Adaptive Moat Premium Applied — ${escHtml(d.moat_path)}</span>
+        <span class="moat-badge-sub">${escHtml(reasonStr)} &nbsp;·&nbsp; ${waccLine}${multLine}</span>
+      </div>
+    </div>`;
+  }
+
   // Multiples fallback badge — shown prominently when DCF is replaced by multiples
   if (d.multiples_val && (!d.dcf_available || iv == null)) {
     warnHtml += `<div class="multiples-badge">
@@ -289,6 +305,7 @@ function renderResults(d) {
     row('PV of FCFs',      fmtBig(d.total_pv_fcf)),
     row('PV Terminal Val', fmtBig(d.pv_terminal)),
     row('Terminal % of EV',fmtPct(d.terminal_value_pct)),
+    d.moat_detected ? row('Moat Premium', `<span style="color:var(--gold);font-size:11px">◆ ${d.moat_path} — WACC −${(d.moat_wacc_delta||0).toFixed(1)}pp</span>`) : '',
     d.growth_source ? row('Growth Source', `<span style="color:var(--muted2);font-size:11px">${d.growth_source}</span>`) : '',
     d.fcf_source    ? row('FCF Source',    `<span style="color:var(--muted2);font-size:11px">${d.fcf_source}</span>`)    : '',
     (d.fx_rate && d.financial_currency && d.trading_currency)

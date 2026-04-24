@@ -149,11 +149,13 @@ def _sector_to_mult_key(sector: str) -> str:
     return "default"
 
 
-def calc_multiples_val(info, sector, industry, fx_rate, ebitda_ttm=None):
+def calc_multiples_val(info, sector, industry, fx_rate, ebitda_ttm=None, moat_premium=1.0):
     """
     Fallback valuation when DCF is unavailable (negative equity or negative FCF).
     Method 1: Forward EPS × sector median Forward P/E
     Method 2: (EBITDA × sector EV/EBITDA − Net Debt) / Shares
+    moat_premium: multiplier applied to both sector multiples for High-Moat companies
+                  (1.0 = no change, 1.20 = 20% expansion above sector median).
     Returns (value, method_label) or (None, None).
     """
     ind_class = _classify_industry(sector, industry)
@@ -163,7 +165,12 @@ def calc_multiples_val(info, sector, industry, fx_rate, ebitda_ttm=None):
         "default": _sector_to_mult_key(sector),
     }
     mk = class_to_mult.get(ind_class, "default")
-    fpe_mult, ev_ebitda_mult = SECTOR_MULT_PARAMS.get(mk, SECTOR_MULT_PARAMS["default"])
+    base_fpe, base_ev = SECTOR_MULT_PARAMS.get(mk, SECTOR_MULT_PARAMS["default"])
+
+    # Apply moat expansion — 20% above sector median for backbone companies
+    fpe_mult      = round(base_fpe * moat_premium, 1) if base_fpe else None
+    ev_ebitda_mult = round(base_ev  * moat_premium, 1) if base_ev  else None
+    premium_tag   = f" +{round((moat_premium-1)*100):.0f}% moat" if moat_premium > 1.0 else ""
 
     shares = safe(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"), 0) or 0
     if shares <= 0:
@@ -172,7 +179,7 @@ def calc_multiples_val(info, sector, industry, fx_rate, ebitda_ttm=None):
     # Method 1: Forward EPS × sector Forward P/E multiple
     fwd_eps = safe(info.get("forwardEps"))
     if fwd_eps and fwd_eps > 0 and fpe_mult:
-        return round(fwd_eps * fpe_mult, 2), f"Forward P/E ({fpe_mult:.0f}x sector median)"
+        return round(fwd_eps * fpe_mult, 2), f"Forward P/E ({fpe_mult:.0f}x sector median{premium_tag})"
 
     # Method 2: EV/EBITDA → derive equity value per share
     ebitda = ebitda_ttm or safe(info.get("ebitda"))
@@ -184,7 +191,7 @@ def calc_multiples_val(info, sector, industry, fx_rate, ebitda_ttm=None):
         net_debt = debt - cash
         eq_val   = ev_implied - net_debt
         if eq_val > 0:
-            return round(eq_val / shares, 2), f"EV/EBITDA ({ev_ebitda_mult:.0f}x sector median)"
+            return round(eq_val / shares, 2), f"EV/EBITDA ({ev_ebitda_mult:.0f}x sector median{premium_tag})"
 
     return None, None
 
@@ -210,6 +217,34 @@ def _bear_floor_iv(info, sector, industry, fx_rate, ebitda_ttm=None):
     net_debt = debt - cash
     eq_floor = ev_floor - net_debt
     return max(eq_floor / shares, 0.0)
+
+
+def _detect_moat(net_margin, revenue_growth, earnings_growth, fcf_margin, roe):
+    """
+    Three-path moat classifier. All inputs are already in percentage form (e.g. 20 = 20%).
+
+    Path A — High-Growth Backbone:      Net margin > 20%  AND  Revenue growth > 15%
+    Path B — Mature Cash Machine:       Net margin > 25%  AND  Earnings growth > 15%
+    Path C — Capital-Light Compounder:  Net margin > 20%  AND  FCF margin > 20%  AND  ROE > 25%
+
+    Returns (is_high_moat: bool, path_label: str | None, reasons: list[str])
+    """
+    nm    = net_margin      or 0
+    rg    = revenue_growth  or 0
+    eg    = earnings_growth or 0
+    fm    = fcf_margin      or 0
+    roe_v = roe             or 0
+
+    if nm > 20 and rg > 15:
+        return True, "High-Growth Backbone", [
+            f"Net margin {nm:.1f}%", f"Revenue growth {rg:.1f}%"]
+    if nm > 25 and eg > 15:
+        return True, "Mature Cash Machine", [
+            f"Net margin {nm:.1f}%", f"Earnings growth {eg:.1f}%"]
+    if nm > 20 and fm > 20 and roe_v > 25:
+        return True, "Capital-Light Compounder", [
+            f"Net margin {nm:.1f}%", f"FCF margin {fm:.1f}%", f"ROE {roe_v:.1f}%"]
+    return False, None, []
 
 
 def get_quarterly_balance_data(stock, info, fx_rate):
@@ -1007,6 +1042,27 @@ def analyze():
         operating_margin_ttm = round(oi_ttm / rev_ttm * 100, 2) if oi_ttm and rev_ttm else None
         net_margin_ttm = round(ni_ttm / rev_ttm * 100, 2) if ni_ttm and rev_ttm else None
 
+        # ── Moat Detection ───────────────────────────────────────────────────
+        # Run before DCF so the classification can adjust WACC and TG ceilings.
+        _rev_g_raw  = safe(info.get("revenueGrowth"))
+        _earn_g_raw = safe(info.get("earningsGrowth"))
+        _roe_raw    = safe(info.get("returnOnEquity"))
+        rev_growth_pct  = round(_rev_g_raw  * 100, 2) if _rev_g_raw  is not None else None
+        earn_growth_pct = round(_earn_g_raw * 100, 2) if _earn_g_raw is not None else None
+        roe_pct         = round(_roe_raw    * 100, 2) if _roe_raw    is not None else None
+        # FCF margin preview: use info freeCashflow / TTM revenue (base_fcf already in USD)
+        _fcf_preview  = safe(info.get("freeCashflow"))
+        _rev_preview  = rev_ttm or safe(info.get("totalRevenue"))
+        fcf_margin_preview = (
+            round(_fcf_preview / _rev_preview * 100, 1)
+            if _fcf_preview and _rev_preview and _rev_preview > 0 else None
+        )
+        moat_detected, moat_path, moat_reasons = _detect_moat(
+            net_margin_ttm, rev_growth_pct, earn_growth_pct, fcf_margin_preview, roe_pct
+        )
+        moat_wacc_delta   = 0.0      # how many pp of WACC were removed (filled below)
+        moat_mult_premium = 1.20 if moat_detected else 1.0  # 20% multiple expansion
+
         # ── DCF computation ───────────────────────────────────────────────────
         intrinsic_value  = None
         margin_of_safety = None
@@ -1062,6 +1118,20 @@ def analyze():
             # Cap terminal growth at industry ceiling (GDP-aligned for mature sectors)
             if not user_tg_override:
                 tg = min(tg, ind_params["max_tg"])
+
+            # ── Moat Premium adjustments ─────────────────────────────────────
+            # Applied after industry guardrails — moat premium is a reward on top,
+            # not a way to bypass sector-specific safety floors.
+            if moat_detected:
+                _wacc_pre  = wacc
+                # Reduce WACC 1.5 pp to reflect lower institutional risk (floor: 7.5%)
+                wacc = max(wacc - 0.015, 0.075)
+                wacc_data["wacc"] = wacc
+                moat_wacc_delta = round(_wacc_pre - wacc, 4)
+                # Allow terminal growth up to 3.0% for backbone companies
+                # (vs 2.5% global hard cap for commodity businesses)
+                if not user_tg_override:
+                    tg = min(tg, 0.030)
 
             # Enforce minimum WACC − TGR spread to prevent Gordon Growth Model blow-up
             # (small denominator creates astronomical terminal values)
@@ -1202,7 +1272,8 @@ def analyze():
                 else "Negative/Missing Free Cash Flow"
             )
             multiples_val, multiples_method = calc_multiples_val(
-                info, sector, industry, fx_rate, ebitda_ttm
+                info, sector, industry, fx_rate, ebitda_ttm,
+                moat_premium=moat_mult_premium
             )
             if multiples_val and price:
                 multiples_mos = round((multiples_val - price) / price * 100, 1)
@@ -1340,6 +1411,12 @@ def analyze():
             "multiples_method": multiples_method,
             "multiples_reason": multiples_reason,
             "multiples_mos":    multiples_mos,
+            # Moat detection
+            "moat_detected":    moat_detected,
+            "moat_path":        moat_path,
+            "moat_reasons":     moat_reasons,
+            "moat_wacc_delta":  round(moat_wacc_delta * 100, 2) if moat_wacc_delta else None,
+            "moat_mult_premium":round((moat_mult_premium - 1) * 100) if moat_detected else None,
         }
 
         return jsonify(clean(result))
