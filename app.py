@@ -168,6 +168,29 @@ def get_fcf_series(cashflow):
         return []
 
 
+def get_income_stmt_ttm(stock):
+    """
+    Compute key income statement metrics from quarterly data (TTM).
+    For foreign companies, quarterly TTM is more current than annual filings.
+    Returns dict with revenue, cogs, gross_profit, operating_income, net_income (all TTM).
+    """
+    result = {}
+    try:
+        q = stock.quarterly_income_stmt
+        if q is None or q.empty or len(q.columns) < 4:
+            return result
+        cols = q.columns[:4]
+        for key in ["Total Revenue", "Cost Of Revenue", "Gross Profit",
+                    "Operating Income", "Net Income", "EBITDA"]:
+            if key in q.index:
+                vals = [safe(q.loc[key, c]) for c in cols]
+                if all(v is not None for v in vals):
+                    result[key] = sum(vals)
+    except Exception:
+        pass
+    return result
+
+
 def get_base_fcf(info, stock):
     """
     Best available FCF to use as DCF base:
@@ -767,11 +790,25 @@ def analyze():
             if growth_pct > 0:
                 peg = round(pe_ttm / growth_pct, 2)
 
+        # ── Income statement TTM (prefer quarterly for foreign companies) ──────
+        inc_ttm = get_income_stmt_ttm(stock)
+        rev_ttm = inc_ttm.get("Total Revenue") or safe(info.get("totalRevenue"))
+        cogs_ttm = inc_ttm.get("Cost Of Revenue")
+        gp_ttm = inc_ttm.get("Gross Profit")
+        oi_ttm = inc_ttm.get("Operating Income")
+        ni_ttm = inc_ttm.get("Net Income")
+        ebitda_ttm = inc_ttm.get("EBITDA") or safe(info.get("ebitda"))
+
+        # Compute margins from TTM data
+        gross_margin_ttm = round(gp_ttm / rev_ttm * 100, 2) if gp_ttm and rev_ttm else None
+        operating_margin_ttm = round(oi_ttm / rev_ttm * 100, 2) if oi_ttm and rev_ttm else None
+        net_margin_ttm = round(ni_ttm / rev_ttm * 100, 2) if ni_ttm and rev_ttm else None
+
         # ── FCF yield and margin ──────────────────────────────────────────────
         mcap = safe(info.get("marketCap"), 0) or 0
         fcf_for_yield = base_fcf or (fcf_series[0] if fcf_series else None)
         fcf_yield   = round(fcf_for_yield / mcap * 100, 2) if fcf_for_yield and mcap > 0 else None
-        rev_total   = safe(info.get("totalRevenue"))
+        rev_total   = rev_ttm  # Use TTM revenue for margin
         fcf_margin  = round(fcf_for_yield / rev_total * 100, 1) if fcf_for_yield and rev_total else None
 
         def pct(v):
@@ -843,12 +880,12 @@ def analyze():
             "pb_ratio":      f2(info.get("priceToBook")),
             "ev_ebitda":     f2(info.get("enterpriseToEbitda")),
             "ev_revenue":    f2(info.get("enterpriseToRevenue")),
-            # Financials card
-            "revenue":           f2(rev_total),
-            "ebitda":            f2(info.get("ebitda")),
-            "gross_margin":      pct(info.get("grossMargins")),
-            "operating_margin":  pct(info.get("operatingMargins")),
-            "profit_margin":     pct(info.get("profitMargins")),
+            # Financials card — use TTM from quarterly for accuracy (esp. foreign cos)
+            "revenue":           rev_total,  # keep as number, js will format
+            "ebitda":            ebitda_ttm,  # keep as number, js will format
+            "gross_margin":      gross_margin_ttm or pct(info.get("grossMargins")),
+            "operating_margin":  operating_margin_ttm or pct(info.get("operatingMargins")),
+            "profit_margin":     net_margin_ttm or pct(info.get("profitMargins")),
             "revenue_growth":    pct(info.get("revenueGrowth")),
             "earnings_growth":   pct(info.get("earningsGrowth")),
             "roe":               pct(info.get("returnOnEquity")),
