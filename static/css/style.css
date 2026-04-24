@@ -1,6 +1,9 @@
 /* ── Reset ─────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+::selection { background: rgba(0,212,255,0.25); color: #eef0f8; }
+::-moz-selection { background: rgba(0,212,255,0.25); color: #eef0f8; }
+
 :root {
   --bg:        #07080f;
   --surface:   #0d0f1c;
@@ -388,9 +391,20 @@ tfoot td:first-child { text-align: left; position: sticky; left: 0; }
   font-size: 12px; color: var(--muted2); padding: 20px 0;
 }
 
-/* Statements table: numbers right-aligned */
-.stmt-table thead th:first-child { min-width: 200px; }
+/* Statements table */
+.stmt-table thead th:first-child { min-width: 220px; }
 .stmt-table td { color: var(--text); }
+.stmt-label { color: var(--muted2); font-size: 12px; }
+.stmt-section-header td {
+  background: var(--surface3);
+  color: var(--cyan);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  padding: 7px 12px;
+  border-top: 1px solid var(--border2);
+}
 
 /* ── Modal ─────────────────────────────────────────────────── */
 .modal-overlay {

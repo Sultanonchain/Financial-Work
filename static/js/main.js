@@ -414,23 +414,36 @@ function renderStatements(tab) {
   }
 
   const cols = data.columns || [];
+  const bodyRows = data.rows.map(r => {
+    if (r.section) {
+      return `<tr class="stmt-section-header"><td colspan="${cols.length + 1}">${r.label}</td></tr>`;
+    }
+    return `<tr>
+      <td class="stmt-label">${fmtStmtLabel(r.label)}</td>
+      ${r.values.map(v => `<td>${fmtStmt(v)}</td>`).join('')}
+    </tr>`;
+  }).join('');
+
   content.innerHTML = `
     <table class="stmt-table">
       <thead>
         <tr>
           <th>Item</th>
-          ${cols.map(c => `<th>${c}</th>`).join('')}
+          ${cols.map(c => `<th>${c.slice(0,7)}</th>`).join('')}
         </tr>
       </thead>
-      <tbody>
-        ${data.rows.map(r => `
-          <tr>
-            <td>${r.label}</td>
-            ${r.values.map(v => `<td>${fmtStmt(v)}</td>`).join('')}
-          </tr>`).join('')}
-      </tbody>
+      <tbody>${bodyRows}</tbody>
     </table>`;
   content.classList.remove('hidden');
+}
+
+function fmtStmtLabel(s) {
+  // Convert camelCase/PascalCase yfinance labels to readable form
+  return s.replace(/([a-z])([A-Z])/g, '$1 $2')
+          .replace(/ And /g, ' & ')
+          .replace(/ Of /g, ' of ')
+          .replace(/ In /g, ' in ')
+          .replace(/ From /g, ' from ');
 }
 
 function fmtStmt(v) {
@@ -438,10 +451,13 @@ function fmtStmt(v) {
   const n = parseFloat(v);
   if (isNaN(n)) return v;
   const abs = Math.abs(n);
-  const s   = n < 0 ? '<span style="color:var(--red)">-' : '<span>';
-  if (abs >= 1e9)  return s + '$' + (abs/1e9).toFixed(2)  + 'B</span>';
-  if (abs >= 1e6)  return s + '$' + (abs/1e6).toFixed(2)  + 'M</span>';
-  return s + '$' + abs.toFixed(0) + '</span>';
+  const neg = n < 0;
+  const s   = neg ? '<span style="color:var(--red)">(' : '<span>';
+  const e   = neg ? ')</span>' : '</span>';
+  if (abs >= 1e9)  return s + '$' + (abs/1e9).toFixed(2)  + 'B' + e;
+  if (abs >= 1e6)  return s + '$' + (abs/1e6).toFixed(2)  + 'M' + e;
+  if (abs >= 1)    return s + (neg ? '' : '') + abs.toFixed(2) + e;
+  return s + abs.toFixed(2) + e;
 }
 
 /* ── Shared chart options ─────────────────────────────────── */

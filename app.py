@@ -204,6 +204,99 @@ def history():
         return jsonify({"error": str(e)}), 500
 
 
+INCOME_ROWS = [
+    "__Revenue",
+    "Total Revenue", "Cost Of Revenue", "Gross Profit",
+    "__Operating Expenses",
+    "Research And Development", "Selling General And Administration",
+    "Operating Expense", "Operating Income",
+    "__Below the Line",
+    "Interest Income Non Operating", "Interest Expense Non Operating",
+    "Net Interest Income", "Other Income Expense",
+    "Pretax Income", "Tax Provision", "Net Income",
+    "__Per Share",
+    "Diluted EPS", "Basic EPS",
+    "__Profitability",
+    "EBITDA", "Normalized EBITDA", "Reconciled Depreciation",
+]
+
+BALANCE_ROWS = [
+    "__Current Assets",
+    "Cash And Cash Equivalents", "Cash Cash Equivalents And Short Term Investments",
+    "Accounts Receivable", "Receivables", "Inventory",
+    "Other Current Assets", "Current Assets",
+    "__Non-Current Assets",
+    "Gross PPE", "Accumulated Depreciation", "Net PPE",
+    "Investments And Advances", "Other Non Current Assets",
+    "Total Non Current Assets", "Total Assets",
+    "__Current Liabilities",
+    "Accounts Payable", "Current Debt", "Current Deferred Revenue",
+    "Current Accrued Expenses", "Other Current Liabilities", "Current Liabilities",
+    "__Non-Current Liabilities",
+    "Long Term Debt", "Long Term Debt And Capital Lease Obligation",
+    "Other Non Current Liabilities", "Total Non Current Liabilities Net Minority Interest",
+    "Total Liabilities Net Minority Interest",
+    "__Shareholders' Equity",
+    "Common Stock", "Retained Earnings",
+    "Gains Losses Not Affecting Retained Earnings",
+    "Common Stock Equity", "Stockholders Equity",
+    "__Summary",
+    "Total Debt", "Net Debt", "Working Capital", "Tangible Book Value",
+]
+
+CASHFLOW_ROWS = [
+    "__Operating Activities",
+    "Net Income From Continuing Operations",
+    "Depreciation And Amortization", "Depreciation Amortization Depletion",
+    "Stock Based Compensation", "Deferred Income Tax",
+    "Change In Receivables", "Change In Inventory",
+    "Change In Payable", "Change In Working Capital",
+    "Other Non Cash Items", "Operating Cash Flow",
+    "__Investing Activities",
+    "Purchase Of PPE", "Capital Expenditure",
+    "Purchase Of Investment", "Sale Of Investment",
+    "Purchase Of Business", "Net Business Purchase And Sale",
+    "Net Other Investing Changes", "Investing Cash Flow",
+    "__Financing Activities",
+    "Common Stock Payments", "Common Stock Issuance",
+    "Cash Dividends Paid", "Long Term Debt Payments", "Long Term Debt Issuance",
+    "Net Other Financing Charges", "Financing Cash Flow",
+    "__Summary",
+    "Free Cash Flow",
+    "Beginning Cash Position", "End Cash Position", "Changes In Cash",
+]
+
+
+def filtered_df_to_rows(df, row_order):
+    """Return rows matching row_order (in order). Strings starting with __ become section headers."""
+    if df is None or df.empty:
+        return {"columns": [], "rows": []}
+    cols = []
+    for c in df.columns:
+        if hasattr(c, 'strftime'):
+            cols.append(c.strftime('%Y-%m-%d'))
+        else:
+            s = str(c)
+            cols.append(s[:10] if len(s) > 10 else s)
+
+    idx = set(df.index)
+    rows = []
+    for item in row_order:
+        if item.startswith("__"):
+            rows.append({"label": item[2:], "values": None, "section": True})
+        elif item in idx:
+            series = df.loc[item]
+            vals = []
+            for v in series.values:
+                try:
+                    f = float(v)
+                    vals.append(None if np.isnan(f) or np.isinf(f) else round(f, 0))
+                except Exception:
+                    vals.append(None)
+            rows.append({"label": item, "values": vals})
+    return {"columns": cols, "rows": rows}
+
+
 @app.route("/api/statements")
 def statements():
     ticker = request.args.get("ticker", "").strip().upper()
@@ -211,15 +304,10 @@ def statements():
         return jsonify({"error": "ticker required"}), 400
     try:
         stock = yf.Ticker(ticker)
-
-        def safe_df(df):
-            # yfinance returns df with dates as columns, items as index — use as-is
-            return df_to_rows(df)
-
         return jsonify(clean({
-            "income":  safe_df(stock.income_stmt),
-            "balance": safe_df(stock.balance_sheet),
-            "cashflow":safe_df(stock.cashflow),
+            "income":  filtered_df_to_rows(stock.income_stmt,  INCOME_ROWS),
+            "balance": filtered_df_to_rows(stock.balance_sheet, BALANCE_ROWS),
+            "cashflow":filtered_df_to_rows(stock.cashflow,     CASHFLOW_ROWS),
         }))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
