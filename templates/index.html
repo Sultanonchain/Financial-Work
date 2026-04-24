@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ValuScope — DCF & Financial Analysis</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+<!-- ── HEADER ────────────────────────────────────────────────────── -->
+<header class="site-header">
+  <div class="header-inner">
+    <div class="logo">
+      <span class="logo-icon">◈</span>
+      <span class="logo-text">ValuScope</span>
+      <span class="logo-tag">DCF Analyzer</span>
+    </div>
+    <p class="disclaimer-badge">⚠ Not Financial Advice</p>
+  </div>
+</header>
+
+<!-- ── HERO / SEARCH ─────────────────────────────────────────────── -->
+<section class="hero">
+  <div class="hero-inner">
+    <h1>Intrinsic Value, <span class="accent">Instantly</span></h1>
+    <p class="hero-sub">Enter any stock ticker to run a full DCF valuation and financial deep-dive.</p>
+
+    <div class="search-bar">
+      <input id="tickerInput" type="text" placeholder="e.g. AAPL, MSFT, NVDA, TSLA…"
+             autocomplete="off" spellcheck="false" maxlength="10" />
+      <button id="analyzeBtn" onclick="runAnalysis()">Analyze</button>
+    </div>
+
+    <!-- Advanced toggles -->
+    <div class="advanced-toggle" onclick="toggleAdvanced()">
+      <span id="advToggleLabel">⚙ Customize assumptions</span>
+    </div>
+    <div id="advancedPanel" class="advanced-panel hidden">
+      <div class="adv-grid">
+        <label>Stage 1 Growth (yrs 1–5)
+          <input id="growth1" type="number" step="0.1" placeholder="auto" />
+          <span class="adv-hint">%</span>
+        </label>
+        <label>Stage 2 Growth (yrs 6–10)
+          <input id="growth2" type="number" step="0.1" placeholder="auto" />
+          <span class="adv-hint">%</span>
+        </label>
+        <label>Terminal Growth Rate
+          <input id="terminalGrowth" type="number" step="0.1" value="3.0" />
+          <span class="adv-hint">%</span>
+        </label>
+        <label>Projection Years
+          <input id="projYears" type="number" step="1" value="10" min="5" max="15" />
+          <span class="adv-hint">yrs</span>
+        </label>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── LOADING ───────────────────────────────────────────────────── -->
+<div id="loadingState" class="loading-state hidden">
+  <div class="spinner"></div>
+  <p>Fetching data for <span id="loadingTicker"></span>…</p>
+</div>
+
+<!-- ── ERROR ─────────────────────────────────────────────────────── -->
+<div id="errorState" class="error-state hidden">
+  <div class="error-box">
+    <span class="error-icon">✕</span>
+    <p id="errorMsg"></p>
+  </div>
+</div>
+
+<!-- ── RESULTS ───────────────────────────────────────────────────── -->
+<main id="results" class="results hidden">
+
+  <!-- Company header -->
+  <div class="company-header">
+    <div class="company-info">
+      <h2 id="companyName"></h2>
+      <div class="company-meta">
+        <span id="tickerBadge" class="badge badge-blue"></span>
+        <span id="sectorBadge" class="badge badge-gray"></span>
+        <span id="exchangeBadge" class="badge badge-gray"></span>
+      </div>
+    </div>
+    <div class="price-block">
+      <div class="current-price" id="currentPrice"></div>
+      <div class="price-range" id="priceRange"></div>
+    </div>
+  </div>
+
+  <!-- ── DCF VERDICT ──────────────────────────────────────────────── -->
+  <section class="verdict-section">
+    <div class="verdict-card" id="verdictCard">
+      <div class="verdict-left">
+        <div class="verdict-label">DCF Intrinsic Value</div>
+        <div class="verdict-value" id="intrinsicValue"></div>
+        <div class="verdict-sub" id="verdictSub"></div>
+      </div>
+      <div class="verdict-divider"></div>
+      <div class="verdict-right">
+        <div class="mos-label">Margin of Safety</div>
+        <div class="mos-value" id="mosValue"></div>
+        <div class="mos-bar-wrap"><div class="mos-bar" id="mosBar"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── METRICS GRID ──────────────────────────────────────────────── -->
+  <section class="metrics-section">
+
+    <!-- Valuation -->
+    <div class="card">
+      <h3 class="card-title">Valuation Multiples</h3>
+      <div class="metric-list" id="valuationMetrics"></div>
+    </div>
+
+    <!-- DCF Assumptions -->
+    <div class="card">
+      <h3 class="card-title">DCF Assumptions</h3>
+      <div class="metric-list" id="dcfAssumptions"></div>
+    </div>
+
+    <!-- Financials -->
+    <div class="card">
+      <h3 class="card-title">Financials</h3>
+      <div class="metric-list" id="financialMetrics"></div>
+    </div>
+
+    <!-- Health -->
+    <div class="card">
+      <h3 class="card-title">Financial Health</h3>
+      <div class="metric-list" id="healthMetrics"></div>
+    </div>
+
+  </section>
+
+  <!-- ── FCF PROJECTION TABLE ──────────────────────────────────────── -->
+  <section class="table-section">
+    <div class="card full-width">
+      <h3 class="card-title">FCF Projection &amp; Discounted Cash Flows</h3>
+      <div class="table-scroll">
+        <table id="projectionTable">
+          <thead>
+            <tr>
+              <th>Year</th>
+              <th>Stage</th>
+              <th>Growth Rate</th>
+              <th>Projected FCF</th>
+              <th>Present Value</th>
+            </tr>
+          </thead>
+          <tbody id="projectionBody"></tbody>
+          <tfoot id="projectionFoot"></tfoot>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── DCF BRIDGE ────────────────────────────────────────────────── -->
+  <section class="bridge-section">
+    <div class="card full-width">
+      <h3 class="card-title">Equity Value Bridge</h3>
+      <div id="bridgeChart" class="bridge-chart"></div>
+    </div>
+  </section>
+
+  <!-- ── HISTORICAL FCF ────────────────────────────────────────────── -->
+  <section class="hist-section">
+    <div class="card full-width">
+      <h3 class="card-title">Historical Free Cash Flow</h3>
+      <div id="histChart" class="hist-chart"></div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ── DISCLAIMER FOOTER ──────────────────────────────────────────── -->
+<footer class="site-footer">
+  <p>⚠ <strong>Not Financial Advice.</strong> ValuScope is an educational tool only. All valuations are model-based estimates and may be materially wrong. Always do your own due diligence before making any investment decisions. Past performance is not indicative of future results. Consult a licensed financial advisor.</p>
+  <p class="footer-sub">Data sourced from Yahoo Finance via yfinance. ValuScope © 2025</p>
+</footer>
+
+<script src="/static/js/main.js"></script>
+</body>
+</html>
