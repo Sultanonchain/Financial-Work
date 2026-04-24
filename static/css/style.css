@@ -429,6 +429,11 @@ tfoot td:first-child { text-align: left; position: sticky; left: 0; }
 }
 
 /* Statements table */
+.stmt-ccy-note {
+  background: rgba(91,141,184,0.08); border: 1px solid rgba(91,141,184,0.15);
+  border-radius: 6px; padding: 8px 12px; font-size: 11px; color: var(--muted2);
+  margin-bottom: 12px; font-family: var(--mono);
+}
 .stmt-table thead th:first-child { min-width: 220px; }
 .stmt-table td { color: var(--text); }
 .stmt-label { color: var(--muted2); font-size: 11.5px; font-family: 'Inter', sans-serif; }

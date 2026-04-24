@@ -12,6 +12,42 @@ CORS(app)
 RISK_FREE_RATE   = 0.045   # 10-yr US Treasury proxy
 EQUITY_RISK_PREM = 0.055   # Damodaran ERP
 
+# FX rate cache (in-memory, lives for the process lifetime — good enough for a session)
+_fx_cache: dict = {}
+
+def get_fx_rate(from_ccy: str, to_ccy: str) -> float:
+    """
+    Return the exchange rate: 1 from_ccy = X to_ccy.
+    E.g. get_fx_rate('EUR','USD') ≈ 1.09
+    Falls back to 1.0 if unavailable.
+    """
+    if from_ccy == to_ccy:
+        return 1.0
+    key = f"{from_ccy}{to_ccy}"
+    if key in _fx_cache:
+        return _fx_cache[key]
+    try:
+        ticker_sym = f"{from_ccy}{to_ccy}=X"
+        fi = yf.Ticker(ticker_sym).fast_info
+        rate = float(fi.get("lastPrice") or fi.get("regularMarketPrice") or 1.0)
+        if rate and not np.isnan(rate) and 0.0001 < rate < 100000:
+            _fx_cache[key] = rate
+            return rate
+    except Exception:
+        pass
+    # Try inverse
+    try:
+        ticker_sym2 = f"{to_ccy}{from_ccy}=X"
+        fi2 = yf.Ticker(ticker_sym2).fast_info
+        inv = float(fi2.get("lastPrice") or fi2.get("regularMarketPrice") or 1.0)
+        if inv and not np.isnan(inv) and inv > 0:
+            rate = 1.0 / inv
+            _fx_cache[key] = rate
+            return rate
+    except Exception:
+        pass
+    return 1.0
+
 PERIOD_MAP = {
     "1d":  ("1d",  "5m"),
     "5d":  ("5d",  "30m"),
@@ -69,13 +105,14 @@ def calc_tax_rate(info, income_stmt):
 
 # ── WACC ───────────────────────────────────────────────────────────────────────
 
-def calc_wacc(info, income_stmt, tax_rate=0.21):
+def calc_wacc(info, income_stmt, tax_rate=0.21, fx_rate=1.0):
     beta = safe(info.get("beta"), 1.0) or 1.0
     beta = min(max(beta, 0.3), 3.0)
     coe  = RISK_FREE_RATE + beta * EQUITY_RISK_PREM
 
     cod = 0.05
     try:
+        # iexp and debt are both in reporting currency, so the ratio is currency-neutral
         iexp = None
         if income_stmt is not None and not income_stmt.empty:
             for lbl in ["Interest Expense Non Operating", "Interest Expense"]:
@@ -91,8 +128,8 @@ def calc_wacc(info, income_stmt, tax_rate=0.21):
     except Exception:
         pass
 
-    mcap = safe(info.get("marketCap"), 0) or 0
-    debt = safe(info.get("totalDebt"), 0) or 0
+    mcap = safe(info.get("marketCap"), 0) or 0          # in trading currency
+    debt = (safe(info.get("totalDebt"), 0) or 0) * fx_rate  # convert to trading currency
     tc   = mcap + debt
     we, wd = (mcap / tc, debt / tc) if tc > 0 else (0.85, 0.15)
 
@@ -558,10 +595,15 @@ def statements():
         return jsonify({"error": "ticker required"}), 400
     try:
         stock = yf.Ticker(ticker)
+        info  = stock.info
+        financial_ccy = info.get("financialCurrency") or info.get("currency") or "USD"
+        trading_ccy   = info.get("currency") or "USD"
         return jsonify(clean({
-            "income":   filtered_df_to_rows(stock.income_stmt,   INCOME_ROWS),
-            "balance":  filtered_df_to_rows(stock.balance_sheet, BALANCE_ROWS),
-            "cashflow": filtered_df_to_rows(stock.cashflow,      CASHFLOW_ROWS),
+            "income":           filtered_df_to_rows(stock.income_stmt,   INCOME_ROWS),
+            "balance":          filtered_df_to_rows(stock.balance_sheet, BALANCE_ROWS),
+            "cashflow":         filtered_df_to_rows(stock.cashflow,      CASHFLOW_ROWS),
+            "financialCurrency": financial_ccy,
+            "tradingCurrency":   trading_ccy,
         }))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -593,6 +635,14 @@ def analyze():
         cashflow    = stock.cashflow
         income_stmt = stock.income_stmt
 
+        # ── Currency handling ─────────────────────────────────────────────────
+        # yfinance returns financial statements in the company's REPORTING currency
+        # (financialCurrency) but stock price / market cap are in TRADING currency.
+        # For foreign ADRs (e.g. NOK reports in EUR, trades in USD) we must convert.
+        financial_ccy = info.get("financialCurrency") or info.get("currency") or "USD"
+        trading_ccy   = info.get("currency") or "USD"
+        fx_rate = get_fx_rate(financial_ccy, trading_ccy)   # e.g. EUR→USD ≈ 1.09
+
         # ── Price history (1Y default) ────────────────────────────────────────
         hist = stock.history(period="1y", interval="1d")
         price_history = []
@@ -605,6 +655,10 @@ def analyze():
         # ── FCF setup ─────────────────────────────────────────────────────────
         fcf_series    = get_fcf_series(cashflow)
         base_fcf, fcf_source = get_base_fcf(info, stock)
+        # Convert FCF from reporting currency to trading currency
+        if base_fcf is not None:
+            base_fcf = base_fcf * fx_rate
+        fcf_series = [v * fx_rate for v in fcf_series]
         dcf_available = base_fcf is not None and base_fcf > 0
 
         # ── Tax rate ──────────────────────────────────────────────────────────
@@ -658,7 +712,7 @@ def analyze():
                 s2 = max(s1 * 0.55, tg + 0.005)   # Stage 2 fades to near-terminal
 
             # WACC
-            wacc_data = calc_wacc(info, income_stmt, tax_rate)
+            wacc_data = calc_wacc(info, income_stmt, tax_rate, fx_rate)
             wacc      = wacc_data["wacc"]
             half      = yrs // 2
             fcf_run   = base_fcf
@@ -681,8 +735,9 @@ def analyze():
             total_pv_fcf     = sum(p["pv"] for p in projected)
             enterprise_value = total_pv_fcf + pv_terminal
 
-            cash         = safe(info.get("totalCash"), 0) or 0
-            debt         = safe(info.get("totalDebt"), 0) or 0
+            # Convert balance sheet items from reporting → trading currency
+            cash         = (safe(info.get("totalCash"), 0) or 0) * fx_rate
+            debt         = (safe(info.get("totalDebt"), 0) or 0) * fx_rate
             net_debt     = debt - cash
             equity_value = enterprise_value - net_debt
 
@@ -763,8 +818,11 @@ def analyze():
             "total_pv_fcf":      total_pv_fcf,
             "terminal_value_pct": round(pv_terminal / enterprise_value * 100, 1)
                                   if enterprise_value and pv_terminal else None,
-            "net_debt":          (safe(info.get("totalDebt"), 0) or 0) - (safe(info.get("totalCash"), 0) or 0),
+            "net_debt":          ((safe(info.get("totalDebt"), 0) or 0) - (safe(info.get("totalCash"), 0) or 0)) * fx_rate,
             "shares_outstanding": safe(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"), 0),
+            "financial_currency": financial_ccy,
+            "trading_currency":   trading_ccy,
+            "fx_rate":            round(fx_rate, 4) if fx_rate != 1.0 else None,
             "wacc":          round(wacc_data.get("wacc", 0) * 100, 2) if wacc_data else None,
             "cost_of_equity":round(wacc_data.get("coe", 0)  * 100, 2) if wacc_data else None,
             "cost_of_debt":  round(wacc_data.get("cod", 0)  * 100, 2) if wacc_data else None,
@@ -796,9 +854,9 @@ def analyze():
             "roe":               pct(info.get("returnOnEquity")),
             "roa":               pct(info.get("returnOnAssets")),
             "div_yield":         dividend_yield,
-            # Health card
-            "total_cash":    f2(info.get("totalCash")),
-            "total_debt":    f2(info.get("totalDebt")),
+            # Health card — convert balance sheet items to trading currency
+            "total_cash":    f2((safe(info.get("totalCash")) or 0) * fx_rate),
+            "total_debt":    f2((safe(info.get("totalDebt")) or 0) * fx_rate),
             "current_ratio": f2(info.get("currentRatio")),
             "quick_ratio":   f2(info.get("quickRatio")),
             "debt_to_equity":f2(info.get("debtToEquity")),

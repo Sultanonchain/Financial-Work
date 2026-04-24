@@ -261,6 +261,8 @@ function renderResults(d) {
     row('Terminal % of EV',fmtPct(d.terminal_value_pct)),
     d.growth_source ? row('Growth Source', `<span style="color:var(--muted2);font-size:11px">${d.growth_source}</span>`) : '',
     d.fcf_source    ? row('FCF Source',    `<span style="color:var(--muted2);font-size:11px">${d.fcf_source}</span>`)    : '',
+    (d.fx_rate && d.financial_currency && d.trading_currency)
+      ? row('FX Applied', `<span style="color:var(--muted2);font-size:11px">1 ${d.financial_currency} = ${d.fx_rate} ${d.trading_currency}</span>`) : '',
   ].join('') : '<div style="color:var(--muted);font-size:12px;padding:8px 0">DCF not available for this security.</div>';
 
   // Financials
@@ -424,6 +426,9 @@ function renderStatements(tab) {
   $('statementsLoading').classList.add('hidden');
   const content = $('statementsContent');
   const data    = statementsData && statementsData[tab];
+  const finCcy  = statementsData && statementsData.financialCurrency;
+  const trdCcy  = statementsData && statementsData.tradingCurrency;
+  const hasFxNote = finCcy && trdCcy && finCcy !== trdCcy;
 
   if (!data || !data.rows || !data.rows.length) {
     content.innerHTML = '<p style="color:var(--muted);font-size:13px;padding:12px 0">No data available.</p>';
@@ -437,16 +442,21 @@ function renderStatements(tab) {
       return `<tr class="stmt-section-header"><td colspan="${cols.length + 1}">${r.label}</td></tr>`;
     }
     return `<tr>
-      <td class="stmt-label">${fmtStmtLabel(r.label)}</td>
+      <td class="stmt-label">${r.label}</td>
       ${r.values.map(v => `<td>${fmtStmt(v)}</td>`).join('')}
     </tr>`;
   }).join('');
 
+  const ccyNote = hasFxNote
+    ? `<div class="stmt-ccy-note">Values in <strong>${finCcy}</strong> (company reporting currency) · Stock price quoted in <strong>${trdCcy}</strong></div>`
+    : '';
+
   content.innerHTML = `
+    ${ccyNote}
     <table class="stmt-table">
       <thead>
         <tr>
-          <th>Item</th>
+          <th>Item (${finCcy || 'USD'})</th>
           ${cols.map(c => `<th>${c.slice(0,7)}</th>`).join('')}
         </tr>
       </thead>
