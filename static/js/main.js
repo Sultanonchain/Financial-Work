@@ -257,6 +257,35 @@ function renderResults(d) {
     </div>`;
   }
 
+  // Sector methodology badge — shown for banking / biotech / energy specialist valuation
+  if (d.sector_val_label) {
+    const smIcon  = d.valuation_method === 'biotech'   ? '⬡'
+                  : d.valuation_method === 'banking'    ? '⬢'
+                  : d.valuation_method === 'dcf_energy' ? '◉' : '◈';
+    const smTitle = d.valuation_method === 'biotech'   ? 'Biotech Specialist Valuation'
+                  : d.valuation_method === 'banking'    ? 'Banking / Financial Methodology'
+                  : d.valuation_method === 'dcf_energy' ? 'Energy / Commodities Methodology'
+                  : 'Sector-Specific Methodology';
+    const analystLine = d.analyst_adjusted
+      ? ' &nbsp;·&nbsp; <em>Analyst-aligned blend applied (&gt;50% divergence)</em>' : '';
+    warnHtml += `<div class="sector-badge">
+      <span class="sector-badge-icon">${smIcon}</span>
+      <div class="sector-badge-body">
+        <span class="sector-badge-title">${smTitle}</span>
+        <span class="sector-badge-sub">${escHtml(d.sector_val_label)}${analystLine}</span>
+      </div>
+    </div>`;
+  } else if (d.analyst_adjusted) {
+    // Analyst alignment applied even on standard DCF
+    warnHtml += `<div class="sector-badge sector-badge--analyst">
+      <span class="sector-badge-icon">⟳</span>
+      <div class="sector-badge-body">
+        <span class="sector-badge-title">Analyst Alignment Applied</span>
+        <span class="sector-badge-sub">Model diverged &gt;50% from consensus — blended toward analyst target (67% model · 33% target)</span>
+      </div>
+    </div>`;
+  }
+
   // Multiples fallback badge — shown prominently when DCF is replaced by multiples
   if (d.multiples_val && (!d.dcf_available || iv == null)) {
     warnHtml += `<div class="multiples-badge">

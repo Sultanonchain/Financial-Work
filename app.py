@@ -28,10 +28,10 @@ INDUSTRY_PARAMS = {
     "utilities":       {"max_tg": 0.022, "min_wacc": 0.075, "wacc_spread": 0.020, "max_s1": 0.08},
     # Telecom: mature, high CapEx, GDP-pace growth
     "telecom":         {"max_tg": 0.022, "min_wacc": 0.075, "wacc_spread": 0.020, "max_s1": 0.10},
-    # Energy (traditional): commodity-cyclical, normalize through cycle
-    "energy":          {"max_tg": 0.025, "min_wacc": 0.075, "wacc_spread": 0.022, "max_s1": 0.15},
-    # Materials / Mining: commodity-cyclical
-    "materials":       {"max_tg": 0.022, "min_wacc": 0.075, "wacc_spread": 0.022, "max_s1": 0.12},
+    # Energy (traditional): finite resources → terminal growth capped at 1.5%
+    "energy":          {"max_tg": 0.015, "min_wacc": 0.075, "wacc_spread": 0.022, "max_s1": 0.15},
+    # Materials / Mining: finite resources → terminal growth capped at 1.5%
+    "materials":       {"max_tg": 0.015, "min_wacc": 0.075, "wacc_spread": 0.022, "max_s1": 0.12},
     # Autos: cyclical, capital-intensive
     "auto":            {"max_tg": 0.025, "min_wacc": 0.075, "wacc_spread": 0.020, "max_s1": 0.15},
     # Default (tech, consumer, healthcare, etc.) — global sanity floor
@@ -42,7 +42,7 @@ INDUSTRY_PARAMS = {
 # Sourced from Damodaran sector averages (updated annually)
 # (forward_pe_multiple, ev_ebitda_multiple) — None means that metric isn't reliable for sector
 SECTOR_MULT_PARAMS = {
-    "technology":         (25.0, 18.0),
+    "technology":         (25.0, 23.0),  # moat ×1.20 → ~30x fpe / ~27.6x ev/ebitda
     "consumer_cyclical":  (18.0, 12.0),
     "consumer_defensive": (22.0, 14.0),
     "healthcare":         (20.0, 14.0),
@@ -245,6 +245,131 @@ def _detect_moat(net_margin, revenue_growth, earnings_growth, fcf_margin, roe):
         return True, "Capital-Light Compounder", [
             f"Net margin {nm:.1f}%", f"FCF margin {fm:.1f}%", f"ROE {roe_v:.1f}%"]
     return False, None, []
+
+
+def _get_valuation_method(sector: str, industry: str) -> str:
+    """
+    Route each company to its most appropriate primary valuation methodology.
+    Returns: 'dcf' | 'dcf_energy' | 'biotech' | 'banking'
+    """
+    s   = (sector   or "").lower()
+    ind = (industry or "").lower()
+
+    # Biotech / early-stage pharma — negative FCF, pipeline drives value
+    if "biotech" in ind or "biotechnology" in ind:
+        return "biotech"
+    if "biopharmaceutical" in ind or ("pharmaceutical" in ind and "specialty" in ind):
+        return "biotech"
+
+    # Banking / Financial services — interest is operating cost; DCF structurally wrong
+    if any(x in s for x in ["financial", "bank"]):
+        return "banking"
+    if any(x in ind for x in ["bank", "insurance", "credit service",
+                               "investment bank", "thrift", "mortgage", "diversified financials"]):
+        return "banking"
+
+    # Energy / Mining / Commodities — finite reserves cap terminal growth at 1.5%
+    if ("energy" in s and "renewable" not in ind) or "mining" in ind or "metals" in ind:
+        return "dcf_energy"
+
+    return "dcf"
+
+
+def calc_banking_val(info, fx_rate):
+    """
+    P/B + P/E blend for banks and financial companies.
+    Applies a 20% efficiency premium to both multiples when ROE > 15%.
+    Returns (value_per_share, method_label) or (None, None).
+    """
+    bvps    = safe(info.get("bookValue"))       # book value per share
+    fwd_eps = safe(info.get("forwardEps"))
+    roe     = (safe(info.get("returnOnEquity")) or 0) * 100   # convert to %
+
+    pb_mult = 1.30
+    pe_mult = 11.0
+    roe_tag = ""
+    if roe > 15:
+        pb_mult  = round(pb_mult * 1.20, 3)
+        pe_mult  = round(pe_mult * 1.20, 1)
+        roe_tag  = f" + ROE {roe:.1f}% efficiency premium"
+
+    val_pb = round(bvps    * pb_mult, 2) if bvps    and bvps    > 0 else None
+    val_pe = round(fwd_eps * pe_mult, 2) if fwd_eps and fwd_eps > 0 else None
+
+    if val_pb and val_pe:
+        val    = round((val_pb + val_pe) / 2, 2)
+        method = f"P/B ({pb_mult:.2f}x) + P/E ({pe_mult:.1f}x) blend{roe_tag}"
+    elif val_pb:
+        val, method = val_pb, f"P/B ({pb_mult:.2f}x){roe_tag}"
+    elif val_pe:
+        val, method = val_pe, f"P/E ({pe_mult:.1f}x){roe_tag}"
+    else:
+        return None, None
+
+    return max(val, 0.0), method
+
+
+def calc_biotech_val(info, fx_rate, rev_ttm=None, analyst_target=None):
+    """
+    EV/Revenue-based valuation for biotech / early-stage pharma.
+    Multiple range: 10x–15x (12x median). R&D > 30% of revenue adds +10% pipeline premium.
+    Blends 50/50 with analyst consensus price target when available.
+    Returns (value_per_share, method_label) or (None, None).
+    """
+    shares = safe(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"), 0) or 0
+    if shares <= 0:
+        return None, None
+
+    rev = rev_ttm or safe(info.get("totalRevenue"))
+    if not rev or rev <= 0:
+        # Pre-revenue: analyst target is the only anchor
+        if analyst_target and analyst_target > 0:
+            return round(float(analyst_target), 2), "Analyst Target (pre-revenue biotech)"
+        return None, None
+
+    ev_rev_mult = 12.0
+    ev_implied  = rev * fx_rate * ev_rev_mult
+    cash     = (safe(info.get("totalCash"), 0) or 0) * fx_rate
+    debt     = (safe(info.get("totalDebt"), 0) or 0) * fx_rate
+    net_debt = debt - cash
+    eq_val   = ev_implied - net_debt
+    if eq_val <= 0:
+        if analyst_target and analyst_target > 0:
+            return round(float(analyst_target), 2), "Analyst Target (negative equity biotech)"
+        return None, None
+
+    val_ev_rev = eq_val / shares
+
+    # Pipeline premium: 10% uplift when R&D > 30% of revenue (active clinical spend)
+    rnd = safe(info.get("researchDevelopment")) or 0
+    has_pipeline = (rev > 0 and rnd / rev > 0.30)
+    if has_pipeline:
+        val_ev_rev *= 1.10
+    pp_tag = " + Pipeline Premium" if has_pipeline else ""
+
+    # 50/50 blend with analyst consensus when available
+    if analyst_target and analyst_target > 0:
+        val_final = 0.50 * val_ev_rev + 0.50 * float(analyst_target)
+        method = f"EV/Revenue ({ev_rev_mult:.0f}x){pp_tag} 50% + Analyst Target 50%"
+    else:
+        val_final = val_ev_rev
+        method = f"EV/Revenue ({ev_rev_mult:.0f}x){pp_tag}"
+
+    return round(max(val_final, 0), 2), method
+
+
+def _analyst_alignment_check(iv, analyst_target, price):
+    """
+    If model IV diverges from analyst consensus by >50% of the current price,
+    blend 2/3 model + 1/3 analyst to anchor to professional consensus.
+    Returns (adjusted_iv, was_adjusted: bool).
+    """
+    if not iv or not analyst_target or not price or price <= 0:
+        return iv, False
+    at = float(analyst_target)
+    if abs(iv - at) / price > 0.50:
+        return round(max(0.667 * iv + 0.333 * at, 0.0), 2), True
+    return iv, False
 
 
 def get_quarterly_balance_data(stock, info, fx_rate):
@@ -646,6 +771,20 @@ def get_dcf_notes(sector, industry, pe, fcf_available):
             "type": "info",
             "text": "Energy: FCF is highly cyclical with commodity prices. "
                     "Consider EV/EBITDA on normalized (through-cycle) earnings rather than spot FCF."
+        })
+    elif "retail" in ind or "specialty retail" in ind or ("consumer" in s and "cycl" in s):
+        notes.append({
+            "type": "info",
+            "text": "Retail / Consumer Cyclical: DCF quality depends heavily on inventory efficiency "
+                    "and leverage discipline. Cross-check Inventory Turnover and Debt/Equity ratios "
+                    "in the Financial Health card."
+        })
+    elif "industrial" in s or "aerospace" in ind or "machinery" in ind:
+        notes.append({
+            "type": "info",
+            "text": "Industrials: Capital-intensive, cyclical cash flows. "
+                    "Verify Debt/Equity and CapEx intensity. "
+                    "EV/EBITDA is widely used alongside DCF for cycle-normalized valuation."
         })
     elif "biotechnology" in ind or ("health" in s and "drug" in ind):
         notes.append({
@@ -1063,6 +1202,12 @@ def analyze():
         moat_wacc_delta   = 0.0      # how many pp of WACC were removed (filled below)
         moat_mult_premium = 1.20 if moat_detected else 1.0  # 20% multiple expansion
 
+        # ── Sector valuation routing ─────────────────────────────────────────
+        valuation_method     = _get_valuation_method(sector, industry)
+        analyst_target_price = safe(info.get("targetMeanPrice"))
+        sector_val_label     = None   # set when sector-specific method overrides/blends
+        analyst_adjusted     = False  # set when analyst alignment check blends IV
+
         # ── DCF computation ───────────────────────────────────────────────────
         intrinsic_value  = None
         margin_of_safety = None
@@ -1078,6 +1223,14 @@ def analyze():
         growth_source    = None
         scenarios        = None
         net_debt         = ((safe(info.get("totalDebt"), 0) or 0) - (safe(info.get("totalCash"), 0) or 0)) * fx_rate
+
+        # Banking: force DCF off — interest income/expense are operating items,
+        # not financing, so FCF-based DCF systematically misprices financials.
+        if valuation_method == "banking" and dcf_available:
+            dcf_available = False
+            dcf_warning   = ("Banking / Financial sector: DCF not applicable — "
+                             "interest items are core operating costs. "
+                             "Valuing via Price-to-Book and Price-to-Earnings.")
 
         # ── Industry guardrails ───────────────────────────────────────────────
         ind_class  = _classify_industry(sector, industry)
@@ -1260,6 +1413,44 @@ def analyze():
                 margin_of_safety = None
                 scenarios        = None
 
+        # ── Sector-Specific Valuation ─────────────────────────────────────────
+        # Runs after DCF so we can blend (biotech) or override (banking) as needed.
+
+        if valuation_method == "biotech":
+            _bv, _bm = calc_biotech_val(
+                info, fx_rate, rev_ttm, analyst_target_price)
+            if _bv is not None:
+                if intrinsic_value is not None:
+                    # Positive FCF biotech: blend DCF 50% + EV/Revenue 50%
+                    intrinsic_value = round(0.50 * intrinsic_value + 0.50 * _bv, 2)
+                    sector_val_label = f"DCF 50% + {_bm} 50%"
+                else:
+                    intrinsic_value  = _bv
+                    sector_val_label = _bm
+                if intrinsic_value and price:
+                    margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
+
+        elif valuation_method == "banking" and intrinsic_value is None:
+            # DCF was forced off; use P/B + P/E banking model
+            _bkv, _bkm = calc_banking_val(info, fx_rate)
+            if _bkv is not None:
+                intrinsic_value  = _bkv
+                sector_val_label = _bkm
+                if intrinsic_value and price:
+                    margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
+
+        # ── Analyst Alignment Check ───────────────────────────────────────────
+        # If model IV diverges >50% from analyst consensus, blend toward consensus.
+        if intrinsic_value is not None:
+            intrinsic_value, analyst_adjusted = _analyst_alignment_check(
+                intrinsic_value, analyst_target_price, price)
+            if analyst_adjusted and price:
+                margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
+
+        # ── Absolute Zero Floor ───────────────────────────────────────────────
+        if intrinsic_value is not None:
+            intrinsic_value = max(round(intrinsic_value, 2), 0.0)
+
         # ── Multiples fallback when DCF is unavailable ───────────────────────
         # Triggered when: (a) no positive FCF, or (b) net debt exceeds DCF enterprise value.
         # Never leaves the user without a value — industry multiples serve as the primary metric.
@@ -1411,6 +1602,11 @@ def analyze():
             "multiples_method": multiples_method,
             "multiples_reason": multiples_reason,
             "multiples_mos":    multiples_mos,
+            # Sector-adaptive valuation
+            "valuation_method":  valuation_method,
+            "sector_val_label":  sector_val_label,
+            "analyst_adjusted":  analyst_adjusted,
+            "analyst_target":    analyst_target_price,
             # Moat detection
             "moat_detected":    moat_detected,
             "moat_path":        moat_path,
