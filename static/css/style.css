@@ -534,6 +534,23 @@ tfoot td:first-child { text-align: left; position: sticky; left: 0; }
 
 @media (max-width: 640px) { .sc-grid { grid-template-columns: 1fr; } }
 
+/* ── Multiples Fallback Badge ──────────────────────────────── */
+.multiples-badge {
+  display: flex; align-items: flex-start; gap: 10px;
+  background: rgba(196,154,60,0.07);
+  border: 1px solid rgba(196,154,60,0.30);
+  border-radius: var(--radius); padding: 11px 14px;
+  margin-bottom: 10px;
+}
+.multiples-badge-icon {
+  color: var(--gold); font-size: 15px; line-height: 1.5;
+  flex-shrink: 0; margin-top: 1px;
+}
+.multiples-badge-text {
+  font-size: 12px; color: var(--muted2); line-height: 1.6;
+}
+.multiples-badge-text strong { color: var(--gold); font-weight: 600; }
+
 /* ── Utility ───────────────────────────────────────────────── */
 .hidden { display: none !important; }
 

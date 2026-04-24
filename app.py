@@ -25,17 +25,37 @@ INDUSTRY_PARAMS = {
     # Airlines: low long-run growth, high capital intensity, often junk-rated
     "airlines":        {"max_tg": 0.020, "min_wacc": 0.085, "wacc_spread": 0.025, "max_s1": 0.12},
     # Utilities: regulated, GDP-matched growth ceiling
-    "utilities":       {"max_tg": 0.022, "min_wacc": 0.055, "wacc_spread": 0.020, "max_s1": 0.08},
+    "utilities":       {"max_tg": 0.022, "min_wacc": 0.075, "wacc_spread": 0.020, "max_s1": 0.08},
     # Telecom: mature, high CapEx, GDP-pace growth
-    "telecom":         {"max_tg": 0.022, "min_wacc": 0.065, "wacc_spread": 0.020, "max_s1": 0.10},
+    "telecom":         {"max_tg": 0.022, "min_wacc": 0.075, "wacc_spread": 0.020, "max_s1": 0.10},
     # Energy (traditional): commodity-cyclical, normalize through cycle
     "energy":          {"max_tg": 0.025, "min_wacc": 0.075, "wacc_spread": 0.022, "max_s1": 0.15},
     # Materials / Mining: commodity-cyclical
     "materials":       {"max_tg": 0.022, "min_wacc": 0.075, "wacc_spread": 0.022, "max_s1": 0.12},
     # Autos: cyclical, capital-intensive
-    "auto":            {"max_tg": 0.025, "min_wacc": 0.072, "wacc_spread": 0.020, "max_s1": 0.15},
-    # Default (tech, consumer, healthcare, etc.)
-    "default":         {"max_tg": 0.035, "min_wacc": 0.050, "wacc_spread": 0.015, "max_s1": 0.25},
+    "auto":            {"max_tg": 0.025, "min_wacc": 0.075, "wacc_spread": 0.020, "max_s1": 0.15},
+    # Default (tech, consumer, healthcare, etc.) — global sanity floor
+    "default":         {"max_tg": 0.025, "min_wacc": 0.075, "wacc_spread": 0.020, "max_s1": 0.25},
+}
+
+# Industry-standard multiples for fallback valuation when DCF is unavailable
+# Sourced from Damodaran sector averages (updated annually)
+# (forward_pe_multiple, ev_ebitda_multiple) — None means that metric isn't reliable for sector
+SECTOR_MULT_PARAMS = {
+    "technology":         (25.0, 18.0),
+    "consumer_cyclical":  (18.0, 12.0),
+    "consumer_defensive": (22.0, 14.0),
+    "healthcare":         (20.0, 14.0),
+    "industrials":        (18.0, 12.0),
+    "financial":          (13.0, None),   # P/B preferred for banks; use PE as proxy
+    "energy":             (14.0,  8.0),
+    "materials":          (15.0,  9.0),
+    "utilities":          (17.0, 11.0),
+    "telecom":            (15.0,  7.0),
+    "airlines":           (10.0,  6.0),
+    "auto":               (12.0,  7.0),
+    "real_estate":        (None, 18.0),   # FFO/AFFO preferred; EV/EBITDA as proxy
+    "default":            (17.0, 12.0),
 }
 
 # Sector/industry default betas when yfinance returns None
@@ -92,6 +112,100 @@ def _default_beta(sector: str, industry: str) -> float:
     if "real estate" in s:                  return INDUSTRY_BETA_DEFAULTS["real_estate"]
     if "communic" in s:                     return INDUSTRY_BETA_DEFAULTS["communication"]
     return 1.0
+
+def _sector_to_mult_key(sector: str) -> str:
+    """Map a yfinance sector string to a SECTOR_MULT_PARAMS key."""
+    s = (sector or "").lower()
+    if "tech" in s:                         return "technology"
+    if "consumer" in s and "cycl" in s:     return "consumer_cyclical"
+    if "consumer" in s:                     return "consumer_defensive"
+    if "health" in s:                       return "healthcare"
+    if "industrial" in s:                   return "industrials"
+    if "financial" in s or "bank" in s:     return "financial"
+    if "real estate" in s:                  return "real_estate"
+    if "energy" in s:                       return "energy"
+    if "material" in s:                     return "materials"
+    if "utilit" in s:                       return "utilities"
+    if "communic" in s:                     return "telecom"
+    return "default"
+
+
+def calc_multiples_val(info, sector, industry, fx_rate, ebitda_ttm=None):
+    """
+    Fallback valuation when DCF is unavailable (negative equity or negative FCF).
+    Method 1: Forward EPS × sector median Forward P/E
+    Method 2: (EBITDA × sector EV/EBITDA − Net Debt) / Shares
+    Returns (value, method_label) or (None, None).
+    """
+    ind_class = _classify_industry(sector, industry)
+    class_to_mult = {
+        "airlines": "airlines", "utilities": "utilities", "telecom": "telecom",
+        "energy": "energy", "materials": "materials", "auto": "auto",
+        "default": _sector_to_mult_key(sector),
+    }
+    mk = class_to_mult.get(ind_class, "default")
+    fpe_mult, ev_ebitda_mult = SECTOR_MULT_PARAMS.get(mk, SECTOR_MULT_PARAMS["default"])
+
+    shares = safe(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"), 0) or 0
+    if shares <= 0:
+        return None, None
+
+    # Method 1: Forward EPS × sector Forward P/E multiple
+    fwd_eps = safe(info.get("forwardEps"))
+    if fwd_eps and fwd_eps > 0 and fpe_mult:
+        return round(fwd_eps * fpe_mult, 2), f"Forward P/E ({fpe_mult:.0f}x sector median)"
+
+    # Method 2: EV/EBITDA → derive equity value per share
+    ebitda = ebitda_ttm or safe(info.get("ebitda"))
+    if ebitda and ebitda > 0 and ev_ebitda_mult:
+        ebitda_usd = ebitda * fx_rate
+        ev_implied = ebitda_usd * ev_ebitda_mult
+        cash     = (safe(info.get("totalCash"), 0) or 0) * fx_rate
+        debt     = (safe(info.get("totalDebt"), 0) or 0) * fx_rate
+        net_debt = debt - cash
+        eq_val   = ev_implied - net_debt
+        if eq_val > 0:
+            return round(eq_val / shares, 2), f"EV/EBITDA ({ev_ebitda_mult:.0f}x sector median)"
+
+    return None, None
+
+
+def get_quarterly_balance_data(stock, info, fx_rate):
+    """
+    Pull the most recent quarterly balance sheet for cash, debt, and shares.
+    Falls back to info-dict values when quarterly data is unavailable.
+    Returns a dict with keys: total_cash, total_debt, shares (all in trading currency).
+    """
+    result = {
+        "total_cash": (safe(info.get("totalCash"), 0) or 0) * fx_rate,
+        "total_debt": (safe(info.get("totalDebt"), 0) or 0) * fx_rate,
+        "shares":     safe(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"), 0) or 0,
+    }
+    try:
+        qbs = stock.quarterly_balance_sheet
+        if qbs is None or qbs.empty:
+            return result
+        col = qbs.columns[0]  # Most recent quarter
+        for k in ["Cash Cash Equivalents And Short Term Investments", "Cash And Cash Equivalents"]:
+            if k in qbs.index:
+                v = safe(qbs.loc[k, col])
+                if v is not None and v >= 0:
+                    result["total_cash"] = v * fx_rate
+                    break
+        for k in ["Total Debt", "Long Term Debt And Capital Lease Obligation", "Long Term Debt"]:
+            if k in qbs.index:
+                v = safe(qbs.loc[k, col])
+                if v is not None and v >= 0:
+                    result["total_debt"] = v * fx_rate
+                    break
+        if "Share Issued" in qbs.index:
+            v = safe(qbs.loc["Share Issued", col])
+            if v and v > 0:
+                result["shares"] = v
+    except Exception:
+        pass
+    return result
+
 
 def get_fx_rate(from_ccy: str, to_ccy: str) -> float:
     """
@@ -796,6 +910,11 @@ def analyze():
         sector   = info.get("sector",   "")
         industry = info.get("industry", "")
 
+        # ── Most recent quarterly balance sheet data ───────────────────────────
+        # Pull from quarterly filing (most recent quarter, e.g. Q1 2026) for accuracy.
+        # info dict may lag behind; quarterly_balance_sheet is more current.
+        bal_data = get_quarterly_balance_data(stock, info, fx_rate)
+
         # ── Price history (1Y default) ────────────────────────────────────────
         hist = stock.history(period="1y", interval="1d")
         price_history = []
@@ -970,6 +1089,39 @@ def analyze():
                 margin_of_safety = None
                 scenarios        = None
 
+        # ── Income statement TTM (needed early for multiples fallback) ──────────
+        inc_ttm = get_income_stmt_ttm(stock)
+        rev_ttm = inc_ttm.get("Total Revenue") or safe(info.get("totalRevenue"))
+        cogs_ttm = inc_ttm.get("Cost Of Revenue")
+        gp_ttm = inc_ttm.get("Gross Profit")
+        oi_ttm = inc_ttm.get("Operating Income")
+        ni_ttm = inc_ttm.get("Net Income")
+        ebitda_ttm = inc_ttm.get("EBITDA") or safe(info.get("ebitda"))
+        gross_margin_ttm = round(gp_ttm / rev_ttm * 100, 2) if gp_ttm and rev_ttm else None
+        operating_margin_ttm = round(oi_ttm / rev_ttm * 100, 2) if oi_ttm and rev_ttm else None
+        net_margin_ttm = round(ni_ttm / rev_ttm * 100, 2) if ni_ttm and rev_ttm else None
+
+        # ── Multiples fallback when DCF is unavailable ───────────────────────
+        # Triggered when: (a) no positive FCF, or (b) net debt exceeds DCF enterprise value.
+        # Never leaves the user without a value — industry multiples serve as the primary metric.
+        multiples_val    = None
+        multiples_method = None
+        multiples_reason = None
+        if intrinsic_value is None:
+            multiples_reason = (
+                "High Debt Profile" if (dcf_available and equity_value is not None and equity_value < 0)
+                else "Negative/Missing Free Cash Flow"
+            )
+            multiples_val, multiples_method = calc_multiples_val(
+                info, sector, industry, fx_rate, ebitda_ttm
+            )
+            if multiples_val and price:
+                multiples_mos = round((multiples_val - price) / price * 100, 1)
+            else:
+                multiples_mos = None
+        else:
+            multiples_mos = None
+
         # ── Sector / P/E context notes ────────────────────────────────────────
         pe_ttm    = safe(info.get("trailingPE"))
         dcf_notes = get_dcf_notes(sector, industry, pe_ttm, dcf_available)
@@ -995,20 +1147,6 @@ def analyze():
             growth_pct = s1 * 100
             if growth_pct > 0:
                 peg = round(pe_ttm / growth_pct, 2)
-
-        # ── Income statement TTM (prefer quarterly for foreign companies) ──────
-        inc_ttm = get_income_stmt_ttm(stock)
-        rev_ttm = inc_ttm.get("Total Revenue") or safe(info.get("totalRevenue"))
-        cogs_ttm = inc_ttm.get("Cost Of Revenue")
-        gp_ttm = inc_ttm.get("Gross Profit")
-        oi_ttm = inc_ttm.get("Operating Income")
-        ni_ttm = inc_ttm.get("Net Income")
-        ebitda_ttm = inc_ttm.get("EBITDA") or safe(info.get("ebitda"))
-
-        # Compute margins from TTM data
-        gross_margin_ttm = round(gp_ttm / rev_ttm * 100, 2) if gp_ttm and rev_ttm else None
-        operating_margin_ttm = round(oi_ttm / rev_ttm * 100, 2) if oi_ttm and rev_ttm else None
-        net_margin_ttm = round(ni_ttm / rev_ttm * 100, 2) if ni_ttm and rev_ttm else None
 
         # ── FCF yield and margin ──────────────────────────────────────────────
         mcap = safe(info.get("marketCap"), 0) or 0
@@ -1063,7 +1201,7 @@ def analyze():
                                   if enterprise_value and pv_terminal else None,
             "net_debt":          net_debt if dcf_available else ((safe(info.get("totalDebt"), 0) or 0) - (safe(info.get("totalCash"), 0) or 0)) * fx_rate,
             "scenarios":         scenarios if dcf_available else None,
-            "shares_outstanding": safe(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"), 0),
+            "shares_outstanding": bal_data["shares"],
             "financial_currency": financial_ccy,
             "trading_currency":   trading_ccy,
             "fx_rate":            round(fx_rate, 4) if fx_rate != 1.0 else None,
@@ -1098,9 +1236,9 @@ def analyze():
             "roe":               pct(info.get("returnOnEquity")),
             "roa":               pct(info.get("returnOnAssets")),
             "div_yield":         dividend_yield,
-            # Health card — convert balance sheet items to trading currency
-            "total_cash":    f2((safe(info.get("totalCash")) or 0) * fx_rate),
-            "total_debt":    f2((safe(info.get("totalDebt")) or 0) * fx_rate),
+            # Health card — use most recent quarterly balance sheet data
+            "total_cash":    f2(bal_data["total_cash"]),
+            "total_debt":    f2(bal_data["total_debt"]),
             "current_ratio": f2(info.get("currentRatio")),
             "quick_ratio":   f2(info.get("quickRatio")),
             "debt_to_equity":f2(info.get("debtToEquity")),
@@ -1108,6 +1246,11 @@ def analyze():
             # Analyst
             "analyst_rating": info.get("recommendationKey", "N/A"),
             "analyst_count":  info.get("numberOfAnalystOpinions"),
+            # Multiples-based fallback valuation
+            "multiples_val":    multiples_val,
+            "multiples_method": multiples_method,
+            "multiples_reason": multiples_reason,
+            "multiples_mos":    multiples_mos,
         }
 
         return jsonify(clean(result))

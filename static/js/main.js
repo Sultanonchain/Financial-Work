@@ -192,12 +192,30 @@ function renderResults(d) {
   card.className = 'verdict-card';
 
   if (!d.dcf_available || iv == null) {
-    $('intrinsicValue').textContent = 'N/A';
-    $('verdictSub').textContent     = d.dcf_warning || 'DCF not available';
-    $('mosValue').textContent       = '—';
-    $('mosFill').style.width        = '0';
-    $('mosHint').textContent        = '';
-    card.classList.add('fair');
+    // Show multiples-based fallback if available
+    if (d.multiples_val) {
+      $('intrinsicValue').textContent = fmtPrice(d.multiples_val);
+      const mmos = d.multiples_mos;
+      let mtxt = '';
+      if (mmos > 15)       { card.classList.add('undervalued'); mtxt = `${fmtPct(mmos)} upside to multiples fair value`; }
+      else if (mmos < -15) { card.classList.add('overvalued');  mtxt = `${fmtPct(Math.abs(mmos))} above multiples fair value`; }
+      else                 { card.classList.add('fair');        mtxt = 'Trading near multiples-based fair value'; }
+      $('verdictSub').textContent = mtxt;
+      const mcolor = mmos > 15 ? 'var(--green)' : mmos < -15 ? 'var(--red)' : 'var(--gold)';
+      const mosEl = $('mosValue');
+      mosEl.textContent  = (mmos > 0 ? '+' : '') + fmtPct(mmos);
+      mosEl.style.color  = mcolor;
+      $('mosFill').style.width      = Math.min(Math.abs(mmos), 100) + '%';
+      $('mosFill').style.background = mcolor;
+      $('mosHint').textContent      = mmos > 0 ? 'Trading below multiples fair value' : 'Trading above multiples fair value';
+    } else {
+      $('intrinsicValue').textContent = 'N/A';
+      $('verdictSub').textContent     = d.dcf_warning || 'DCF not available';
+      $('mosValue').textContent       = '—';
+      $('mosFill').style.width        = '0';
+      $('mosHint').textContent        = '';
+      card.classList.add('fair');
+    }
   } else {
     $('intrinsicValue').textContent = fmtPrice(iv);
     $('verdictSub').textContent     = '50/25/25 probability-weighted across 3 scenarios';
@@ -223,6 +241,13 @@ function renderResults(d) {
   const warnEl = $('dcfWarning');
   const notes  = d.dcf_notes || [];
   let warnHtml = '';
+  // Multiples fallback badge — shown prominently when DCF is replaced by multiples
+  if (d.multiples_val && (!d.dcf_available || iv == null)) {
+    warnHtml += `<div class="multiples-badge">
+      <span class="multiples-badge-icon">◈</span>
+      <span class="multiples-badge-text"><strong>Secondary Valuation Applied:</strong> Industry Multiples Method used due to ${d.multiples_reason || 'DCF unavailability'} — ${d.multiples_method}.</span>
+    </div>`;
+  }
   if (d.dcf_warning) warnHtml += `<div class="dcf-note dcf-note--warn">⚠ ${d.dcf_warning}</div>`;
   notes.forEach(n => {
     const cls = n.type === 'warn' ? 'dcf-note--warn' : 'dcf-note--info';
