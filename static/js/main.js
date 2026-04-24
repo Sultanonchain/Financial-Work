@@ -353,16 +353,22 @@ function renderScenarios(sc, price) {
     const up = data.upside;
     const upCls = up > 0 ? 'green' : 'red';
     const upSign = up > 0 ? '+' : '';
+    // Scenario integrity flags
+    let flags = '';
+    if (data.distressed)   flags += `<span class="sc-flag sc-flag--distressed">Distressed</span>`;
+    if (data.floored)      flags += `<span class="sc-flag sc-flag--floored">Floor Applied</span>`;
+    if (data.recalculated) flags += `<span class="sc-flag sc-flag--recalc">Re-calculated</span>`;
     return `
       <div class="sc-case sc-${cls}">
         <div class="sc-label">${label}</div>
         <div class="sc-weight">${data.weight}% weight</div>
-        <div class="sc-value">${fmtPrice(data.value)}</div>
+        <div class="sc-value">${data.value === 0 ? '<span style="color:var(--red)">$0.00</span>' : fmtPrice(data.value)}</div>
         <div class="sc-upside ${upCls}">${upSign}${fmtPct(up)} vs current</div>
         <div class="sc-assumptions">
           <span>g₁ ${fmtPct(data.s1)}</span>
           <span>WACC ${fmtPct(data.wacc)}</span>
         </div>
+        ${flags ? `<div class="sc-flags">${flags}</div>` : ''}
       </div>`;
   }
 

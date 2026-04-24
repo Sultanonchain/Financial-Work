@@ -58,6 +58,25 @@ SECTOR_MULT_PARAMS = {
     "default":            (17.0, 12.0),
 }
 
+# Minimum EV/EBITDA multiple used as the Bear Case institutional floor.
+# Prevents a stress scenario from assigning impossible valuations to healthy businesses.
+INDUSTRY_BEAR_EV_FLOORS = {
+    "technology":         10.0,
+    "consumer_cyclical":   6.0,
+    "consumer_defensive":  8.0,
+    "healthcare":          8.0,
+    "industrials":         6.0,
+    "financial":           5.0,
+    "energy":              4.0,
+    "materials":           4.0,
+    "utilities":           7.0,
+    "telecom":             5.0,
+    "airlines":            4.0,
+    "auto":                4.0,
+    "real_estate":         9.0,
+    "default":             6.0,
+}
+
 # Sector/industry default betas when yfinance returns None
 INDUSTRY_BETA_DEFAULTS = {
     "airlines":          1.75,
@@ -168,6 +187,29 @@ def calc_multiples_val(info, sector, industry, fx_rate, ebitda_ttm=None):
             return round(eq_val / shares, 2), f"EV/EBITDA ({ev_ebitda_mult:.0f}x sector median)"
 
     return None, None
+
+
+def _bear_floor_iv(info, sector, industry, fx_rate, ebitda_ttm=None):
+    """
+    Minimum share price for the bear scenario, derived from the sector's EV/EBITDA floor.
+    Prevents stress assumptions from producing impossible valuations for healthy companies.
+    Returns 0.0 when EBITDA is unavailable or the floor equity value is negative.
+    """
+    ind_class = _classify_industry(sector, industry)
+    key = ind_class if ind_class != "default" else _sector_to_mult_key(sector)
+    floor_mult = INDUSTRY_BEAR_EV_FLOORS.get(key, INDUSTRY_BEAR_EV_FLOORS["default"])
+
+    ebitda = ebitda_ttm or safe(info.get("ebitda"))
+    shares = safe(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"), 0) or 0
+    if not ebitda or ebitda <= 0 or shares <= 0:
+        return 0.0
+
+    ev_floor = ebitda * fx_rate * floor_mult
+    cash     = (safe(info.get("totalCash"), 0) or 0) * fx_rate
+    debt     = (safe(info.get("totalDebt"), 0) or 0) * fx_rate
+    net_debt = debt - cash
+    eq_floor = ev_floor - net_debt
+    return max(eq_floor / shares, 0.0)
 
 
 def get_quarterly_balance_data(stock, info, fx_rate):
@@ -350,9 +392,11 @@ def calc_wacc(info, income_stmt, tax_rate=0.21, fx_rate=1.0):
 
 # ── Single DCF run ─────────────────────────────────────────────────────────────
 
-def run_dcf_single(base_fcf, s1, s2, tg, wacc, yrs, info, fx_rate):
+def run_dcf_single(base_fcf, s1, s2, tg, wacc, yrs, info, fx_rate, net_debt_override=None):
     """
     Run one DCF scenario. base_fcf must already be in trading currency.
+    net_debt_override: pass pre-computed net debt (e.g. from quarterly balance sheet)
+    to bypass the info-dict lookup — important for mega-caps where cash is material.
     Returns (intrinsic_value, projected_rows, enterprise_value, equity_value, pv_terminal).
     """
     if wacc <= tg:
@@ -372,10 +416,13 @@ def run_dcf_single(base_fcf, s1, s2, tg, wacc, yrs, info, fx_rate):
     total_pv_fcf = sum(p["pv"] for p in projected)
     ev           = total_pv_fcf + pv_terminal
 
-    cash     = (safe(info.get("totalCash"), 0) or 0) * fx_rate
-    debt     = (safe(info.get("totalDebt"), 0) or 0) * fx_rate
-    net_debt = debt - cash
-    eq_val   = ev - net_debt
+    if net_debt_override is not None:
+        net_debt = net_debt_override
+    else:
+        cash     = (safe(info.get("totalCash"), 0) or 0) * fx_rate
+        debt     = (safe(info.get("totalDebt"), 0) or 0) * fx_rate
+        net_debt = debt - cash
+    eq_val = ev - net_debt
 
     shares = safe(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"), 0) or 0
     iv     = (eq_val / shares) if shares > 0 else None
@@ -946,6 +993,20 @@ def analyze():
         else:
             dividend_yield = None
 
+        # ── Income statement TTM ─────────────────────────────────────────────
+        # Computed before the DCF block so ebitda_ttm is available to both
+        # the scenario analysis (institutional floor) and the multiples fallback.
+        inc_ttm = get_income_stmt_ttm(stock)
+        rev_ttm = inc_ttm.get("Total Revenue") or safe(info.get("totalRevenue"))
+        cogs_ttm = inc_ttm.get("Cost Of Revenue")
+        gp_ttm = inc_ttm.get("Gross Profit")
+        oi_ttm = inc_ttm.get("Operating Income")
+        ni_ttm = inc_ttm.get("Net Income")
+        ebitda_ttm = inc_ttm.get("EBITDA") or safe(info.get("ebitda"))
+        gross_margin_ttm = round(gp_ttm / rev_ttm * 100, 2) if gp_ttm and rev_ttm else None
+        operating_margin_ttm = round(oi_ttm / rev_ttm * 100, 2) if oi_ttm and rev_ttm else None
+        net_margin_ttm = round(ni_ttm / rev_ttm * 100, 2) if ni_ttm and rev_ttm else None
+
         # ── DCF computation ───────────────────────────────────────────────────
         intrinsic_value  = None
         margin_of_safety = None
@@ -1025,21 +1086,56 @@ def analyze():
             }
 
             # ── Scenario analysis (50 / 25 / 25 probability weights) ─────────
-            # Bull case: higher growth, lower WACC, slightly higher terminal growth
-            s1_bull   = min(s1 * 1.5, 0.35)
-            s2_bull   = max(s1_bull * 0.55, tg + 0.01)
-            wacc_bull = max(wacc - 0.015, 0.04)
-            tg_bull   = min(tg + 0.005, 0.04)
-            iv_bull, _, _, _, _ = run_dcf_single(
-                base_fcf, s1_bull, s2_bull, tg_bull, wacc_bull, yrs, info, fx_rate)
+            # Net debt: always use quarterly balance sheet data so cash piles
+            # (especially for mega-caps) are never understated in any scenario.
+            scenario_net_debt = bal_data["total_debt"] - bal_data["total_cash"]
 
-            # Bear case: lower growth, higher WACC, lower terminal growth
-            s1_bear   = max(s1 * 0.4, 0.01)
-            s2_bear   = max(s1_bear * 0.55, 0.005)
-            wacc_bear = min(wacc + 0.020, 0.18)
-            tg_bear   = max(tg - 0.01, 0.01)
+            # Rule 1 — WACC Stability: max ±1% from base (prevents distorted discounting)
+            wacc_bull = max(wacc - 0.010, 0.04)
+            wacc_bear = min(wacc + 0.010, 0.18)
+
+            # Bull case: growth premium, WACC at floor, TG at industry ceiling
+            s1_bull = min(s1 * 1.5, 0.35)
+            s2_bull = max(s1_bull * 0.55, tg + 0.01)
+            tg_bull = min(tg + 0.005, ind_params["max_tg"])
+            iv_bull, _, _, _, _ = run_dcf_single(
+                base_fcf, s1_bull, s2_bull, tg_bull, wacc_bull, yrs, info, fx_rate,
+                net_debt_override=scenario_net_debt)
+
+            # Bear case: measured growth haircut, WACC at cap, modest TG trim
+            s1_bear = max(s1 * 0.50, 0.01)   # 50% of base (was 40% — too aggressive)
+            s2_bear = max(s1_bear * 0.55, 0.005)
+            tg_bear = max(tg - 0.005, 0.010)  # trim 0.5pp (was 1.0pp)
             iv_bear, _, _, _, _ = run_dcf_single(
-                base_fcf, s1_bear, s2_bear, tg_bear, wacc_bear, yrs, info, fx_rate)
+                base_fcf, s1_bear, s2_bear, tg_bear, wacc_bear, yrs, info, fx_rate,
+                net_debt_override=scenario_net_debt)
+
+            # Rule 2 — Institutional Floor: bear can't fall below sector EV/EBITDA floor
+            bear_floored = False
+            if iv_bear is not None:
+                floor_iv = _bear_floor_iv(info, sector, industry, fx_rate, ebitda_ttm)
+                if floor_iv > 0 and iv_bear < floor_iv:
+                    iv_bear = floor_iv
+                    bear_floored = True
+
+            # Rule 4 — Reasonability Check: clamp any scenario beyond ±90% of market price
+            bull_recalculated = bear_recalculated = False
+            if price and intrinsic_value:
+                if iv_bull is not None and abs(iv_bull - price) / price > 0.90:
+                    iv_bull = (iv_bull + intrinsic_value) / 2
+                    bull_recalculated = True
+                if iv_bear is not None and abs(iv_bear - price) / price > 0.90:
+                    iv_bear = (iv_bear + intrinsic_value) / 2
+                    bear_recalculated = True
+
+            # Rule 5 — Negative Value Ban: hard floor at $0.00
+            bull_distressed = bear_distressed = False
+            if iv_bull is not None and iv_bull < 0:
+                iv_bull = 0.0
+                bull_distressed = True
+            if iv_bear is not None and iv_bear < 0:
+                iv_bear = 0.0
+                bear_distressed = True
 
             # Probability-weighted fair value
             if all(v is not None for v in [intrinsic_value, iv_bull, iv_bear]):
@@ -1064,6 +1160,8 @@ def analyze():
                     "s1":     round(s1_bull * 100, 2),
                     "wacc":   round(wacc_bull * 100, 2),
                     "upside": round((iv_bull - price) / price * 100, 1) if iv_bull and price else None,
+                    "recalculated": bull_recalculated,
+                    "distressed":   bull_distressed,
                 },
                 "bear": {
                     "value":  round(iv_bear, 2) if iv_bear else None,
@@ -1071,6 +1169,9 @@ def analyze():
                     "s1":     round(s1_bear * 100, 2),
                     "wacc":   round(wacc_bear * 100, 2),
                     "upside": round((iv_bear - price) / price * 100, 1) if iv_bear and price else None,
+                    "floored":      bear_floored,
+                    "recalculated": bear_recalculated,
+                    "distressed":   bear_distressed,
                 },
                 "weighted": round(iv_weighted, 2) if iv_weighted else None,
                 "weighted_upside": round((iv_weighted - price) / price * 100, 1) if iv_weighted and price else None,
@@ -1088,18 +1189,6 @@ def analyze():
                 intrinsic_value  = None
                 margin_of_safety = None
                 scenarios        = None
-
-        # ── Income statement TTM (needed early for multiples fallback) ──────────
-        inc_ttm = get_income_stmt_ttm(stock)
-        rev_ttm = inc_ttm.get("Total Revenue") or safe(info.get("totalRevenue"))
-        cogs_ttm = inc_ttm.get("Cost Of Revenue")
-        gp_ttm = inc_ttm.get("Gross Profit")
-        oi_ttm = inc_ttm.get("Operating Income")
-        ni_ttm = inc_ttm.get("Net Income")
-        ebitda_ttm = inc_ttm.get("EBITDA") or safe(info.get("ebitda"))
-        gross_margin_ttm = round(gp_ttm / rev_ttm * 100, 2) if gp_ttm and rev_ttm else None
-        operating_margin_ttm = round(oi_ttm / rev_ttm * 100, 2) if oi_ttm and rev_ttm else None
-        net_margin_ttm = round(ni_ttm / rev_ttm * 100, 2) if ni_ttm and rev_ttm else None
 
         # ── Multiples fallback when DCF is unavailable ───────────────────────
         # Triggered when: (a) no positive FCF, or (b) net debt exceeds DCF enterprise value.
