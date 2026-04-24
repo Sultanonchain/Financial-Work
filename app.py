@@ -15,6 +15,84 @@ EQUITY_RISK_PREM = 0.055   # Damodaran ERP
 # FX rate cache (in-memory, lives for the process lifetime — good enough for a session)
 _fx_cache: dict = {}
 
+# ── Industry-specific DCF guardrails ──────────────────────────────────────────
+# These prevent Gordon Growth Model blow-up for mature/capital-intensive sectors.
+# max_tg:      maximum terminal growth rate (capped at long-run GDP)
+# min_wacc:    WACC floor regardless of capital structure
+# wacc_spread: minimum (WACC − terminal growth) to avoid near-zero denominators
+# max_s1:      cap on Stage 1 growth — prevents using cyclical recovery as perpetual rate
+INDUSTRY_PARAMS = {
+    # Airlines: low long-run growth, high capital intensity, often junk-rated
+    "airlines":        {"max_tg": 0.020, "min_wacc": 0.085, "wacc_spread": 0.025, "max_s1": 0.12},
+    # Utilities: regulated, GDP-matched growth ceiling
+    "utilities":       {"max_tg": 0.022, "min_wacc": 0.055, "wacc_spread": 0.020, "max_s1": 0.08},
+    # Telecom: mature, high CapEx, GDP-pace growth
+    "telecom":         {"max_tg": 0.022, "min_wacc": 0.065, "wacc_spread": 0.020, "max_s1": 0.10},
+    # Energy (traditional): commodity-cyclical, normalize through cycle
+    "energy":          {"max_tg": 0.025, "min_wacc": 0.075, "wacc_spread": 0.022, "max_s1": 0.15},
+    # Materials / Mining: commodity-cyclical
+    "materials":       {"max_tg": 0.022, "min_wacc": 0.075, "wacc_spread": 0.022, "max_s1": 0.12},
+    # Autos: cyclical, capital-intensive
+    "auto":            {"max_tg": 0.025, "min_wacc": 0.072, "wacc_spread": 0.020, "max_s1": 0.15},
+    # Default (tech, consumer, healthcare, etc.)
+    "default":         {"max_tg": 0.035, "min_wacc": 0.050, "wacc_spread": 0.015, "max_s1": 0.25},
+}
+
+# Sector/industry default betas when yfinance returns None
+INDUSTRY_BETA_DEFAULTS = {
+    "airlines":          1.75,
+    "aerospace":         1.30,
+    "auto":              1.30,
+    "energy":            1.35,
+    "materials":         1.20,
+    "financial":         1.15,
+    "utilities":         0.65,
+    "technology":        1.25,
+    "healthcare":        0.90,
+    "consumer_cyclical": 1.20,
+    "consumer_defensive":0.70,
+    "industrials":       1.10,
+    "real_estate":       1.00,
+    "communication":     0.90,
+}
+
+def _classify_industry(sector: str, industry: str) -> str:
+    """Map yfinance sector/industry strings to one of our INDUSTRY_PARAMS keys."""
+    s   = (sector   or "").lower()
+    ind = (industry or "").lower()
+    if any(x in ind for x in ["airline", "air freight", "airport services"]):
+        return "airlines"
+    if "utilities" in s or "electric util" in ind or "gas util" in ind:
+        return "utilities"
+    if any(x in ind for x in ["telecom", "wireless", "integrated telecom"]):
+        return "telecom"
+    if "energy" in s and "renewable" not in ind:
+        return "energy"
+    if "materials" in s or "mining" in ind or "metals" in ind:
+        return "materials"
+    if any(x in ind for x in ["auto", "automobile"]):
+        return "auto"
+    return "default"
+
+def _default_beta(sector: str, industry: str) -> float:
+    """Return a reasonable beta when yfinance provides None."""
+    s   = (sector   or "").lower()
+    ind = (industry or "").lower()
+    if "airline" in ind:                    return INDUSTRY_BETA_DEFAULTS["airlines"]
+    if "utilities" in s:                    return INDUSTRY_BETA_DEFAULTS["utilities"]
+    if "energy" in s:                       return INDUSTRY_BETA_DEFAULTS["energy"]
+    if "materials" in s or "mining" in ind: return INDUSTRY_BETA_DEFAULTS["materials"]
+    if any(x in ind for x in ["auto","automobile"]): return INDUSTRY_BETA_DEFAULTS["auto"]
+    if "financial" in s or "bank" in ind:   return INDUSTRY_BETA_DEFAULTS["financial"]
+    if "technology" in s or "software" in ind: return INDUSTRY_BETA_DEFAULTS["technology"]
+    if "health" in s:                       return INDUSTRY_BETA_DEFAULTS["healthcare"]
+    if "consumer" in s and "cycl" in s:     return INDUSTRY_BETA_DEFAULTS["consumer_cyclical"]
+    if "consumer" in s:                     return INDUSTRY_BETA_DEFAULTS["consumer_defensive"]
+    if "industrial" in s:                   return INDUSTRY_BETA_DEFAULTS["industrials"]
+    if "real estate" in s:                  return INDUSTRY_BETA_DEFAULTS["real_estate"]
+    if "communic" in s:                     return INDUSTRY_BETA_DEFAULTS["communication"]
+    return 1.0
+
 def get_fx_rate(from_ccy: str, to_ccy: str) -> float:
     """
     Return the exchange rate: 1 from_ccy = X to_ccy.
@@ -106,13 +184,16 @@ def calc_tax_rate(info, income_stmt):
 # ── WACC ───────────────────────────────────────────────────────────────────────
 
 def calc_wacc(info, income_stmt, tax_rate=0.21, fx_rate=1.0):
-    beta = safe(info.get("beta"), 1.0) or 1.0
-    beta = min(max(beta, 0.3), 3.0)
+    # Use reported beta; fall back to industry default when yfinance returns None
+    beta_raw = safe(info.get("beta"))
+    if beta_raw is None or np.isnan(beta_raw):
+        beta_raw = _default_beta(info.get("sector",""), info.get("industry",""))
+    beta = float(min(max(beta_raw, 0.3), 3.0))
     coe  = RISK_FREE_RATE + beta * EQUITY_RISK_PREM
 
+    # Cost of debt: interest expense / total debt (both in reporting ccy, ratio is neutral)
     cod = 0.05
     try:
-        # iexp and debt are both in reporting currency, so the ratio is currency-neutral
         iexp = None
         if income_stmt is not None and not income_stmt.empty:
             for lbl in ["Interest Expense Non Operating", "Interest Expense"]:
@@ -120,24 +201,33 @@ def calc_wacc(info, income_stmt, tax_rate=0.21, fx_rate=1.0):
                     v = safe(income_stmt.loc[lbl].iloc[0])
                     if v is not None:
                         iexp = abs(v); break
-        debt = safe(info.get("totalDebt"), 0) or 0
-        if iexp and debt > 0:
-            c = iexp / debt
-            if 0.01 < c < 0.20:
+        debt_rep = safe(info.get("totalDebt"), 0) or 0
+        if iexp and debt_rep > 0:
+            c = iexp / debt_rep
+            if 0.01 < c < 0.25:
                 cod = c
     except Exception:
         pass
 
-    mcap = safe(info.get("marketCap"), 0) or 0          # in trading currency
-    debt = (safe(info.get("totalDebt"), 0) or 0) * fx_rate  # convert to trading currency
+    mcap = safe(info.get("marketCap"), 0) or 0
+    debt = (safe(info.get("totalDebt"), 0) or 0) * fx_rate
     tc   = mcap + debt
-    we, wd = (mcap / tc, debt / tc) if tc > 0 else (0.85, 0.15)
+
+    if tc > 0:
+        we_raw = mcap / tc
+        wd_raw = debt / tc
+        # Cap debt weight at 75%: prevents distressed-leverage from pulling WACC
+        # below the point where the Gordon Growth Model becomes meaningless.
+        wd = min(wd_raw, 0.75)
+        we = 1.0 - wd
+    else:
+        we, wd = 0.85, 0.15
 
     wacc = we * coe + wd * cod * (1 - tax_rate)
     if not wacc or np.isnan(wacc):
         wacc = coe
     return {
-        "wacc": min(max(wacc, 0.05), 0.18),
+        "wacc": min(max(wacc, 0.05), 0.20),
         "coe": coe, "cod": cod,
         "tax": tax_rate, "beta": beta,
         "we": we, "wd": wd,
@@ -288,14 +378,16 @@ def get_forward_growth(stock, info, fcf_series):
     except Exception:
         pass
 
-    # 2. Growth estimates dataframe (analyst consensus)
+    # 2. Growth estimates dataframe — use stockTrend only, not indexTrend
+    # (indexTrend reflects the sector/index benchmark, not the individual company)
     try:
         ge = stock.growth_estimates
         if ge is not None and not ge.empty and '+1y' in ge.index:
-            for col in ge.columns:
-                v = safe(ge.loc['+1y', col])
-                if v is not None and 0.02 < v < 0.50:
-                    return float(v), "Analyst consensus (+1y)"
+            for col in ["stockTrend", "stock"]:
+                if col in ge.columns:
+                    v = safe(ge.loc['+1y', col])
+                    if v is not None and 0.02 < v < 0.50:
+                        return float(v), "Analyst consensus (+1y)"
     except Exception:
         pass
 
@@ -700,6 +792,10 @@ def analyze():
         trading_ccy   = info.get("currency") or "USD"
         fx_rate = get_fx_rate(financial_ccy, trading_ccy)   # e.g. EUR→USD ≈ 1.09
 
+        # Sector / industry — needed early for industry guardrails
+        sector   = info.get("sector",   "")
+        industry = info.get("industry", "")
+
         # ── Price history (1Y default) ────────────────────────────────────────
         hist = stock.history(period="1y", interval="1d")
         price_history = []
@@ -747,6 +843,11 @@ def analyze():
         scenarios        = None
         net_debt         = ((safe(info.get("totalDebt"), 0) or 0) - (safe(info.get("totalCash"), 0) or 0)) * fx_rate
 
+        # ── Industry guardrails ───────────────────────────────────────────────
+        ind_class  = _classify_industry(sector, industry)
+        ind_params = INDUSTRY_PARAMS[ind_class]
+        user_tg_override = request.args.get("terminal") is not None
+
         if not dcf_available:
             if not fcf_series:
                 dcf_warning = "No Free Cash Flow data available — DCF not computed."
@@ -763,7 +864,9 @@ def analyze():
                 growth_source = "User override"
             else:
                 s1, growth_source = get_forward_growth(stock, info, fcf_series)
-                s1 = min(s1, 0.25)
+                # Apply industry-specific Stage 1 cap (prevents using cyclical recovery
+                # earnings spikes as a perpetual growth assumption for mature sectors)
+                s1 = min(s1, ind_params["max_s1"])
 
             if s2_ov:
                 s2 = float(s2_ov) / 100 if float(s2_ov) > 1 else float(s2_ov)
@@ -771,7 +874,20 @@ def analyze():
                 s2 = max(s1 * 0.55, tg + 0.005)
 
             wacc_data = calc_wacc(info, income_stmt, tax_rate, fx_rate)
-            wacc      = wacc_data["wacc"]
+            # Apply industry WACC floor (pure capital-structure math can give unrealistically
+            # low WACC for junk-rated, highly-levered companies like airlines)
+            wacc = max(wacc_data["wacc"], ind_params["min_wacc"])
+            wacc_data["wacc"] = wacc
+
+            # Cap terminal growth at industry ceiling (GDP-aligned for mature sectors)
+            if not user_tg_override:
+                tg = min(tg, ind_params["max_tg"])
+
+            # Enforce minimum WACC − TGR spread to prevent Gordon Growth Model blow-up
+            # (small denominator creates astronomical terminal values)
+            min_spread = ind_params["wacc_spread"]
+            if wacc - tg < min_spread:
+                tg = round(wacc - min_spread, 4)
 
             # ── Base case DCF ─────────────────────────────────────────────────
             intrinsic_value, projected, enterprise_value, equity_value, pv_terminal = \
@@ -842,11 +958,35 @@ def analyze():
             }
             intrinsic_value = round(iv_weighted, 2) if iv_weighted else intrinsic_value
 
+            # Negative equity value: net debt exceeds DCF enterprise value
+            if equity_value is not None and equity_value < 0:
+                dcf_warning = (
+                    f"Net debt (${abs(net_debt)/1e9:.1f}B) exceeds DCF enterprise value "
+                    f"(${enterprise_value/1e9:.1f}B) — equity value is technically negative. "
+                    "This means the company's debt load overwhelms the modelled cash flows. "
+                    "Use EV/EBITDA or forward earnings multiples instead of DCF for this security."
+                )
+                intrinsic_value  = None
+                margin_of_safety = None
+                scenarios        = None
+
         # ── Sector / P/E context notes ────────────────────────────────────────
-        pe_ttm   = safe(info.get("trailingPE"))
-        sector   = info.get("sector", "")
-        industry = info.get("industry", "")
+        pe_ttm    = safe(info.get("trailingPE"))
         dcf_notes = get_dcf_notes(sector, industry, pe_ttm, dcf_available)
+
+        # Add note when industry guardrails were applied
+        if dcf_available and ind_class != "default":
+            adj_parts = []
+            if not user_tg_override:
+                adj_parts.append(f"terminal growth capped at {tg*100:.1f}%")
+            adj_parts.append(f"WACC floor {ind_params['min_wacc']*100:.1f}%")
+            adj_parts.append(f"Stage 1 cap {ind_params['max_s1']*100:.0f}%")
+            dcf_notes.insert(0, {
+                "type": "info",
+                "text": (f"{ind_class.capitalize()} industry adjustments applied: "
+                         + ", ".join(adj_parts) + ". "
+                         "These prevent mature-sector distortions in the Gordon Growth Model.")
+            })
 
         # ── PEG ratio ─────────────────────────────────────────────────────────
         peg = safe(info.get("pegRatio"))
