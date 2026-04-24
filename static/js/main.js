@@ -214,20 +214,32 @@ function renderResults(d) {
     $('mosHint').textContent      = mos > 0 ? 'Trading below intrinsic value' : 'Trading above intrinsic value';
   }
 
-  // DCF warning banner
+  // DCF warning banner + contextual notes
   const warnEl = $('dcfWarning');
-  if (d.dcf_warning) { warnEl.textContent = '⚠ ' + d.dcf_warning; warnEl.classList.remove('hidden'); }
-  else               { warnEl.classList.add('hidden'); }
+  const notes  = d.dcf_notes || [];
+  let warnHtml = '';
+  if (d.dcf_warning) warnHtml += `<div class="dcf-note dcf-note--warn">⚠ ${d.dcf_warning}</div>`;
+  notes.forEach(n => {
+    const cls = n.type === 'warn' ? 'dcf-note--warn' : 'dcf-note--info';
+    const icon = n.type === 'warn' ? '⚠' : 'ℹ';
+    warnHtml += `<div class="dcf-note ${cls}">${icon} ${n.text}</div>`;
+  });
+  if (warnHtml) { warnEl.innerHTML = warnHtml; warnEl.classList.remove('hidden'); }
+  else          { warnEl.classList.add('hidden'); }
 
   // Valuation multiples
   $('valuationMetrics').innerHTML = [
     row('Market Cap',     fmtBig(d.market_cap)),
     row('P/E (TTM)',      fmtX(d.pe_ratio),      peColor(d.pe_ratio)),
     row('Forward P/E',   fmtX(d.forward_pe),    peColor(d.forward_pe, true)),
+    row('PEG Ratio',     d.peg_ratio != null ? fmt(d.peg_ratio) + 'x' : '—',
+                         d.peg_ratio != null ? (d.peg_ratio < 1 ? 'green' : d.peg_ratio > 2 ? 'red' : '') : ''),
     row('P/S Ratio',     fmtX(d.ps_ratio)),
     row('P/B Ratio',     fmtX(d.pb_ratio)),
     row('EV/EBITDA',     fmtX(d.ev_ebitda)),
     row('EV/Revenue',    fmtX(d.ev_revenue)),
+    row('FCF Yield',     d.fcf_yield != null ? fmtPct(d.fcf_yield) : '—',
+                         d.fcf_yield != null ? (d.fcf_yield > 4 ? 'green' : '') : ''),
     row('Analyst Target',fmtPrice(d.target_price), 'cyan'),
     row('Analyst Rating',ratingBadge(d.analyst_rating, d.analyst_count)),
   ].join('');
@@ -242,23 +254,29 @@ function renderResults(d) {
     row('Stage 1 Growth',  fmtPct(d.stage1_growth),  'green'),
     row('Stage 2 Growth',  fmtPct(d.stage2_growth),  'green'),
     row('Terminal Growth', fmtPct(d.terminal_growth)),
+    row('Base FCF',        fmtBig(d.base_fcf)),
+    row('FCF Yield',       d.fcf_yield != null ? fmtPct(d.fcf_yield) : '—'),
     row('PV of FCFs',      fmtBig(d.total_pv_fcf)),
     row('PV Terminal Val', fmtBig(d.pv_terminal)),
     row('Terminal % of EV',fmtPct(d.terminal_value_pct)),
+    d.growth_source ? row('Growth Source', `<span style="color:var(--muted2);font-size:11px">${d.growth_source}</span>`) : '',
+    d.fcf_source    ? row('FCF Source',    `<span style="color:var(--muted2);font-size:11px">${d.fcf_source}</span>`)    : '',
   ].join('') : '<div style="color:var(--muted);font-size:12px;padding:8px 0">DCF not available for this security.</div>';
 
   // Financials
   $('financialMetrics').innerHTML = [
     row('Revenue',          fmtBig(d.revenue)),
     row('EBITDA',           fmtBig(d.ebitda)),
+    row('FCF (TTM)',        fmtBig(d.base_fcf)),
+    row('FCF Margin',       d.fcf_margin != null ? fmtPct(d.fcf_margin) : '—', cc(d.fcf_margin)),
     row('Gross Margin',     fmtPct(d.gross_margin),     d.gross_margin > 40 ? 'green' : ''),
     row('Operating Margin', fmtPct(d.operating_margin), cc(d.operating_margin)),
     row('Net Margin',       fmtPct(d.profit_margin),    cc(d.profit_margin)),
-    row('Revenue Growth',   fmtPct(d.revenue_growth),   cc(d.revenue_growth)),
-    row('Earnings Growth',  fmtPct(d.earnings_growth),  cc(d.earnings_growth)),
+    row('Rev. Growth (YoY)',fmtPct(d.revenue_growth),   cc(d.revenue_growth)),
+    row('EPS Growth (YoY)', fmtPct(d.earnings_growth),  cc(d.earnings_growth)),
     row('ROE',              fmtPct(d.roe),               cc(d.roe)),
     row('ROA',              fmtPct(d.roa),               cc(d.roa)),
-    row('Div. Yield',       fmtPct(d.dividend_yield)),
+    row('Div. Yield',       d.dividend_yield != null ? fmtPct(d.dividend_yield) : '—'),
   ].join('');
 
   // Health
