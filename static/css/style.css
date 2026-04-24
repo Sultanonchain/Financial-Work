@@ -493,6 +493,47 @@ tfoot td:first-child { text-align: left; position: sticky; left: 0; }
 .site-footer strong { color: var(--gold); }
 .footer-sub { margin-top: 4px; opacity: 0.4; font-size: 10px; font-family: var(--mono); letter-spacing: 0.3px; }
 
+/* ── Scenario Analysis ─────────────────────────────────────── */
+.sc-header {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 18px;
+}
+.sc-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+  margin-bottom: 20px;
+}
+.sc-case {
+  background: var(--surface3); border-radius: var(--radius);
+  border: 1px solid var(--border);
+  padding: 16px 14px; position: relative; overflow: hidden;
+}
+.sc-case::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+}
+.sc-base::before { background: var(--cyan); }
+.sc-bull::before { background: var(--green); }
+.sc-bear::before { background: var(--red); }
+
+.sc-label  { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted2); margin-bottom: 2px; }
+.sc-weight { font-size: 10px; color: var(--muted); font-family: var(--mono); margin-bottom: 10px; }
+.sc-value  { font-size: 26px; font-weight: 700; font-family: var(--mono); color: var(--text); letter-spacing: -0.5px; }
+.sc-upside { font-size: 12px; font-weight: 600; font-family: var(--mono); margin: 4px 0 10px; }
+.sc-assumptions {
+  display: flex; gap: 10px; flex-wrap: wrap;
+  font-size: 10px; color: var(--muted); font-family: var(--mono);
+  border-top: 1px solid var(--border); padding-top: 8px; margin-top: 4px;
+}
+.sc-weighted {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  background: rgba(91,141,184,0.06); border: 1px solid rgba(91,141,184,0.18);
+  border-radius: var(--radius); padding: 14px 18px;
+}
+.sc-wlabel  { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted2); }
+.sc-wvalue  { font-size: 22px; font-weight: 700; font-family: var(--mono); color: var(--cyan); }
+.sc-wupside { font-size: 13px; font-weight: 600; font-family: var(--mono); }
+
+@media (max-width: 640px) { .sc-grid { grid-template-columns: 1fr; } }
+
 /* ── Utility ───────────────────────────────────────────────── */
 .hidden { display: none !important; }
 

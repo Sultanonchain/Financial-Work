@@ -144,6 +144,40 @@ def calc_wacc(info, income_stmt, tax_rate=0.21, fx_rate=1.0):
     }
 
 
+# ── Single DCF run ─────────────────────────────────────────────────────────────
+
+def run_dcf_single(base_fcf, s1, s2, tg, wacc, yrs, info, fx_rate):
+    """
+    Run one DCF scenario. base_fcf must already be in trading currency.
+    Returns (intrinsic_value, projected_rows, enterprise_value, equity_value, pv_terminal).
+    """
+    if wacc <= tg:
+        tg = wacc - 0.01
+    half = yrs // 2
+    fcf_run = base_fcf
+    projected = []
+    for y in range(1, yrs + 1):
+        g = s1 if y <= half else s2
+        fcf_run = fcf_run * (1 + g)
+        pv = fcf_run / ((1 + wacc) ** y)
+        projected.append({"year": y, "fcf": fcf_run, "pv": pv, "growth": g})
+
+    tv_fcf = projected[-1]["fcf"] * (1 + tg)
+    terminal_val = tv_fcf / (wacc - tg)
+    pv_terminal  = terminal_val / ((1 + wacc) ** yrs)
+    total_pv_fcf = sum(p["pv"] for p in projected)
+    ev           = total_pv_fcf + pv_terminal
+
+    cash     = (safe(info.get("totalCash"), 0) or 0) * fx_rate
+    debt     = (safe(info.get("totalDebt"), 0) or 0) * fx_rate
+    net_debt = debt - cash
+    eq_val   = ev - net_debt
+
+    shares = safe(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"), 0) or 0
+    iv     = (eq_val / shares) if shares > 0 else None
+    return iv, projected, ev, eq_val, pv_terminal
+
+
 # ── Free Cash Flow ─────────────────────────────────────────────────────────────
 
 def get_fcf_series(cashflow):
@@ -710,6 +744,8 @@ def analyze():
         wacc_data        = {}
         dcf_warning      = None
         growth_source    = None
+        scenarios        = None
+        net_debt         = ((safe(info.get("totalDebt"), 0) or 0) - (safe(info.get("totalCash"), 0) or 0)) * fx_rate
 
         if not dcf_available:
             if not fcf_series:
@@ -721,51 +757,28 @@ def analyze():
                     "DCF intrinsic value is unreliable. Showing multiples-based analysis only."
                 )
         else:
-            # Growth rate
+            # ── Growth rate ───────────────────────────────────────────────────
             if s1_ov:
                 s1 = float(s1_ov) / 100 if float(s1_ov) > 1 else float(s1_ov)
                 growth_source = "User override"
             else:
                 s1, growth_source = get_forward_growth(stock, info, fcf_series)
-                s1 = min(s1, 0.25)   # hard cap at 25%
+                s1 = min(s1, 0.25)
 
             if s2_ov:
                 s2 = float(s2_ov) / 100 if float(s2_ov) > 1 else float(s2_ov)
             else:
-                s2 = max(s1 * 0.55, tg + 0.005)   # Stage 2 fades to near-terminal
+                s2 = max(s1 * 0.55, tg + 0.005)
 
-            # WACC
             wacc_data = calc_wacc(info, income_stmt, tax_rate, fx_rate)
             wacc      = wacc_data["wacc"]
-            half      = yrs // 2
-            fcf_run   = base_fcf
 
-            # Ensure WACC > terminal growth (Gordon Growth Model requires this)
-            if wacc <= tg:
-                tg = wacc - 0.01
-
-            for y in range(1, yrs + 1):
-                g       = s1 if y <= half else s2
-                fcf_run = fcf_run * (1 + g)
-                pv      = fcf_run / ((1 + wacc) ** y)
-                projected.append({"year": y, "fcf": fcf_run, "pv": pv, "growth": g})
-
-            # Terminal value — Gordon Growth Model on Year-N FCF
-            tv_fcf       = projected[-1]["fcf"] * (1 + tg)
-            terminal_val = tv_fcf / (wacc - tg)
-            pv_terminal  = terminal_val / ((1 + wacc) ** yrs)
+            # ── Base case DCF ─────────────────────────────────────────────────
+            intrinsic_value, projected, enterprise_value, equity_value, pv_terminal = \
+                run_dcf_single(base_fcf, s1, s2, tg, wacc, yrs, info, fx_rate)
 
             total_pv_fcf     = sum(p["pv"] for p in projected)
-            enterprise_value = total_pv_fcf + pv_terminal
-
-            # Convert balance sheet items from reporting → trading currency
-            cash         = (safe(info.get("totalCash"), 0) or 0) * fx_rate
-            debt         = (safe(info.get("totalDebt"), 0) or 0) * fx_rate
-            net_debt     = debt - cash
-            equity_value = enterprise_value - net_debt
-
-            shares = safe(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"), 0) or 0
-            intrinsic_value  = (equity_value / shares) if shares > 0 else None
+            net_debt         = ((safe(info.get("totalDebt"), 0) or 0) - (safe(info.get("totalCash"), 0) or 0)) * fx_rate
             margin_of_safety = ((intrinsic_value - price) / price * 100) if intrinsic_value and price else None
 
             fcf_chart = {
@@ -775,6 +788,59 @@ def analyze():
                     "pvs":    [round(p["pv"]  / 1e9, 2) for p in projected],
                 }
             }
+
+            # ── Scenario analysis (50 / 25 / 25 probability weights) ─────────
+            # Bull case: higher growth, lower WACC, slightly higher terminal growth
+            s1_bull   = min(s1 * 1.5, 0.35)
+            s2_bull   = max(s1_bull * 0.55, tg + 0.01)
+            wacc_bull = max(wacc - 0.015, 0.04)
+            tg_bull   = min(tg + 0.005, 0.04)
+            iv_bull, _, _, _, _ = run_dcf_single(
+                base_fcf, s1_bull, s2_bull, tg_bull, wacc_bull, yrs, info, fx_rate)
+
+            # Bear case: lower growth, higher WACC, lower terminal growth
+            s1_bear   = max(s1 * 0.4, 0.01)
+            s2_bear   = max(s1_bear * 0.55, 0.005)
+            wacc_bear = min(wacc + 0.020, 0.18)
+            tg_bear   = max(tg - 0.01, 0.01)
+            iv_bear, _, _, _, _ = run_dcf_single(
+                base_fcf, s1_bear, s2_bear, tg_bear, wacc_bear, yrs, info, fx_rate)
+
+            # Probability-weighted fair value
+            if all(v is not None for v in [intrinsic_value, iv_bull, iv_bear]):
+                iv_weighted = 0.50 * intrinsic_value + 0.25 * iv_bull + 0.25 * iv_bear
+            else:
+                iv_weighted = intrinsic_value
+
+            # Update primary margin of safety to use weighted value
+            margin_of_safety = ((iv_weighted - price) / price * 100) if iv_weighted and price else None
+
+            scenarios = {
+                "base": {
+                    "value":  round(intrinsic_value, 2) if intrinsic_value else None,
+                    "weight": 50,
+                    "s1":     round(s1 * 100, 2),
+                    "wacc":   round(wacc * 100, 2),
+                    "upside": round((intrinsic_value - price) / price * 100, 1) if intrinsic_value and price else None,
+                },
+                "bull": {
+                    "value":  round(iv_bull, 2) if iv_bull else None,
+                    "weight": 25,
+                    "s1":     round(s1_bull * 100, 2),
+                    "wacc":   round(wacc_bull * 100, 2),
+                    "upside": round((iv_bull - price) / price * 100, 1) if iv_bull and price else None,
+                },
+                "bear": {
+                    "value":  round(iv_bear, 2) if iv_bear else None,
+                    "weight": 25,
+                    "s1":     round(s1_bear * 100, 2),
+                    "wacc":   round(wacc_bear * 100, 2),
+                    "upside": round((iv_bear - price) / price * 100, 1) if iv_bear and price else None,
+                },
+                "weighted": round(iv_weighted, 2) if iv_weighted else None,
+                "weighted_upside": round((iv_weighted - price) / price * 100, 1) if iv_weighted and price else None,
+            }
+            intrinsic_value = round(iv_weighted, 2) if iv_weighted else intrinsic_value
 
         # ── Sector / P/E context notes ────────────────────────────────────────
         pe_ttm   = safe(info.get("trailingPE"))
@@ -855,7 +921,8 @@ def analyze():
             "total_pv_fcf":      total_pv_fcf,
             "terminal_value_pct": round(pv_terminal / enterprise_value * 100, 1)
                                   if enterprise_value and pv_terminal else None,
-            "net_debt":          ((safe(info.get("totalDebt"), 0) or 0) - (safe(info.get("totalCash"), 0) or 0)) * fx_rate,
+            "net_debt":          net_debt if dcf_available else ((safe(info.get("totalDebt"), 0) or 0) - (safe(info.get("totalCash"), 0) or 0)) * fx_rate,
+            "scenarios":         scenarios if dcf_available else None,
             "shares_outstanding": safe(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"), 0),
             "financial_currency": financial_ccy,
             "trading_currency":   trading_ccy,

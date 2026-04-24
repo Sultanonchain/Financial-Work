@@ -184,9 +184,10 @@ function renderResults(d) {
     statItem('Target',       fmtPrice(d.target_price), 'cyan'),
   ].join('');
 
-  // Verdict
-  const iv  = d.intrinsic_value;
+  // Verdict — use probability-weighted fair value
+  const iv  = d.intrinsic_value;   // already set to weighted by backend
   const mos = d.margin_of_safety;
+  const sc  = d.scenarios;
   const card = $('verdictCard');
   card.className = 'verdict-card';
 
@@ -199,10 +200,11 @@ function renderResults(d) {
     card.classList.add('fair');
   } else {
     $('intrinsicValue').textContent = fmtPrice(iv);
+    $('verdictSub').textContent     = '50/25/25 probability-weighted across 3 scenarios';
     let txt = '';
-    if (mos > 15)       { card.classList.add('undervalued'); txt = `${fmtPct(mos)} below intrinsic value — potentially undervalued`; }
-    else if (mos < -15) { card.classList.add('overvalued');  txt = `${fmtPct(Math.abs(mos))} above intrinsic value — potentially overvalued`; }
-    else                { card.classList.add('fair');         txt = 'Trading near estimated intrinsic value'; }
+    if (mos > 15)       { card.classList.add('undervalued'); txt = `${fmtPct(mos)} upside to fair value — potentially undervalued`; }
+    else if (mos < -15) { card.classList.add('overvalued');  txt = `${fmtPct(Math.abs(mos))} above fair value — potentially overvalued`; }
+    else                { card.classList.add('fair');         txt = 'Trading near probability-weighted fair value'; }
     $('verdictSub').textContent = txt;
 
     const color = mos > 15 ? 'var(--green)' : mos < -15 ? 'var(--red)' : 'var(--gold)';
@@ -211,8 +213,11 @@ function renderResults(d) {
     mosEl.style.color  = color;
     $('mosFill').style.width      = Math.min(Math.abs(mos), 100) + '%';
     $('mosFill').style.background = color;
-    $('mosHint').textContent      = mos > 0 ? 'Trading below intrinsic value' : 'Trading above intrinsic value';
+    $('mosHint').textContent      = mos > 0 ? 'Trading below weighted fair value' : 'Trading above weighted fair value';
   }
+
+  // Scenario analysis
+  renderScenarios(sc, d.current_price);
 
   // DCF warning banner + contextual notes
   const warnEl = $('dcfWarning');
@@ -298,6 +303,12 @@ function renderResults(d) {
   renderPriceChart(d.price_history || [], d);
 
   // DCF chart + table
+  if (d.dcf_available && d.fcf_chart && d.scenarios) {
+    show('scenarioCard');
+  } else {
+    hide('scenarioCard');
+  }
+
   if (d.dcf_available && d.fcf_chart) {
     show('dcfChartCard'); show('dcfTableCard');
     renderDcfChart(d);
@@ -305,6 +316,49 @@ function renderResults(d) {
   } else {
     hide('dcfChartCard'); hide('dcfTableCard');
   }
+}
+
+/* ── Scenario Analysis ────────────────────────────────────── */
+function renderScenarios(sc, price) {
+  const el = $('scenarioCard');
+  if (!sc || !el) return;
+
+  function scCard(label, data, cls) {
+    if (!data || data.value == null) return '';
+    const up = data.upside;
+    const upCls = up > 0 ? 'green' : 'red';
+    const upSign = up > 0 ? '+' : '';
+    return `
+      <div class="sc-case sc-${cls}">
+        <div class="sc-label">${label}</div>
+        <div class="sc-weight">${data.weight}% weight</div>
+        <div class="sc-value">${fmtPrice(data.value)}</div>
+        <div class="sc-upside ${upCls}">${upSign}${fmtPct(up)} vs current</div>
+        <div class="sc-assumptions">
+          <span>g₁ ${fmtPct(data.s1)}</span>
+          <span>WACC ${fmtPct(data.wacc)}</span>
+        </div>
+      </div>`;
+  }
+
+  const weightedUpCls = sc.weighted_upside > 0 ? 'green' : 'red';
+  const weightedSign  = sc.weighted_upside > 0 ? '+' : '';
+
+  el.innerHTML = `
+    <div class="sc-header">
+      <h3 class="card-title">Scenario Analysis</h3>
+      <span class="card-sub">50% Base · 25% Bull · 25% Bear</span>
+    </div>
+    <div class="sc-grid">
+      ${scCard('Base Case',    sc.base, 'base')}
+      ${scCard('Bull Case',    sc.bull, 'bull')}
+      ${scCard('Bear Case',    sc.bear, 'bear')}
+    </div>
+    <div class="sc-weighted">
+      <span class="sc-wlabel">Probability-Weighted Fair Value</span>
+      <span class="sc-wvalue">${fmtPrice(sc.weighted)}</span>
+      <span class="sc-wupside ${weightedUpCls}">${weightedSign}${fmtPct(sc.weighted_upside)} potential upside</span>
+    </div>`;
 }
 
 /* ── Stats strip item ─────────────────────────────────────── */
