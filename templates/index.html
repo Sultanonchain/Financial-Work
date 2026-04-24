@@ -3,71 +3,78 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ValuScope — DCF & Financial Analysis</title>
+  <title>ValuScope — DCF & Stock Analyzer</title>
   <link rel="stylesheet" href="/static/css/style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
-<!-- ── HEADER ────────────────────────────────────────────────────── -->
+<!-- ── HEADER ─────────────────────────────────────────────────── -->
 <header class="site-header">
   <div class="header-inner">
     <div class="logo">
       <span class="logo-icon">◈</span>
       <span class="logo-text">ValuScope</span>
-      <span class="logo-tag">DCF Analyzer</span>
     </div>
-    <p class="disclaimer-badge">⚠ Not Financial Advice</p>
+    <span class="disclaimer-badge">⚠ Not Financial Advice</span>
   </div>
 </header>
 
-<!-- ── HERO / SEARCH ─────────────────────────────────────────────── -->
+<!-- ── HERO / SEARCH ──────────────────────────────────────────── -->
 <section class="hero">
   <div class="hero-inner">
     <h1>Intrinsic Value, <span class="accent">Instantly</span></h1>
-    <p class="hero-sub">Enter any stock ticker to run a full DCF valuation and financial deep-dive.</p>
+    <p class="hero-sub">Enter any stock ticker for a live DCF valuation and full financial breakdown.</p>
 
     <div class="search-bar">
-      <input id="tickerInput" type="text" placeholder="e.g. AAPL, MSFT, NVDA, TSLA…"
+      <input id="tickerInput" type="text" placeholder="e.g. AAPL, MSFT, NVDA…"
              autocomplete="off" spellcheck="false" maxlength="10" />
       <button id="analyzeBtn" onclick="runAnalysis()">Analyze</button>
     </div>
 
-    <!-- Advanced toggles -->
     <div class="advanced-toggle" onclick="toggleAdvanced()">
       <span id="advToggleLabel">⚙ Customize assumptions</span>
     </div>
     <div id="advancedPanel" class="advanced-panel hidden">
       <div class="adv-grid">
-        <label>Stage 1 Growth (yrs 1–5)
-          <input id="growth1" type="number" step="0.1" placeholder="auto" />
-          <span class="adv-hint">%</span>
+        <label>Stage 1 Growth (Yrs 1–5)
+          <div class="adv-input-wrap">
+            <input id="growth1" type="number" step="0.1" placeholder="auto" />
+            <span class="adv-unit">%</span>
+          </div>
         </label>
-        <label>Stage 2 Growth (yrs 6–10)
-          <input id="growth2" type="number" step="0.1" placeholder="auto" />
-          <span class="adv-hint">%</span>
+        <label>Stage 2 Growth (Yrs 6–10)
+          <div class="adv-input-wrap">
+            <input id="growth2" type="number" step="0.1" placeholder="auto" />
+            <span class="adv-unit">%</span>
+          </div>
         </label>
         <label>Terminal Growth Rate
-          <input id="terminalGrowth" type="number" step="0.1" value="3.0" />
-          <span class="adv-hint">%</span>
+          <div class="adv-input-wrap">
+            <input id="terminalGrowth" type="number" step="0.1" value="3.0" />
+            <span class="adv-unit">%</span>
+          </div>
         </label>
         <label>Projection Years
-          <input id="projYears" type="number" step="1" value="10" min="5" max="15" />
-          <span class="adv-hint">yrs</span>
+          <div class="adv-input-wrap">
+            <input id="projYears" type="number" step="1" value="10" min="5" max="15" />
+            <span class="adv-unit">yrs</span>
+          </div>
         </label>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ── LOADING ───────────────────────────────────────────────────── -->
+<!-- ── LOADING ────────────────────────────────────────────────── -->
 <div id="loadingState" class="loading-state hidden">
   <div class="spinner"></div>
-  <p>Fetching data for <span id="loadingTicker"></span>…</p>
+  <p>Fetching live data for <strong id="loadingTicker"></strong>…</p>
 </div>
 
-<!-- ── ERROR ─────────────────────────────────────────────────────── -->
+<!-- ── ERROR ──────────────────────────────────────────────────── -->
 <div id="errorState" class="error-state hidden">
   <div class="error-box">
     <span class="error-icon">✕</span>
@@ -75,7 +82,7 @@
   </div>
 </div>
 
-<!-- ── RESULTS ───────────────────────────────────────────────────── -->
+<!-- ── RESULTS ────────────────────────────────────────────────── -->
 <main id="results" class="results hidden">
 
   <!-- Company header -->
@@ -85,105 +92,96 @@
       <div class="company-meta">
         <span id="tickerBadge" class="badge badge-blue"></span>
         <span id="sectorBadge" class="badge badge-gray"></span>
-        <span id="exchangeBadge" class="badge badge-gray"></span>
+        <span id="industryBadge" class="badge badge-gray"></span>
       </div>
     </div>
     <div class="price-block">
       <div class="current-price" id="currentPrice"></div>
-      <div class="price-range" id="priceRange"></div>
+      <div class="price-meta" id="priceMeta"></div>
     </div>
   </div>
 
-  <!-- ── DCF VERDICT ──────────────────────────────────────────────── -->
-  <section class="verdict-section">
-    <div class="verdict-card" id="verdictCard">
-      <div class="verdict-left">
-        <div class="verdict-label">DCF Intrinsic Value</div>
-        <div class="verdict-value" id="intrinsicValue"></div>
-        <div class="verdict-sub" id="verdictSub"></div>
-      </div>
-      <div class="verdict-divider"></div>
-      <div class="verdict-right">
-        <div class="mos-label">Margin of Safety</div>
-        <div class="mos-value" id="mosValue"></div>
-        <div class="mos-bar-wrap"><div class="mos-bar" id="mosBar"></div></div>
-      </div>
+  <!-- ── VERDICT ─────────────────────────────────────────────── -->
+  <div class="verdict-card" id="verdictCard">
+    <div class="verdict-section-left">
+      <div class="verdict-label">DCF Intrinsic Value</div>
+      <div class="verdict-value" id="intrinsicValue"></div>
+      <div class="verdict-sub" id="verdictSub"></div>
     </div>
-  </section>
+    <div class="verdict-divider"></div>
+    <div class="verdict-section-right">
+      <div class="mos-label">Margin of Safety</div>
+      <div class="mos-value" id="mosValue"></div>
+      <div class="mos-track"><div class="mos-fill" id="mosFill"></div></div>
+      <div class="mos-hint" id="mosHint"></div>
+    </div>
+  </div>
 
-  <!-- ── METRICS GRID ──────────────────────────────────────────────── -->
-  <section class="metrics-section">
+  <!-- ── STOCK PRICE CHART ───────────────────────────────────── -->
+  <div class="card chart-card">
+    <div class="card-header">
+      <h3 class="card-title">1-Year Price Chart</h3>
+      <span class="card-sub" id="priceChartSub"></span>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="priceChart"></canvas>
+    </div>
+  </div>
 
-    <!-- Valuation -->
+  <!-- ── METRICS GRID ───────────────────────────────────────── -->
+  <div class="metrics-grid">
     <div class="card">
       <h3 class="card-title">Valuation Multiples</h3>
       <div class="metric-list" id="valuationMetrics"></div>
     </div>
-
-    <!-- DCF Assumptions -->
     <div class="card">
       <h3 class="card-title">DCF Assumptions</h3>
       <div class="metric-list" id="dcfAssumptions"></div>
     </div>
-
-    <!-- Financials -->
     <div class="card">
       <h3 class="card-title">Financials</h3>
       <div class="metric-list" id="financialMetrics"></div>
     </div>
-
-    <!-- Health -->
     <div class="card">
       <h3 class="card-title">Financial Health</h3>
       <div class="metric-list" id="healthMetrics"></div>
     </div>
+  </div>
 
-  </section>
-
-  <!-- ── FCF PROJECTION TABLE ──────────────────────────────────────── -->
-  <section class="table-section">
-    <div class="card full-width">
-      <h3 class="card-title">FCF Projection &amp; Discounted Cash Flows</h3>
-      <div class="table-scroll">
-        <table id="projectionTable">
-          <thead>
-            <tr>
-              <th>Year</th>
-              <th>Stage</th>
-              <th>Growth Rate</th>
-              <th>Projected FCF</th>
-              <th>Present Value</th>
-            </tr>
-          </thead>
-          <tbody id="projectionBody"></tbody>
-          <tfoot id="projectionFoot"></tfoot>
-        </table>
-      </div>
+  <!-- ── DCF CHART ──────────────────────────────────────────── -->
+  <div class="card chart-card">
+    <div class="card-header">
+      <h3 class="card-title">DCF — Projected vs. Discounted FCF</h3>
+      <span class="card-sub">Billions (USD)</span>
     </div>
-  </section>
-
-  <!-- ── DCF BRIDGE ────────────────────────────────────────────────── -->
-  <section class="bridge-section">
-    <div class="card full-width">
-      <h3 class="card-title">Equity Value Bridge</h3>
-      <div id="bridgeChart" class="bridge-chart"></div>
+    <div class="chart-wrap chart-wrap--tall">
+      <canvas id="dcfChart"></canvas>
     </div>
-  </section>
+  </div>
 
-  <!-- ── HISTORICAL FCF ────────────────────────────────────────────── -->
-  <section class="hist-section">
-    <div class="card full-width">
-      <h3 class="card-title">Historical Free Cash Flow</h3>
-      <div id="histChart" class="hist-chart"></div>
+  <!-- ── PROJECTION TABLE ───────────────────────────────────── -->
+  <div class="card">
+    <h3 class="card-title">Full DCF Projection</h3>
+    <div class="table-scroll">
+      <table id="projectionTable">
+        <thead>
+          <tr>
+            <th>Year</th><th>Stage</th><th>Growth</th>
+            <th>Projected FCF</th><th>Present Value</th>
+          </tr>
+        </thead>
+        <tbody id="projectionBody"></tbody>
+        <tfoot id="projectionFoot"></tfoot>
+      </table>
     </div>
-  </section>
+  </div>
 
 </main>
 
-<!-- ── DISCLAIMER FOOTER ──────────────────────────────────────────── -->
+<!-- ── FOOTER ─────────────────────────────────────────────────── -->
 <footer class="site-footer">
-  <p>⚠ <strong>Not Financial Advice.</strong> ValuScope is an educational tool only. All valuations are model-based estimates and may be materially wrong. Always do your own due diligence before making any investment decisions. Past performance is not indicative of future results. Consult a licensed financial advisor.</p>
-  <p class="footer-sub">Data sourced from Yahoo Finance via yfinance. ValuScope © 2025</p>
+  <p>⚠ <strong>Not Financial Advice.</strong> ValuScope is an educational tool only. All valuations are model-based estimates and may be materially wrong. Always conduct your own due diligence before making investment decisions. Past performance is not indicative of future results. Consult a licensed financial advisor.</p>
+  <p class="footer-sub">Data sourced live from Yahoo Finance via yfinance &nbsp;·&nbsp; ValuScope © 2025</p>
 </footer>
 
 <script src="/static/js/main.js"></script>
