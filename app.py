@@ -2,305 +2,407 @@ from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
 import yfinance as yf
 import numpy as np
+import pandas as pd
+import requests
 import traceback
 
 app = Flask(__name__)
 CORS(app)
 
-RISK_FREE_RATE = 0.045
-EQUITY_RISK_PREMIUM = 0.055
+RISK_FREE_RATE    = 0.045
+EQUITY_RISK_PREM  = 0.055
+
+PERIOD_MAP = {
+    "1d":  ("1d",  "5m"),
+    "5d":  ("5d",  "30m"),
+    "1m":  ("1mo", "1d"),
+    "3m":  ("3mo", "1d"),
+    "6m":  ("6mo", "1d"),
+    "ytd": ("ytd", "1d"),
+    "1y":  ("1y",  "1d"),
+    "5y":  ("5y",  "1wk"),
+}
 
 
-def safe_float(val, default=None):
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+def safe(val, default=None):
     try:
-        if val is None:
-            return default
         f = float(val)
         return None if (np.isnan(f) or np.isinf(f)) else f
     except Exception:
         return default
 
 
-def clean_nan(v):
-    """Recursively replace NaN/Inf with None so JSON stays valid."""
+def clean(v):
     if isinstance(v, float) and (np.isnan(v) or np.isinf(v)):
         return None
     if isinstance(v, list):
-        return [clean_nan(i) for i in v]
+        return [clean(i) for i in v]
     if isinstance(v, dict):
-        return {k: clean_nan(val) for k, val in v.items()}
+        return {k: clean(x) for k, x in v.items()}
     return v
 
 
-def calculate_wacc(info, income_stmt):
-    beta = safe_float(info.get("beta"), 1.0)
-    if not beta or beta <= 0:
-        beta = 1.0
+def fmt_num(v):
+    """Format large numbers for display."""
+    if v is None or (isinstance(v, float) and np.isnan(v)):
+        return None
+    v = float(v)
+    return round(v, 2)
+
+
+# ── WACC ───────────────────────────────────────────────────────────────────────
+
+def calc_wacc(info, income_stmt):
+    beta = safe(info.get("beta"), 1.0) or 1.0
     beta = min(max(beta, 0.3), 3.0)
+    coe  = RISK_FREE_RATE + beta * EQUITY_RISK_PREM
 
-    cost_of_equity = RISK_FREE_RATE + beta * EQUITY_RISK_PREMIUM
-
-    cost_of_debt = 0.05
+    cod = 0.05
     try:
-        interest_exp = None
+        iexp = None
         if income_stmt is not None and not income_stmt.empty:
-            for label in ["Interest Expense", "Interest Expense Non Operating"]:
-                if label in income_stmt.index:
-                    v = safe_float(income_stmt.loc[label].iloc[0])
+            for lbl in ["Interest Expense", "Interest Expense Non Operating"]:
+                if lbl in income_stmt.index:
+                    v = safe(income_stmt.loc[lbl].iloc[0])
                     if v is not None:
-                        interest_exp = abs(v)
-                        break
-        total_debt = safe_float(info.get("totalDebt"), 0) or 0
-        if interest_exp and total_debt > 0:
-            cd = interest_exp / total_debt
-            if not np.isnan(cd) and not np.isinf(cd):
-                cost_of_debt = min(max(cd, 0.02), 0.15)
+                        iexp = abs(v); break
+        debt = safe(info.get("totalDebt"), 0) or 0
+        if iexp and debt > 0:
+            c = iexp / debt
+            if not (np.isnan(c) or np.isinf(c)):
+                cod = min(max(c, 0.02), 0.15)
     except Exception:
         pass
 
-    tax_rate = safe_float(info.get("effectiveTaxRate"), 0.21) or 0.21
-    tax_rate = min(max(tax_rate, 0.05), 0.40)
+    tax  = safe(info.get("effectiveTaxRate"), 0.21) or 0.21
+    tax  = min(max(tax, 0.05), 0.40)
+    mcap = safe(info.get("marketCap"), 0) or 0
+    debt = safe(info.get("totalDebt"), 0) or 0
+    tc   = mcap + debt
+    we, wd = (mcap/tc, debt/tc) if tc > 0 else (0.8, 0.2)
 
-    market_cap = safe_float(info.get("marketCap"), 0) or 0
-    total_debt = safe_float(info.get("totalDebt"), 0) or 0
-    total_capital = market_cap + total_debt
-
-    if total_capital > 0:
-        we = market_cap / total_capital
-        wd = total_debt / total_capital
-    else:
-        we, wd = 0.8, 0.2
-
-    wacc = we * cost_of_equity + wd * cost_of_debt * (1 - tax_rate)
-    if wacc is None or np.isnan(wacc) or np.isinf(wacc):
-        wacc = cost_of_equity
-    wacc = min(max(wacc, 0.05), 0.20)
-
-    return {
-        "wacc": wacc,
-        "cost_of_equity": cost_of_equity,
-        "cost_of_debt": cost_of_debt,
-        "tax_rate": tax_rate,
-        "beta": beta,
-        "weight_equity": we,
-        "weight_debt": wd,
-    }
+    wacc = we * coe + wd * cod * (1 - tax)
+    if not wacc or np.isnan(wacc): wacc = coe
+    return {"wacc": min(max(wacc, 0.05), 0.20), "coe": coe, "cod": cod,
+            "tax": tax, "beta": beta, "we": we, "wd": wd}
 
 
-def get_fcf_series(cashflow):
+# ── FCF series ─────────────────────────────────────────────────────────────────
+
+def get_fcf(cashflow):
     if cashflow is None or cashflow.empty:
         return []
     try:
         if "Free Cash Flow" in cashflow.index:
             vals = cashflow.loc["Free Cash Flow"].values
         else:
-            ocf_key = next((k for k in cashflow.index if "Operating" in k and "Cash" in k), None)
-            capex_key = next((k for k in cashflow.index if "Capital Expenditure" in k or "Capex" in k), None)
-            if ocf_key:
-                ocf = cashflow.loc[ocf_key].values
-                capex = cashflow.loc[capex_key].values if capex_key else np.zeros(len(ocf))
-                vals = ocf + capex
-            else:
+            ok  = next((k for k in cashflow.index if "Operating" in k and "Cash" in k), None)
+            ck  = next((k for k in cashflow.index if "Capital Expenditure" in k), None)
+            if not ok:
                 return []
+            ocf  = cashflow.loc[ok].values
+            capx = cashflow.loc[ck].values if ck else np.zeros(len(ocf))
+            vals = ocf + capx
         return [float(v) for v in vals if v is not None and not np.isnan(float(v))]
     except Exception:
         return []
 
+
+# ── Format a DataFrame as a list of {label, values…} rows ─────────────────────
+
+def df_to_rows(df, max_rows=35):
+    """df should have dates as columns and line items as index (yfinance default)."""
+    if df is None or df.empty:
+        return {"columns": [], "rows": []}
+    try:
+        # Format column dates cleanly (strip time component)
+        cols = []
+        for c in df.columns:
+            if hasattr(c, 'strftime'):
+                cols.append(c.strftime('%Y-%m-%d'))
+            else:
+                s = str(c)
+                cols.append(s[:10] if len(s) > 10 else s)
+
+        rows = []
+        for label, series in df.iterrows():
+            vals = []
+            for v in series.values:
+                try:
+                    f = float(v)
+                    vals.append(None if np.isnan(f) or np.isinf(f) else round(f, 0))
+                except Exception:
+                    vals.append(None)
+            rows.append({"label": str(label), "values": vals})
+        return {"columns": cols, "rows": rows[:max_rows]}
+    except Exception:
+        return {"columns": [], "rows": []}
+
+
+# ── Routes ─────────────────────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
     return render_template("index.html")
 
 
-@app.route("/api/analyze", methods=["GET"])
-def analyze():
+@app.route("/api/search")
+def search():
+    q = request.args.get("q", "").strip()
+    if not q or len(q) < 1:
+        return jsonify([])
+    try:
+        url = f"https://query2.finance.yahoo.com/v1/finance/search?q={q}&quotesCount=7&newsCount=0&listsCount=0"
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+        data = r.json()
+        results = []
+        for item in data.get("quotes", []):
+            qtype = item.get("quoteType", "")
+            if qtype not in ("EQUITY", "ETF"):
+                continue
+            results.append({
+                "symbol":   item.get("symbol", ""),
+                "name":     item.get("longname") or item.get("shortname", ""),
+                "exchange": item.get("exchDisp", ""),
+                "type":     qtype,
+            })
+        return jsonify(results[:6])
+    except Exception:
+        return jsonify([])
+
+
+@app.route("/api/history")
+def history():
     ticker = request.args.get("ticker", "").strip().upper()
+    period = request.args.get("period", "1y").lower()
+    if not ticker:
+        return jsonify({"error": "ticker required"}), 400
+
+    yf_period, yf_interval = PERIOD_MAP.get(period, ("1y", "1d"))
+    try:
+        stock = yf.Ticker(ticker)
+        hist  = stock.history(period=yf_period, interval=yf_interval)
+        if hist.empty:
+            return jsonify({"prices": []})
+
+        is_intraday = yf_interval in ("5m", "30m")
+        prices = []
+        for idx, row in hist.iterrows():
+            if is_intraday:
+                label = idx.strftime("%m/%d %H:%M")
+            else:
+                label = str(idx.date())
+            prices.append({"date": label, "close": round(float(row["Close"]), 2),
+                           "open": round(float(row["Open"]), 2),
+                           "high": round(float(row["High"]), 2),
+                           "low":  round(float(row["Low"]), 2),
+                           "volume": int(row["Volume"]) if not np.isnan(float(row["Volume"])) else 0})
+        return jsonify({"prices": prices, "period": period})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/statements")
+def statements():
+    ticker = request.args.get("ticker", "").strip().upper()
+    if not ticker:
+        return jsonify({"error": "ticker required"}), 400
+    try:
+        stock = yf.Ticker(ticker)
+
+        def safe_df(df):
+            # yfinance returns df with dates as columns, items as index — use as-is
+            return df_to_rows(df)
+
+        return jsonify(clean({
+            "income":  safe_df(stock.income_stmt),
+            "balance": safe_df(stock.balance_sheet),
+            "cashflow":safe_df(stock.cashflow),
+        }))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/analyze")
+def analyze():
+    ticker  = request.args.get("ticker", "").strip().upper()
     if not ticker:
         return jsonify({"error": "Ticker is required"}), 400
 
     try:
-        stage1_growth_override = request.args.get("growth1")
-        stage2_growth_override = request.args.get("growth2")
-        terminal_growth = float(request.args.get("terminal", 0.03))
-        projection_years = int(request.args.get("years", 10))
-        terminal_growth = min(max(terminal_growth, 0.01), 0.05)
-        projection_years = min(max(projection_years, 5), 15)
+        s1_ov   = request.args.get("growth1")
+        s2_ov   = request.args.get("growth2")
+        tg      = float(request.args.get("terminal", 0.03))
+        yrs     = int(request.args.get("years", 10))
+        tg      = min(max(tg, 0.01), 0.05)
+        yrs     = min(max(yrs, 5), 15)
 
-        stock = yf.Ticker(ticker)
-        info = stock.info
+        stock   = yf.Ticker(ticker)
+        info    = stock.info
+        price   = safe(info.get("currentPrice") or info.get("regularMarketPrice"), 0)
 
-        current_price = safe_float(info.get("currentPrice") or info.get("regularMarketPrice"), 0)
-        if not current_price:
-            return jsonify({"error": f"Could not find data for '{ticker}'. Check the symbol and try again."}), 404
+        if not price:
+            return jsonify({"error": f"No data for '{ticker}'. Check the symbol."}), 404
 
-        cashflow = stock.cashflow
+        cashflow    = stock.cashflow
         income_stmt = stock.income_stmt
 
-        # ── Historical price data (1 year, weekly) ─────────────────────────
+        # ── 1Y price history ───────────────────────────────────────────────────
         hist = stock.history(period="1y", interval="1d")
         price_history = []
         if not hist.empty:
-            price_history = [
-                {"date": str(idx.date()), "close": round(float(row["Close"]), 2)}
-                for idx, row in hist.iterrows()
-            ]
+            price_history = [{"date": str(i.date()), "close": round(float(r["Close"]), 2)}
+                             for i, r in hist.iterrows()]
 
-        # ── FCF ────────────────────────────────────────────────────────────
-        fcf_values = get_fcf_series(cashflow)
-        if not fcf_values:
-            return jsonify({"error": "No Free Cash Flow data available. This ticker may not have financial statements (ETFs, indices, etc.)."}), 422
+        # ── FCF ────────────────────────────────────────────────────────────────
+        fcf_vals = get_fcf(cashflow)
+        dcf_available = bool(fcf_vals) and fcf_vals[0] > 0
 
-        base_fcf = fcf_values[0]
+        intrinsic_value  = None
+        margin_of_safety = None
+        projected        = []
+        enterprise_value = None
+        equity_value     = None
+        pv_terminal      = None
+        total_pv_fcf     = None
+        fcf_chart        = None
+        s1 = s2          = None
+        wacc_data        = {}
+        dcf_warning      = None
 
-        positive = [f for f in fcf_values if f > 0]
-        if len(positive) >= 2:
-            years_span = len(positive) - 1
-            hist_growth = (positive[0] / positive[-1]) ** (1 / years_span) - 1
-            hist_growth = min(max(hist_growth, -0.30), 0.50)
+        if not fcf_vals:
+            dcf_warning = "No Free Cash Flow data available — DCF not computed."
+        elif fcf_vals[0] <= 0:
+            dcf_warning = f"Most recent FCF is negative (${fcf_vals[0]/1e9:.1f}B) — DCF intrinsic value is unreliable for this company. Showing multiples-based analysis only."
         else:
-            hist_growth = 0.07
+            base_fcf = fcf_vals[0]
+            positive = [f for f in fcf_vals if f > 0]
+            if len(positive) >= 2:
+                span = len(positive) - 1
+                hg   = (positive[0] / positive[-1]) ** (1/span) - 1
+                hg   = min(max(hg, -0.30), 0.50)
+            else:
+                hg = 0.07
 
-        analyst_growth = safe_float(info.get("earningsGrowth") or info.get("revenueGrowth"))
+            ag = safe(info.get("earningsGrowth") or info.get("revenueGrowth"))
+            s1 = float(s1_ov) if s1_ov else (ag if ag and -0.3 < ag < 0.5 else min(hg, 0.25))
+            s2 = float(s2_ov) if s2_ov else max(s1 * 0.5, tg + 0.01)
 
-        if stage1_growth_override is not None:
-            s1 = float(stage1_growth_override)
-        else:
-            s1 = analyst_growth if analyst_growth and -0.3 < analyst_growth < 0.5 else min(hist_growth, 0.25)
+            wacc_data = calc_wacc(info, income_stmt)
+            wacc      = wacc_data["wacc"]
+            half      = yrs // 2
+            fcf       = base_fcf
 
-        if stage2_growth_override is not None:
-            s2 = float(stage2_growth_override)
-        else:
-            s2 = max(s1 * 0.5, terminal_growth + 0.01)
+            for y in range(1, yrs + 1):
+                g   = s1 if y <= half else s2
+                fcf = fcf * (1 + g)
+                pv  = fcf / ((1 + wacc) ** y)
+                projected.append({"year": y, "fcf": fcf, "pv": pv, "growth": g})
 
-        # ── WACC ───────────────────────────────────────────────────────────
-        wacc_data = calculate_wacc(info, income_stmt)
-        wacc = wacc_data["wacc"]
+            tv_fcf       = projected[-1]["fcf"] * (1 + tg)
+            tv           = tv_fcf / (wacc - tg)
+            pv_terminal  = tv / ((1 + wacc) ** yrs)
+            total_pv_fcf = sum(p["pv"] for p in projected)
+            enterprise_value = total_pv_fcf + pv_terminal
 
-        # ── DCF projection ─────────────────────────────────────────────────
-        half = projection_years // 2
-        projected = []
-        fcf = base_fcf
+            cash         = safe(info.get("totalCash"), 0) or 0
+            debt         = safe(info.get("totalDebt"), 0) or 0
+            net_debt     = debt - cash
+            equity_value = enterprise_value - net_debt
+            shares       = safe(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"), 0) or 0
+            intrinsic_value  = (equity_value / shares) if shares > 0 else None
+            margin_of_safety = ((intrinsic_value - price) / price * 100) if intrinsic_value and price else None
 
-        for y in range(1, projection_years + 1):
-            g = s1 if y <= half else s2
-            fcf = fcf * (1 + g)
-            pv = fcf / ((1 + wacc) ** y)
-            projected.append({"year": y, "fcf": fcf, "pv": pv, "growth": g})
-
-        terminal_fcf = projected[-1]["fcf"] * (1 + terminal_growth)
-        terminal_value = terminal_fcf / (wacc - terminal_growth)
-        pv_terminal = terminal_value / ((1 + wacc) ** projection_years)
-
-        total_pv_fcf = sum(p["pv"] for p in projected)
-        enterprise_value = total_pv_fcf + pv_terminal
-
-        cash = safe_float(info.get("totalCash"), 0) or 0
-        debt = safe_float(info.get("totalDebt"), 0) or 0
-        net_debt = debt - cash
-        equity_value = enterprise_value - net_debt
-
-        shares = safe_float(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"), 0) or 0
-        intrinsic_value = (equity_value / shares) if shares > 0 else 0
-
-        margin_of_safety = (
-            ((intrinsic_value - current_price) / current_price * 100)
-            if current_price and current_price > 0 else None
-        )
-
-        def pct(val):
-            v = safe_float(val)
-            return round(v * 100, 2) if v is not None else None
-
-        def fmt(val, digits=2):
-            v = safe_float(val)
-            return round(v, digits) if v is not None else None
-
-        # ── FCF chart data (labels + values) ───────────────────────────────
-        fcf_chart = {
-            "historical": {
-                "labels": [f"FY-{i}" if i > 0 else "TTM" for i in range(len(fcf_values[:5]))],
-                "values": [round(v / 1e9, 2) for v in fcf_values[:5]],
-            },
-            "projected": {
-                "labels": [f"Y{p['year']}" for p in projected],
-                "values": [round(p["fcf"] / 1e9, 2) for p in projected],
-                "pvs":    [round(p["pv"]  / 1e9, 2) for p in projected],
+            fcf_chart = {
+                "projected": {
+                    "labels": [f"Y{p['year']}" for p in projected],
+                    "values": [round(p["fcf"]/1e9, 2) for p in projected],
+                    "pvs":    [round(p["pv"]/1e9, 2)  for p in projected],
+                }
             }
-        }
+
+        def pct(v):
+            x = safe(v); return round(x*100, 2) if x is not None else None
+        def f2(v, d=2):
+            x = safe(v); return round(x, d)     if x is not None else None
 
         result = {
-            "ticker": ticker,
-            "company_name": info.get("longName", ticker),
-            "sector": info.get("sector", "N/A"),
-            "industry": info.get("industry", "N/A"),
-            "currency": info.get("currency", "USD"),
-            "exchange": info.get("exchange", ""),
-            # Price & history
-            "current_price": fmt(current_price),
-            "52w_high": fmt(info.get("fiftyTwoWeekHigh")),
-            "52w_low": fmt(info.get("fiftyTwoWeekLow")),
-            "target_price": fmt(info.get("targetMeanPrice")),
+            "ticker":        ticker,
+            "company_name":  info.get("longName", ticker),
+            "sector":        info.get("sector", "N/A"),
+            "industry":      info.get("industry", "N/A"),
+            "currency":      info.get("currency", "USD"),
+            "exchange":      info.get("exchange", ""),
+            "description":   info.get("longBusinessSummary", ""),
+            # Price
+            "current_price": f2(price),
+            "52w_high":      f2(info.get("fiftyTwoWeekHigh")),
+            "52w_low":       f2(info.get("fiftyTwoWeekLow")),
+            "target_price":  f2(info.get("targetMeanPrice")),
             "price_history": price_history,
-            # DCF output
-            "intrinsic_value": round(intrinsic_value, 2),
-            "margin_of_safety": round(margin_of_safety, 1) if margin_of_safety is not None else None,
-            "enterprise_value": enterprise_value,
-            "equity_value": equity_value,
-            "pv_terminal": pv_terminal,
-            "total_pv_fcf": total_pv_fcf,
-            "terminal_value_pct": round(pv_terminal / enterprise_value * 100, 1) if enterprise_value else None,
-            # DCF assumptions
-            "wacc": round(wacc * 100, 2),
-            "cost_of_equity": round(wacc_data["cost_of_equity"] * 100, 2),
-            "cost_of_debt": round(wacc_data["cost_of_debt"] * 100, 2),
-            "tax_rate": round(wacc_data["tax_rate"] * 100, 1),
-            "beta": round(wacc_data["beta"], 2),
-            "stage1_growth": round(s1 * 100, 2),
-            "stage2_growth": round(s2 * 100, 2),
-            "terminal_growth": round(terminal_growth * 100, 2),
-            "projection_years": projection_years,
-            # FCF data
-            "base_fcf": base_fcf,
-            "historical_fcf": fcf_values[:5],
-            "historical_growth": round(hist_growth * 100, 2),
-            "projected_fcf": projected,
-            "net_debt": net_debt,
-            "shares_outstanding": shares,
-            "fcf_chart": fcf_chart,
-            # Valuation multiples
-            "market_cap": fmt(info.get("marketCap")),
-            "pe_ratio": fmt(info.get("trailingPE")),
-            "forward_pe": fmt(info.get("forwardPE")),
-            "ps_ratio": fmt(info.get("priceToSalesTrailing12Months")),
-            "pb_ratio": fmt(info.get("priceToBook")),
-            "ev_ebitda": fmt(info.get("enterpriseToEbitda")),
-            "ev_revenue": fmt(info.get("enterpriseToRevenue")),
+            # Key stats for strip
+            "pe_ratio":      f2(info.get("trailingPE")),
+            "forward_pe":    f2(info.get("forwardPE")),
+            "eps":           f2(info.get("trailingEps")),
+            "market_cap":    f2(info.get("marketCap")),
+            "volume":        safe(info.get("volume")),
+            "avg_volume":    safe(info.get("averageVolume")),
+            "dividend_yield":pct(info.get("dividendYield")),
+            # DCF
+            "dcf_available":     dcf_available,
+            "dcf_warning":       dcf_warning,
+            "intrinsic_value":   round(intrinsic_value, 2) if intrinsic_value else None,
+            "margin_of_safety":  round(margin_of_safety, 1) if margin_of_safety is not None else None,
+            "enterprise_value":  enterprise_value,
+            "equity_value":      equity_value,
+            "pv_terminal":       pv_terminal,
+            "total_pv_fcf":      total_pv_fcf,
+            "terminal_value_pct":round(pv_terminal/enterprise_value*100,1) if enterprise_value and pv_terminal else None,
+            "net_debt":          (safe(info.get("totalDebt"),0) or 0) - (safe(info.get("totalCash"),0) or 0),
+            "shares_outstanding":safe(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"), 0),
+            "wacc":          round(wacc_data.get("wacc",0)*100, 2) if wacc_data else None,
+            "cost_of_equity":round(wacc_data.get("coe", 0)*100,  2) if wacc_data else None,
+            "cost_of_debt":  round(wacc_data.get("cod", 0)*100,  2) if wacc_data else None,
+            "tax_rate":      round(wacc_data.get("tax", 0)*100,  1) if wacc_data else None,
+            "beta":          round(wacc_data.get("beta",1.0),    2) if wacc_data else None,
+            "stage1_growth": round(s1*100, 2) if s1 is not None else None,
+            "stage2_growth": round(s2*100, 2) if s2 is not None else None,
+            "terminal_growth":round(tg*100, 2),
+            "projection_years": yrs,
+            "base_fcf":       fcf_vals[0] if fcf_vals else None,
+            "historical_fcf": fcf_vals[:5],
+            "projected_fcf":  projected,
+            "fcf_chart":      fcf_chart,
+            # Multiples
+            "ps_ratio":      f2(info.get("priceToSalesTrailing12Months")),
+            "pb_ratio":      f2(info.get("priceToBook")),
+            "ev_ebitda":     f2(info.get("enterpriseToEbitda")),
+            "ev_revenue":    f2(info.get("enterpriseToRevenue")),
             # Financials
-            "revenue": fmt(info.get("totalRevenue")),
-            "ebitda": fmt(info.get("ebitda")),
-            "profit_margin": pct(info.get("profitMargins")),
-            "operating_margin": pct(info.get("operatingMargins")),
-            "gross_margin": pct(info.get("grossMargins")),
-            "revenue_growth": pct(info.get("revenueGrowth")),
-            "earnings_growth": pct(info.get("earningsGrowth")),
-            # Balance sheet
-            "total_cash": fmt(info.get("totalCash")),
-            "total_debt": fmt(info.get("totalDebt")),
-            "debt_to_equity": fmt(info.get("debtToEquity")),
-            "current_ratio": fmt(info.get("currentRatio")),
-            "quick_ratio": fmt(info.get("quickRatio")),
-            # Returns
-            "roe": pct(info.get("returnOnEquity")),
-            "roa": pct(info.get("returnOnAssets")),
-            # Dividends
-            "dividend_yield": pct(info.get("dividendYield")),
-            "payout_ratio": pct(info.get("payoutRatio")),
+            "revenue":           f2(info.get("totalRevenue")),
+            "ebitda":            f2(info.get("ebitda")),
+            "gross_margin":      pct(info.get("grossMargins")),
+            "operating_margin":  pct(info.get("operatingMargins")),
+            "profit_margin":     pct(info.get("profitMargins")),
+            "revenue_growth":    pct(info.get("revenueGrowth")),
+            "earnings_growth":   pct(info.get("earningsGrowth")),
+            "roe":               pct(info.get("returnOnEquity")),
+            "roa":               pct(info.get("returnOnAssets")),
+            # Health
+            "total_cash":    f2(info.get("totalCash")),
+            "total_debt":    f2(info.get("totalDebt")),
+            "current_ratio": f2(info.get("currentRatio")),
+            "quick_ratio":   f2(info.get("quickRatio")),
+            "debt_to_equity":f2(info.get("debtToEquity")),
+            "payout_ratio":  pct(info.get("payoutRatio")),
             # Analyst
-            "analyst_rating": info.get("recommendationKey", "N/A"),
+            "analyst_rating":info.get("recommendationKey","N/A"),
             "analyst_count": info.get("numberOfAnalystOpinions"),
         }
 
-        return jsonify(clean_nan(result))
+        return jsonify(clean(result))
 
     except Exception as e:
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
