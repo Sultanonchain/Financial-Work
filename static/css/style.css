@@ -612,6 +612,60 @@ tfoot td:first-child { text-align: left; position: sticky; left: 0; }
 }
 .multiples-badge-text strong { color: var(--gold); font-weight: 600; }
 
+/* ── Live Analyst Notes (Discovery Layer) ─────────────────── */
+.live-catalyst-box {
+  background: linear-gradient(135deg, rgba(30,42,60,0.95), rgba(18,28,42,0.98));
+  border: 1px solid rgba(91,141,184,0.30);
+  border-left: 3px solid var(--cyan);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  margin-bottom: 12px;
+}
+.catalyst-header {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+}
+.catalyst-icon  { font-size: 16px; color: var(--cyan); flex-shrink: 0; }
+.catalyst-title {
+  font-size: 13px; font-weight: 700; color: var(--cyan); letter-spacing: 0.3px;
+}
+.catalyst-sub {
+  font-size: 10px; color: var(--muted2); font-family: var(--mono);
+  text-transform: uppercase; letter-spacing: 0.5px; margin-left: auto;
+}
+.catalyst-bullets {
+  list-style: none; padding: 0; margin: 0 0 12px 0;
+  display: flex; flex-direction: column; gap: 7px;
+}
+.catalyst-bullet {
+  font-size: 12px; color: var(--text); line-height: 1.55;
+  padding-left: 14px; position: relative;
+}
+.catalyst-bullet::before {
+  content: "▸"; position: absolute; left: 0;
+  color: var(--cyan); font-size: 10px; top: 1px;
+}
+/* Flags strip */
+.cat-flags {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;
+}
+.cat-flag {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.4px;
+  padding: 3px 8px; border-radius: 4px; font-family: var(--mono);
+  white-space: nowrap;
+}
+.cat-flag--catalyst {
+  background: rgba(80,180,80,0.12); color: #78c878;
+  border: 1px solid rgba(80,180,80,0.30);
+}
+.cat-flag--risk {
+  background: var(--red-dim); color: var(--red);
+  border: 1px solid rgba(224,84,105,0.30);
+}
+.cat-flag--moat {
+  background: rgba(196,154,60,0.10); color: var(--gold);
+  border: 1px solid rgba(196,154,60,0.30);
+}
+
 /* ── Utility ───────────────────────────────────────────────── */
 .hidden { display: none !important; }
 

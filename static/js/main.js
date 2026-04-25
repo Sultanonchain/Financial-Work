@@ -302,6 +302,9 @@ function renderResults(d) {
   if (warnHtml) { warnEl.innerHTML = warnHtml; warnEl.classList.remove('hidden'); }
   else          { warnEl.classList.add('hidden'); }
 
+  // ── Live Analyst Notes (Discovery Layer) ──────────────────────────────────
+  renderCatalystBox(d);
+
   // Valuation multiples
   $('valuationMetrics').innerHTML = [
     row('Market Cap',     fmtBig(d.market_cap)),
@@ -335,6 +338,10 @@ function renderResults(d) {
     row('PV Terminal Val', fmtBig(d.pv_terminal)),
     row('Terminal % of EV',fmtPct(d.terminal_value_pct)),
     d.moat_detected ? row('Moat Premium', `<span style="color:var(--gold);font-size:11px">◆ ${d.moat_path} — WACC −${(d.moat_wacc_delta||0).toFixed(1)}pp</span>`) : '',
+    d.backbone_stage1_extended ? row('Stage 1 Duration', `<span style="color:var(--cyan);font-size:11px">◆ Backbone: all ${d.projection_years} yrs at Stage 1 rate</span>`) : '',
+    d.cash_rich_wacc_applied   ? row('Cash-Rich WACC',   `<span style="color:var(--cyan);font-size:11px">◆ $50B+ cash · WACC capped 9%</span>`)                         : '',
+    d.wacc_risk_applied        ? row('Risk WACC',        `<span style="color:var(--red); font-size:11px">⚠ Material risk · WACC +1%</span>`)                            : '',
+    d.momentum_premium_pct != null ? row('Catalyst Premium', `<span style="color:var(--green);font-size:11px">▲ +${d.momentum_premium_pct}% momentum premium</span>`) : '',
     d.growth_source ? row('Growth Source', `<span style="color:var(--muted2);font-size:11px">${d.growth_source}</span>`) : '',
     d.fcf_source    ? row('FCF Source',    `<span style="color:var(--muted2);font-size:11px">${d.fcf_source}</span>`)    : '',
     (d.fx_rate && d.financial_currency && d.trading_currency)
@@ -387,6 +394,68 @@ function renderResults(d) {
   } else {
     hide('dcfChartCard'); hide('dcfTableCard');
   }
+}
+
+/* ── Live Analyst Notes (Discovery Layer) ─────────────────── */
+function renderCatalystBox(d) {
+  const box = $('liveCatalystBox');
+  if (!box) return;
+
+  const insights = d.catalyst_insights || [];
+  const hasCat   = d.has_positive_catalyst;
+  const hasRisk  = d.has_material_risk;
+  const momPct   = d.momentum_premium_pct;   // e.g. 8.0 for 8%
+  const waccRisk = d.wacc_risk_applied;
+  const backbone = d.backbone_stage1_extended;
+  const cashRich = d.cash_rich_wacc_applied;
+
+  // Hide box if no useful data
+  if (!insights.length && !hasCat && !hasRisk && !backbone && !cashRich) {
+    box.classList.add('hidden');
+    return;
+  }
+
+  let html = `
+    <div class="catalyst-header">
+      <span class="catalyst-icon">⚡</span>
+      <span class="catalyst-title">Live Analyst Notes</span>
+      <span class="catalyst-sub">Catalyst research · SEC 8-K · Market intelligence</span>
+    </div>`;
+
+  // Insight bullets
+  if (insights.length) {
+    html += `<ul class="catalyst-bullets">`;
+    insights.forEach(line => {
+      html += `<li class="catalyst-bullet">${escHtml(line)}</li>`;
+    });
+    html += `</ul>`;
+  }
+
+  // Intelligence flags strip
+  let flags = '';
+
+  if (momPct != null && momPct > 0) {
+    flags += `<span class="cat-flag cat-flag--catalyst">
+      ▲ Momentum Premium +${momPct}% applied to IV
+    </span>`;
+  }
+  if (hasCat && (momPct == null || momPct === 0)) {
+    flags += `<span class="cat-flag cat-flag--catalyst">◈ Positive catalyst detected</span>`;
+  }
+  if (waccRisk) {
+    flags += `<span class="cat-flag cat-flag--risk">⚠ Material risk · WACC +1%</span>`;
+  }
+  if (backbone) {
+    flags += `<span class="cat-flag cat-flag--moat">◆ Backbone: 10-yr Stage 1 growth</span>`;
+  }
+  if (cashRich) {
+    flags += `<span class="cat-flag cat-flag--moat">◆ Cash-rich: WACC capped 9%</span>`;
+  }
+
+  if (flags) html += `<div class="cat-flags">${flags}</div>`;
+
+  box.innerHTML = html;
+  box.classList.remove('hidden');
 }
 
 /* ── Scenario Analysis ────────────────────────────────────── */

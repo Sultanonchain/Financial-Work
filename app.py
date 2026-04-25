@@ -5,6 +5,10 @@ import numpy as np
 import pandas as pd
 import requests
 import traceback
+import time
+import re
+import xml.etree.ElementTree as ET
+from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
@@ -14,6 +18,33 @@ EQUITY_RISK_PREM = 0.055   # Damodaran ERP
 
 # FX rate cache (in-memory, lives for the process lifetime — good enough for a session)
 _fx_cache: dict = {}
+
+# ── Catalyst / Discovery Layer cache ──────────────────────────────────────────
+# Refreshed once per hour so news and filings stay current without hammering APIs.
+_catalyst_cache: dict = {}
+CATALYST_CACHE_TTL = 3600   # seconds
+
+# Keyword lists for positive catalyst and risk classification
+_CATALYST_STRONG = [
+    "billion contract", "billion deal", "$1b ", "$2b ", "$3b ", "$5b ", "$10b ",
+    "fda approv", "fda grants", "breakthrough therapy designation", "accelerated approval",
+    "government contract", "defense contract", "wins contract", "awarded contract",
+    "major contract award", "exclusive agreement", "landmark deal",
+]
+_CATALYST_MODERATE = [
+    "product launch", "new product", "new platform", "new model",
+    "earnings beat", "raised guidance", "record revenue", "record quarter",
+    "exceeded expectations", "exceeded estimates", "strategic partnership",
+    "expanded partnership", "new agreement", "acquisition complete",
+    "fda clearance", "positive phase", "clinical trial success",
+]
+_RISK_KEYWORDS = [
+    "lawsuit", "class action", "sec investigation", "doj investigation",
+    "antitrust investigation", "securities fraud", "data breach",
+    "consent decree", "regulatory fine", "recall", "safety warning",
+    "subpoena", "criminal charge", "fraud allegation", "investigation opened",
+    "sec charges", "department of justice", "preliminary injunction",
+]
 
 # ── Industry-specific DCF guardrails ──────────────────────────────────────────
 # These prevent Gordon Growth Model blow-up for mature/capital-intensive sectors.
@@ -94,6 +125,206 @@ INDUSTRY_BETA_DEFAULTS = {
     "real_estate":       1.00,
     "communication":     0.90,
 }
+
+# ── Discovery Layer helpers ────────────────────────────────────────────────────
+
+def _fetch_edgar_8k(ticker: str) -> list:
+    """
+    Fetch the 5 most recent 8-K filing summaries from SEC EDGAR Atom feed.
+    Returns list of {date, title, summary} dicts. Silently returns [] on any error.
+    """
+    try:
+        url = (
+            f"https://www.sec.gov/cgi-bin/browse-edgar?"
+            f"action=getcompany&CIK={ticker}&type=8-K"
+            f"&dateb=&owner=include&count=5&output=atom"
+        )
+        resp = requests.get(
+            url, timeout=6,
+            headers={"User-Agent": "VALUS Research tool@valus.ai Accept-Encoding: gzip"}
+        )
+        if resp.status_code != 200:
+            return []
+        root = ET.fromstring(resp.text)
+        ns = {"a": "http://www.w3.org/2005/Atom"}
+        entries = []
+        for entry in root.findall("a:entry", ns)[:5]:
+            title   = (entry.findtext("a:title",   default="", namespaces=ns) or "")
+            updated = (entry.findtext("a:updated",  default="", namespaces=ns) or "")[:10]
+            summary = (entry.findtext("a:summary",  default="", namespaces=ns) or "")
+            # Strip HTML tags from EDGAR summary
+            summary_clean = re.sub(r"<[^>]+>", " ", summary).strip()[:300]
+            entries.append({"date": updated, "title": title, "summary": summary_clean})
+        return entries
+    except Exception:
+        return []
+
+
+def get_catalyst_insights(ticker: str, info: dict, stock) -> dict:
+    """
+    Discovery Layer: scan recent news (yfinance) + SEC 8-K filings for catalysts and risks.
+
+    Returns:
+        insights          – up to 3 bullet strings for the Live Analyst Notes box
+        momentum_premium  – 0.05–0.10 multiplier if strong positive catalyst found (else 0)
+        wacc_risk_add     – 0.01 if a material risk keyword found (else 0)
+        has_positive_catalyst / has_material_risk – booleans for UI badges
+        catalyst_labels / risk_labels – short strings describing what triggered the flag
+    """
+    now = time.time()
+    if ticker in _catalyst_cache:
+        cached = _catalyst_cache[ticker]
+        if now - cached["ts"] < CATALYST_CACHE_TTL:
+            return cached["data"]
+
+    insights          = []
+    momentum_premium  = 0.0
+    wacc_risk_add     = 0.0
+    has_positive      = False
+    has_risk          = False
+    catalyst_labels   = []
+    risk_labels       = []
+    seven_days_ago    = now - 7 * 86400
+
+    # ── 1. yfinance news ─────────────────────────────────────────────────────
+    try:
+        news_items = getattr(stock, "news", None) or []
+        recent = sorted(
+            [n for n in news_items if n.get("providerPublishTime", 0) > seven_days_ago],
+            key=lambda x: x.get("providerPublishTime", 0), reverse=True
+        )
+        for item in recent[:10]:
+            raw_title   = item.get("title",   "") or ""
+            raw_snippet = item.get("summary", "") or ""
+            text = (raw_title + " " + raw_snippet).lower()
+
+            is_strong = any(kw in text for kw in _CATALYST_STRONG)
+            is_mod    = any(kw in text for kw in _CATALYST_MODERATE)
+            is_risk   = any(kw in text for kw in _RISK_KEYWORDS)
+
+            if is_strong:
+                has_positive = True
+                momentum_premium = max(momentum_premium, 0.08)
+                if len(catalyst_labels) < 2:
+                    catalyst_labels.append(raw_title[:70])
+            elif is_mod and not has_positive:
+                has_positive = True
+                momentum_premium = max(momentum_premium, 0.05)
+                if len(catalyst_labels) < 2:
+                    catalyst_labels.append(raw_title[:70])
+
+            if is_risk:
+                has_risk = True
+                wacc_risk_add = 0.01
+                if len(risk_labels) < 2:
+                    risk_labels.append(raw_title[:70])
+
+            if len(insights) < 3:
+                pub_ts   = item.get("providerPublishTime", 0)
+                date_str = datetime.fromtimestamp(pub_ts).strftime("%b %d") if pub_ts else ""
+                headline = raw_title[:100]
+                insights.append(f"{date_str}: {headline}" if date_str else headline)
+    except Exception:
+        pass
+
+    # ── 2. SEC EDGAR 8-K filings ─────────────────────────────────────────────
+    try:
+        filings = _fetch_edgar_8k(ticker)
+        for f in filings[:3]:
+            text = (f["title"] + " " + f["summary"]).lower()
+
+            is_strong = any(kw in text for kw in _CATALYST_STRONG)
+            is_mod    = any(kw in text for kw in _CATALYST_MODERATE)
+            is_risk   = any(kw in text for kw in _RISK_KEYWORDS)
+
+            if is_strong and not has_positive:
+                has_positive = True
+                momentum_premium = max(momentum_premium, 0.08)
+                catalyst_labels.append(f"SEC 8-K: {f['title'][:60]}")
+            elif is_mod and not has_positive:
+                has_positive = True
+                momentum_premium = max(momentum_premium, 0.05)
+                catalyst_labels.append(f"SEC 8-K: {f['title'][:60]}")
+            if is_risk and not has_risk:
+                has_risk = True
+                wacc_risk_add = 0.01
+                risk_labels.append(f"SEC 8-K: {f['title'][:60]}")
+
+            # Include filing as insight bullet if room remains
+            if len(insights) < 3 and f["date"] and f["title"]:
+                insights.append(f"SEC 8-K ({f['date']}): {f['title'][:90]}")
+    except Exception:
+        pass
+
+    # ── 3. Fallback: analyst consensus summary ────────────────────────────────
+    if not insights:
+        n_analysts = info.get("numberOfAnalystOpinions")
+        target     = safe(info.get("targetMeanPrice"))
+        rating     = info.get("recommendationKey", "").replace("_", " ").title()
+        if n_analysts and target:
+            insights.append(
+                f"Analyst consensus: ${target:.2f} target · {rating or 'N/A'} "
+                f"({n_analysts} analysts)"
+            )
+
+    result = {
+        "insights":              insights[:3],
+        "momentum_premium":      round(momentum_premium, 3),
+        "wacc_risk_add":         round(wacc_risk_add, 3),
+        "has_positive_catalyst": has_positive,
+        "has_material_risk":     has_risk,
+        "catalyst_labels":       catalyst_labels[:2],
+        "risk_labels":           risk_labels[:2],
+    }
+    _catalyst_cache[ticker] = {"ts": now, "data": result}
+    return result
+
+
+def _analyst_divergence_note(iv, analyst_target, price, rev_growth_pct, forward_pe):
+    """
+    Cross-reference model IV vs analyst consensus.
+    Returns a dcf_notes dict when divergence > 15% of current price, else None.
+    """
+    if not iv or not analyst_target or not price or price <= 0:
+        return None
+    at  = float(analyst_target)
+    div = (at - iv) / price * 100   # positive = analyst above model
+
+    if abs(div) < 15:
+        return None   # numbers are close enough; no note needed
+
+    if div > 15:
+        # Consensus is materially above model
+        reasons = []
+        if rev_growth_pct and rev_growth_pct > 20:
+            reasons.append(
+                f"market pricing in sustained {rev_growth_pct:.0f}% revenue growth "
+                "not yet reflected in modelled FCF base"
+            )
+        if forward_pe and forward_pe > 40:
+            reasons.append(
+                f"premium multiple ({forward_pe:.0f}x fwd P/E) embeds growth optionality "
+                "not captured by FCF discounting"
+            )
+        if not reasons:
+            reasons.append(
+                "market assigns a higher multiple to expected earnings power "
+                "than the DCF growth-rate path implies"
+            )
+        text = (
+            f"Analyst consensus (${at:.2f}) is {abs(div):.0f}% above VALUS model IV (${iv:.2f}) — "
+            + "; ".join(reasons) + "."
+        )
+        return {"type": "info", "text": text}
+    else:
+        # Model is materially above consensus
+        text = (
+            f"VALUS model IV (${iv:.2f}) exceeds analyst consensus (${at:.2f}) "
+            f"by {abs(div):.0f}% — DCF is highly sensitive to growth-rate assumptions. "
+            "Verify Stage 1 growth and WACC inputs against updated guidance."
+        )
+        return {"type": "info", "text": text}
+
 
 def _classify_industry(sector: str, industry: str) -> str:
     """Map yfinance sector/industry strings to one of our INDUSTRY_PARAMS keys."""
@@ -552,20 +783,23 @@ def calc_wacc(info, income_stmt, tax_rate=0.21, fx_rate=1.0):
 
 # ── Single DCF run ─────────────────────────────────────────────────────────────
 
-def run_dcf_single(base_fcf, s1, s2, tg, wacc, yrs, info, fx_rate, net_debt_override=None):
+def run_dcf_single(base_fcf, s1, s2, tg, wacc, yrs, info, fx_rate,
+                   net_debt_override=None, stage1_years=None):
     """
     Run one DCF scenario. base_fcf must already be in trading currency.
     net_debt_override: pass pre-computed net debt (e.g. from quarterly balance sheet)
     to bypass the info-dict lookup — important for mega-caps where cash is material.
+    stage1_years: how many years to use s1 growth (default: yrs // 2).
+      Pass yrs to keep Stage 1 growth for the full projection horizon (Backbone moat).
     Returns (intrinsic_value, projected_rows, enterprise_value, equity_value, pv_terminal).
     """
     if wacc <= tg:
         tg = wacc - 0.01
-    half = yrs // 2
+    s1_cutoff = stage1_years if stage1_years is not None else (yrs // 2)
     fcf_run = base_fcf
     projected = []
     for y in range(1, yrs + 1):
-        g = s1 if y <= half else s2
+        g = s1 if y <= s1_cutoff else s2
         fcf_run = fcf_run * (1 + g)
         pv = fcf_run / ((1 + wacc) ** y)
         projected.append({"year": y, "fcf": fcf_run, "pv": pv, "growth": g})
@@ -1136,6 +1370,19 @@ def analyze():
         # info dict may lag behind; quarterly_balance_sheet is more current.
         bal_data = get_quarterly_balance_data(stock, info, fx_rate)
 
+        # ── Discovery Layer: Catalyst Research ───────────────────────────────
+        # Scans recent news + SEC 8-K filings for catalysts and risks.
+        # Results are cached for 1 hour; adds ~1-2s on cold start per ticker.
+        catalyst        = get_catalyst_insights(ticker, info, stock)
+        catalyst_insights       = catalyst["insights"]
+        momentum_premium        = catalyst["momentum_premium"]
+        catalyst_wacc_risk      = catalyst["wacc_risk_add"]
+        has_positive_catalyst   = catalyst["has_positive_catalyst"]
+        has_material_risk       = catalyst["has_material_risk"]
+        catalyst_labels         = catalyst["catalyst_labels"]
+        risk_labels             = catalyst["risk_labels"]
+        momentum_applied        = False   # set True when premium is baked into IV
+
         # ── Price history (1Y default) ────────────────────────────────────────
         hist = stock.history(period="1y", interval="1d")
         price_history = []
@@ -1209,19 +1456,21 @@ def analyze():
         analyst_adjusted     = False  # set when analyst alignment check blends IV
 
         # ── DCF computation ───────────────────────────────────────────────────
-        intrinsic_value  = None
-        margin_of_safety = None
-        projected        = []
-        enterprise_value = None
-        equity_value     = None
-        pv_terminal      = None
-        total_pv_fcf     = None
-        fcf_chart        = None
-        s1 = s2          = None
-        wacc_data        = {}
-        dcf_warning      = None
-        growth_source    = None
-        scenarios        = None
+        intrinsic_value       = None
+        margin_of_safety      = None
+        projected             = []
+        enterprise_value      = None
+        equity_value          = None
+        pv_terminal           = None
+        total_pv_fcf          = None
+        fcf_chart             = None
+        s1 = s2               = None
+        wacc_data             = {}
+        dcf_warning           = None
+        growth_source         = None
+        scenarios             = None
+        backbone_stage1_years = None   # set inside DCF block for backbone moat
+        cash_rich_wacc_applied = False  # set inside DCF block
         net_debt         = ((safe(info.get("totalDebt"), 0) or 0) - (safe(info.get("totalCash"), 0) or 0)) * fx_rate
 
         # Banking: force DCF off — interest income/expense are operating items,
@@ -1248,14 +1497,20 @@ def analyze():
                 )
         else:
             # ── Growth rate ───────────────────────────────────────────────────
+            # Backbone moat companies (High-Growth / Mature Cash Machine) get a
+            # lifted max_s1 cap — their analyst estimates legitimately exceed 25%.
+            is_backbone_moat = (
+                moat_detected and
+                moat_path in ("High-Growth Backbone", "Mature Cash Machine")
+            )
+            effective_max_s1 = max(ind_params["max_s1"], 0.35) if is_backbone_moat else ind_params["max_s1"]
+
             if s1_ov:
                 s1 = float(s1_ov) / 100 if float(s1_ov) > 1 else float(s1_ov)
                 growth_source = "User override"
             else:
                 s1, growth_source = get_forward_growth(stock, info, fcf_series)
-                # Apply industry-specific Stage 1 cap (prevents using cyclical recovery
-                # earnings spikes as a perpetual growth assumption for mature sectors)
-                s1 = min(s1, ind_params["max_s1"])
+                s1 = min(s1, effective_max_s1)
 
             if s2_ov:
                 s2 = float(s2_ov) / 100 if float(s2_ov) > 1 else float(s2_ov)
@@ -1286,15 +1541,62 @@ def analyze():
                 if not user_tg_override:
                     tg = min(tg, 0.030)
 
+            # ── Cash-Rich WACC Optimisation ───────────────────────────────────
+            # Companies with $50B+ in cash have institutional-grade balance sheets;
+            # cap WACC at 9% to match how buyside models price these securities.
+            total_cash_abs = (safe(info.get("totalCash"), 0) or 0) * fx_rate
+            cash_rich_wacc_applied = False
+            if total_cash_abs > 50e9:
+                if wacc > 0.09:
+                    wacc = 0.09
+                    wacc_data["wacc"] = wacc
+                    cash_rich_wacc_applied = True
+
+            # ── Material Risk WACC Surcharge ──────────────────────────────────
+            # When catalyst scan found lawsuits / regulatory investigations,
+            # apply +1% to WACC to price in the added uncertainty.
+            if catalyst_wacc_risk > 0:
+                wacc = min(wacc + catalyst_wacc_risk, 0.20)
+                wacc_data["wacc"] = wacc
+
             # Enforce minimum WACC − TGR spread to prevent Gordon Growth Model blow-up
             # (small denominator creates astronomical terminal values)
             min_spread = ind_params["wacc_spread"]
             if wacc - tg < min_spread:
                 tg = round(wacc - min_spread, 4)
 
+            # ── Backbone moat: forward-revenue growth source enrichment ──────
+            # For backbone moat companies, try to fetch the analyst forward revenue
+            # estimate and log it for transparency.  We do NOT scale base_fcf here
+            # because Stage 1 growth already projects forward revenue growth — scaling
+            # base_fcf on top of s1 would double-count the same expected uplift.
+            fwd_base_fcf  = base_fcf   # always equal to base_fcf
+            if is_backbone_moat and not s1_ov:
+                try:
+                    re_df = stock.revenue_estimate
+                    if re_df is not None and not re_df.empty and "+1y" in re_df.index:
+                        fwd_rev = safe(re_df.loc["+1y", "avg"])
+                        ttm_rev_for_label = rev_ttm or safe(info.get("totalRevenue"))
+                        if fwd_rev and ttm_rev_for_label and fwd_rev > ttm_rev_for_label:
+                            fwd_label = (
+                                f"Analyst fwd rev ${fwd_rev/1e9:.0f}B "
+                                f"(TTM ${ttm_rev_for_label/1e9:.0f}B)"
+                            )
+                            if growth_source:
+                                growth_source = growth_source + " · " + fwd_label
+                except Exception:
+                    pass
+
+            # ── Extended Stage 1 for Backbone moat ───────────────────────────
+            # Backbone companies sustain high growth for a full decade — use all
+            # projection years at the Stage 1 rate instead of cutting to Stage 2
+            # at the midpoint.  S2 still applies in scenario runs for extra caution.
+            backbone_stage1_years = yrs if is_backbone_moat else None
+
             # ── Base case DCF ─────────────────────────────────────────────────
             intrinsic_value, projected, enterprise_value, equity_value, pv_terminal = \
-                run_dcf_single(base_fcf, s1, s2, tg, wacc, yrs, info, fx_rate)
+                run_dcf_single(fwd_base_fcf, s1, s2, tg, wacc, yrs, info, fx_rate,
+                               stage1_years=backbone_stage1_years)
 
             total_pv_fcf     = sum(p["pv"] for p in projected)
             net_debt         = ((safe(info.get("totalDebt"), 0) or 0) - (safe(info.get("totalCash"), 0) or 0)) * fx_rate
@@ -1318,20 +1620,22 @@ def analyze():
             wacc_bear = min(wacc + 0.010, 0.18)
 
             # Bull case: growth premium, WACC at floor, TG at industry ceiling
-            s1_bull = min(s1 * 1.5, 0.35)
+            s1_bull = min(s1 * 1.5, 0.45)
             s2_bull = max(s1_bull * 0.55, tg + 0.01)
             tg_bull = min(tg + 0.005, ind_params["max_tg"])
             iv_bull, _, _, _, _ = run_dcf_single(
-                base_fcf, s1_bull, s2_bull, tg_bull, wacc_bull, yrs, info, fx_rate,
-                net_debt_override=scenario_net_debt)
+                fwd_base_fcf, s1_bull, s2_bull, tg_bull, wacc_bull, yrs, info, fx_rate,
+                net_debt_override=scenario_net_debt,
+                stage1_years=backbone_stage1_years)
 
             # Bear case: measured growth haircut, WACC at cap, modest TG trim
             s1_bear = max(s1 * 0.50, 0.01)   # 50% of base (was 40% — too aggressive)
             s2_bear = max(s1_bear * 0.55, 0.005)
             tg_bear = max(tg - 0.005, 0.010)  # trim 0.5pp (was 1.0pp)
             iv_bear, _, _, _, _ = run_dcf_single(
-                base_fcf, s1_bear, s2_bear, tg_bear, wacc_bear, yrs, info, fx_rate,
-                net_debt_override=scenario_net_debt)
+                fwd_base_fcf, s1_bear, s2_bear, tg_bear, wacc_bear, yrs, info, fx_rate,
+                net_debt_override=scenario_net_debt,
+                stage1_years=backbone_stage1_years)
 
             # Rule 2 — Institutional Floor: bear can't fall below sector EV/EBITDA floor
             bear_floored = False
@@ -1447,6 +1751,15 @@ def analyze():
             if analyst_adjusted and price:
                 margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
 
+        # ── Catalyst Momentum Premium ─────────────────────────────────────────
+        # Applied AFTER analyst alignment so the premium stacks on the blended value.
+        # Only fires when a strong positive catalyst was found in the last 7 days.
+        if intrinsic_value is not None and momentum_premium > 0:
+            intrinsic_value  = round(intrinsic_value * (1 + momentum_premium), 2)
+            momentum_applied = True
+            if price:
+                margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
+
         # ── Absolute Zero Floor ───────────────────────────────────────────────
         if intrinsic_value is not None:
             intrinsic_value = max(round(intrinsic_value, 2), 0.0)
@@ -1490,6 +1803,15 @@ def analyze():
                          + ", ".join(adj_parts) + ". "
                          "These prevent mature-sector distortions in the Gordon Growth Model.")
             })
+
+        # ── Analyst Consensus Cross-Reference Note ────────────────────────────
+        # Explain large divergences between VALUS model IV and sell-side consensus.
+        div_note = _analyst_divergence_note(
+            intrinsic_value, analyst_target_price, price,
+            rev_growth_pct, safe(info.get("forwardPE"))
+        )
+        if div_note:
+            dcf_notes.append(div_note)
 
         # ── PEG ratio ─────────────────────────────────────────────────────────
         peg = safe(info.get("pegRatio"))
@@ -1613,6 +1935,16 @@ def analyze():
             "moat_reasons":     moat_reasons,
             "moat_wacc_delta":  round(moat_wacc_delta * 100, 2) if moat_wacc_delta else None,
             "moat_mult_premium":round((moat_mult_premium - 1) * 100) if moat_detected else None,
+            # Discovery Layer — catalyst research
+            "catalyst_insights":         catalyst_insights,
+            "has_positive_catalyst":     has_positive_catalyst,
+            "has_material_risk":         has_material_risk,
+            "momentum_premium_pct":      round(momentum_premium * 100, 1) if momentum_applied else None,
+            "wacc_risk_applied":         catalyst_wacc_risk > 0,
+            "catalyst_labels":           catalyst_labels,
+            "risk_labels":               risk_labels,
+            "backbone_stage1_extended":  bool(backbone_stage1_years),
+            "cash_rich_wacc_applied":    cash_rich_wacc_applied,
         }
 
         return jsonify(clean(result))
