@@ -90,25 +90,38 @@
   <!-- Verdict -->
   <div class="verdict-card" id="verdictCard">
     <div class="verdict-accent"></div>
-    <div class="verdict-body">
-      <div class="verdict-section-left">
-        <div class="verdict-label-row">
-          <span class="verdict-label" id="verdictLabel">Intrinsic Value</span>
-          <span class="conf-badge hidden" id="confBadge"></span>
+    <div class="verdict-main">
+
+      <!-- Bear / Base / Bull scenario toggle — hidden until DCF scenarios exist -->
+      <div class="sc-toggle hidden" id="scenarioToggle">
+        <div class="sc-tog-wrap">
+          <button class="sc-tog-btn" data-scenario="bear" onclick="activateScenario('bear')">▼ Bear</button>
+          <button class="sc-tog-btn" data-scenario="base" onclick="activateScenario('base')">◆ Base</button>
+          <button class="sc-tog-btn" data-scenario="bull" onclick="activateScenario('bull')">▲ Bull</button>
         </div>
-        <div class="verdict-value-row">
-          <div class="verdict-value" id="intrinsicValue"></div>
-          <span class="signal-badge hidden" id="signalBadge"></span>
+      </div>
+
+      <div class="verdict-body">
+        <div class="verdict-section-left">
+          <div class="verdict-label-row">
+            <span class="verdict-label" id="verdictLabel">Intrinsic Value</span>
+            <span class="conf-badge hidden" id="confBadge"></span>
+          </div>
+          <div class="verdict-value-row">
+            <div class="verdict-value" id="intrinsicValue"></div>
+            <span class="signal-badge hidden" id="signalBadge"></span>
+          </div>
+          <div class="verdict-sub" id="verdictSub"></div>
         </div>
-        <div class="verdict-sub" id="verdictSub"></div>
+        <div class="verdict-divider"></div>
+        <div class="verdict-section-right">
+          <div class="mos-label">Margin of Safety</div>
+          <div class="mos-value" id="mosValue"></div>
+          <div class="mos-track"><div class="mos-fill" id="mosFill"></div></div>
+          <div class="mos-hint" id="mosHint"></div>
+        </div>
       </div>
-      <div class="verdict-divider"></div>
-      <div class="verdict-section-right">
-        <div class="mos-label">Margin of Safety</div>
-        <div class="mos-value" id="mosValue"></div>
-        <div class="mos-track"><div class="mos-fill" id="mosFill"></div></div>
-        <div class="mos-hint" id="mosHint"></div>
-      </div>
+
     </div>
   </div>
 

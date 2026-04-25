@@ -36,11 +36,99 @@ function row(label, value, cls = '') {
 }
 
 /* ── State ────────────────────────────────────────────────── */
-let priceChart = null;
-let dcfChart   = null;
+let priceChart    = null;
+let dcfChart      = null;
 let currentTicker = '';
 let currentData   = null;
 let searchTimer   = null;
+let _activeData   = null;   // full result stored for toggle interactions
+let _ivAnimRaf    = null;   // rAF handle for IV counter animation
+
+/* ── IV counter animation ─────────────────────────────────── */
+function animateIV(targetVal) {
+  const el = $('intrinsicValue');
+  if (!el) return;
+  if (_ivAnimRaf) { cancelAnimationFrame(_ivAnimRaf); _ivAnimRaf = null; }
+  const raw = el.textContent.replace(/[^0-9.]/g, '');
+  const fromVal = parseFloat(raw) || 0;
+  const diff    = targetVal - fromVal;
+  if (Math.abs(diff) < 0.005) { el.textContent = fmtPrice(targetVal); return; }
+  const duration = 480;
+  const t0 = performance.now();
+  function tick(now) {
+    const t = Math.min((now - t0) / duration, 1);
+    const ease = t >= 1 ? 1 : 1 - Math.pow(2, -10 * t); // easeOutExpo
+    el.textContent = fmtPrice(fromVal + diff * ease);
+    if (t < 1) { _ivAnimRaf = requestAnimationFrame(tick); }
+    else        { el.textContent = fmtPrice(targetVal); _ivAnimRaf = null; }
+  }
+  _ivAnimRaf = requestAnimationFrame(tick);
+}
+
+/* ── Scenario toggle ──────────────────────────────────────── */
+function activateScenario(key) {
+  if (!_activeData) return;
+  const d  = _activeData;
+  const sc = d.scenarios;
+  if (!sc) return;
+
+  const map = {
+    // Base uses the final displayed IV (post-consensus-anchor, post-blend) so that
+    // clicking "Base" always snaps back to the exact number the verdict card opened with.
+    base: { iv: d.intrinsic_value,  mos: d.margin_of_safety, label: 'Base Case' },
+    bull: { iv: sc.bull?.value,     mos: sc.bull?.upside,     label: 'Bull Case' },
+    bear: { iv: sc.bear?.value,     mos: sc.bear?.upside,     label: 'Bear Case' },
+  };
+  const data = map[key];
+  if (!data || data.iv == null) return;
+
+  // Toggle button states
+  document.querySelectorAll('.sc-tog-btn').forEach(b =>
+    b.classList.toggle('sc-tog-active', b.dataset.scenario === key));
+
+  // Animate IV counter
+  animateIV(data.iv);
+
+  // MoS + signal badge + card colour
+  const mosVal = data.mos;
+  const card   = $('verdictCard');
+  const sigEl  = $('signalBadge');
+  const mosEl  = $('mosValue');
+  const color  = mosVal > 15 ? 'var(--green)' : mosVal < -15 ? 'var(--red)' : 'var(--gold)';
+  card.className = 'verdict-card';
+  if      (mosVal > 15)  card.classList.add('undervalued');
+  else if (mosVal < -15) card.classList.add('overvalued');
+  else                   card.classList.add('fair');
+  if (sigEl) {
+    if (mosVal == null)   { sigEl.classList.add('hidden'); }
+    else if (mosVal > 20) { sigEl.className = 'signal-badge signal-strong'; sigEl.textContent = '▲ Strong Value'; sigEl.classList.remove('hidden'); }
+    else if (mosVal >= 0) { sigEl.className = 'signal-badge signal-fair';   sigEl.textContent = '◆ Fair Value';   sigEl.classList.remove('hidden'); }
+    else                  { sigEl.className = 'signal-badge signal-over';   sigEl.textContent = '▼ Overvalued';   sigEl.classList.remove('hidden'); }
+  }
+  if (mosVal != null) {
+    mosEl.textContent             = (mosVal > 0 ? '+' : '') + fmtPct(mosVal);
+    mosEl.style.color             = color;
+    $('mosFill').style.width      = Math.min(Math.abs(mosVal), 100) + '%';
+    $('mosFill').style.background = color;
+  } else {
+    mosEl.textContent        = '—';
+    $('mosFill').style.width = '0';
+  }
+  const hintDir = mosVal > 0 ? 'Trading below' : 'Trading above';
+  $('mosHint').textContent  = `${hintDir} fair value · ${data.label}`;
+
+  // Verdict sub text
+  let sub = '';
+  if      (mosVal > 15)  sub = `${fmtPct(mosVal)} upside to fair value`;
+  else if (mosVal < -15) sub = `${fmtPct(Math.abs(mosVal))} above fair value`;
+  else                   sub = 'Trading near fair value';
+  $('verdictSub').textContent = sub + ' · ' + data.label;
+
+  // Scenario card glow
+  document.querySelectorAll('.sc-case').forEach(el => {
+    el.classList.toggle('sc-case--active', el.classList.contains('sc-' + key));
+  });
+}
 
 /* ── Modal ────────────────────────────────────────────────── */
 function openDcfGuide()  { $('dcfModal').classList.remove('hidden'); document.body.style.overflow = 'hidden'; }
@@ -134,6 +222,11 @@ async function runAnalysis() {
   $('loadingTicker').textContent = ticker;
   show('loadingState'); hide('results'); hide('errorState');
   $('analyzeBtn').disabled = true;
+  // Cancel any in-flight IV animation and reset toggle state
+  if (_ivAnimRaf) { cancelAnimationFrame(_ivAnimRaf); _ivAnimRaf = null; }
+  _activeData = null;
+  const _prevTog = $('scenarioToggle');
+  if (_prevTog) _prevTog.classList.add('hidden');
 
   try {
     const res  = await fetch('/api/analyze?' + params);
@@ -302,8 +395,31 @@ function renderResults(d) {
     $('mosHint').textContent = mosHintBase + multRef;
   }
 
+  // Store data for toggle interactions
+  _activeData = d;
+
   // Scenario analysis
   renderScenarios(sc, d.current_price);
+
+  // Set up scenario toggle — visible only for full DCF with all three scenarios
+  {
+    const togEl = $('scenarioToggle');
+    if (togEl) {
+      const hasAll = isDCF && sc &&
+        sc.base?.value != null && sc.bull?.value != null && sc.bear?.value != null;
+      if (hasAll) {
+        togEl.classList.remove('hidden');
+        // Set 'base' as initial active button (no animation on first load)
+        document.querySelectorAll('.sc-tog-btn').forEach(b =>
+          b.classList.toggle('sc-tog-active', b.dataset.scenario === 'base'));
+        // Light up the base scenario card
+        const baseCard = document.querySelector('.sc-base');
+        if (baseCard) baseCard.classList.add('sc-case--active');
+      } else {
+        togEl.classList.add('hidden');
+      }
+    }
+  }
 
   // DCF warning banner + contextual notes
   const warnEl = $('dcfWarning');

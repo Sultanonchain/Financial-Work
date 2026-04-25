@@ -287,8 +287,67 @@ body {
 .verdict-card.undervalued .verdict-accent { background: linear-gradient(180deg,var(--green),#1a8a5a); }
 .verdict-card.overvalued  .verdict-accent { background: linear-gradient(180deg,var(--red),#9a2035); }
 .verdict-card.fair        .verdict-accent { background: linear-gradient(180deg,var(--gold),#8a6a1a); }
+/* Column wrapper — lets toggle sit above the body row */
+.verdict-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .verdict-body { display: flex; flex: 1; flex-wrap: wrap; padding: 20px 24px; gap: 24px; align-items: center; }
 .verdict-section-left, .verdict-section-right { flex: 1; min-width: 150px; }
+
+/* ── Bear / Base / Bull segmented toggle ────────────────────── */
+.sc-toggle {
+  display: flex; align-items: center; justify-content: center;
+  padding: 12px 24px 10px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0,0,0,0.18);
+}
+.sc-tog-wrap {
+  display: inline-flex;
+  border-radius: 8px; overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(0,0,0,0.35);
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.40), 0 1px 0 rgba(255,255,255,0.04);
+}
+.sc-tog-btn {
+  padding: 7px 26px;
+  background: transparent;
+  border: none; border-right: 1px solid rgba(255,255,255,0.07);
+  color: var(--muted); font-size: 11px; font-weight: 700;
+  letter-spacing: 0.9px; text-transform: uppercase;
+  font-family: var(--mono); cursor: pointer; outline: none;
+  transition: color 0.20s, background 0.20s, box-shadow 0.20s, text-shadow 0.20s;
+  position: relative; user-select: none;
+}
+.sc-tog-btn:last-child { border-right: none; }
+.sc-tog-btn:hover:not(.sc-tog-active) {
+  color: var(--text); background: rgba(255,255,255,0.05);
+}
+
+/* Active — Base (cyan) */
+.sc-tog-btn.sc-tog-active[data-scenario="base"] {
+  background: rgba(91,196,255,0.13);
+  color: var(--cyan);
+  box-shadow: 0 0 14px rgba(91,196,255,0.22), inset 0 0 18px rgba(91,196,255,0.08);
+  text-shadow: 0 0 10px rgba(91,196,255,0.55);
+}
+/* Active — Bull (green) */
+.sc-tog-btn.sc-tog-active[data-scenario="bull"] {
+  background: rgba(46,204,138,0.13);
+  color: var(--green);
+  box-shadow: 0 0 14px rgba(46,204,138,0.24), inset 0 0 18px rgba(46,204,138,0.08);
+  text-shadow: 0 0 10px rgba(46,204,138,0.55);
+}
+/* Active — Bear (red) */
+.sc-tog-btn.sc-tog-active[data-scenario="bear"] {
+  background: rgba(224,84,105,0.13);
+  color: var(--red);
+  box-shadow: 0 0 14px rgba(224,84,105,0.24), inset 0 0 18px rgba(224,84,105,0.08);
+  text-shadow: 0 0 10px rgba(224,84,105,0.55);
+}
+
+/* Scenario card glow when active via toggle */
+.sc-case { transition: box-shadow 0.28s ease, border-color 0.28s ease; }
+.sc-base.sc-case--active { border-color: rgba(91,141,184,0.60); box-shadow: 0 0 20px rgba(91,196,255,0.14); }
+.sc-bull.sc-case--active { border-color: rgba(46,204,138,0.60); box-shadow: 0 0 20px rgba(46,204,138,0.17); }
+.sc-bear.sc-case--active { border-color: rgba(224,84,105,0.60); box-shadow: 0 0 20px rgba(224,84,105,0.17); }
 /* Verdict label row — label + confidence badge */
 .verdict-label-row {
   display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap;
@@ -715,6 +774,8 @@ tfoot td:first-child { text-align: left; position: sticky; left: 0; }
   .metrics-grid { grid-template-columns: 1fr; }
   .verdict-body { padding: 16px 18px; gap: 16px; }
   .verdict-divider { display: none; }
+  .sc-toggle { padding: 10px 16px 8px; }
+  .sc-tog-btn { padding: 6px 16px; font-size: 10px; }
   .stats-strip { gap: 0; }
   .stat-item { min-width: 90px; padding: 8px 12px; }
   .company-header { gap: 10px; }
