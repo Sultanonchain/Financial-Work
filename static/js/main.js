@@ -456,36 +456,6 @@ function renderResults(d) {
   }
   if (mhTarget) mhTarget.textContent = fmtPrice(d.target_price);
 
-  // ── Drawer context strip (sector / industry) ─────────────
-  const ctxEl = $('drawerContext');
-  if (ctxEl) {
-    const badges = [];
-    if (d.sector)   badges.push(`<span class="badge badge-gray">${escHtml(d.sector)}</span>`);
-    if (d.industry) badges.push(`<span class="badge badge-gray">${escHtml(d.industry)}</span>`);
-    if (d.valuation_method && d.valuation_method !== 'dcf') {
-      const mLabel = d.valuation_method === 'banking'    ? 'Banking Methodology'
-                   : d.valuation_method === 'biotech'    ? 'Biotech Specialist'
-                   : d.valuation_method === 'dcf_energy' ? 'Energy DCF'
-                   : d.valuation_method.toUpperCase();
-      badges.push(`<span class="badge badge-cyan">${mLabel}</span>`);
-    }
-    ctxEl.innerHTML = badges.length
-      ? `<span class="drawer-ctx-label">Sector Context</span>` + badges.join('')
-      : '';
-  }
-
-  // Stats strip
-  $('statsStrip').innerHTML = [
-    statItem('P/E (TTM)',     fmtX(d.pe_ratio),      peColor(d.pe_ratio)),
-    statItem('Forward P/E',  fmtX(d.forward_pe),    peColor(d.forward_pe, true)),
-    statItem('EPS',          fmtPrice(d.eps)),
-    statItem('Market Cap',   fmtBig(d.market_cap)),
-    statItem('Volume',       fmtVol(d.volume)),
-    statItem('Avg Volume',   fmtVol(d.avg_volume)),
-    statItem('Div. Yield',   fmtPct(d.dividend_yield)),
-    statItem('Target',       fmtPrice(d.target_price), 'cyan'),
-  ].join('');
-
   // ── Verdict — unified rendering for DCF / Specialist / Multiples ──────────
   const iv  = d.intrinsic_value;
   const mos = d.margin_of_safety;
@@ -603,128 +573,8 @@ function renderResults(d) {
     }
   }
 
-  // DCF warning banner + contextual notes
-  const warnEl = $('dcfWarning');
-  const notes  = d.dcf_notes || [];
-  let warnHtml = '';
-  // Moat badge — shown for any High-Moat/Backbone classification
-  if (d.moat_detected && d.moat_path) {
-    const reasonStr = (d.moat_reasons || []).join(' · ');
-    const waccLine  = d.moat_wacc_delta
-      ? `WACC reduced ${d.moat_wacc_delta.toFixed(1)}pp · ` : '';
-    const multLine  = d.moat_mult_premium
-      ? `Exit multiples +${d.moat_mult_premium}%` : '';
-    warnHtml += `<div class="moat-badge">
-      <span class="moat-badge-icon">◆</span>
-      <div class="moat-badge-body">
-        <span class="moat-badge-title">Adaptive Moat Premium Applied — ${escHtml(d.moat_path)}</span>
-        <span class="moat-badge-sub">${escHtml(reasonStr)} &nbsp;·&nbsp; ${waccLine}${multLine}</span>
-      </div>
-    </div>`;
-  }
-
-  // Sector methodology badge — shown for banking / biotech / energy specialist valuation
-  if (d.sector_val_label) {
-    const smIcon  = d.valuation_method === 'biotech'   ? '⬡'
-                  : d.valuation_method === 'banking'    ? '⬢'
-                  : d.valuation_method === 'dcf_energy' ? '◉' : '◈';
-    const smTitle = d.valuation_method === 'biotech'   ? 'Biotech Specialist Valuation'
-                  : d.valuation_method === 'banking'    ? 'Banking / Financial Methodology'
-                  : d.valuation_method === 'dcf_energy' ? 'Energy / Commodities Methodology'
-                  : 'Sector-Specific Methodology';
-    const analystLine = d.analyst_adjusted
-      ? ' &nbsp;·&nbsp; <em>Consensus Anchor applied — blended toward analyst target</em>' : '';
-    warnHtml += `<div class="sector-badge">
-      <span class="sector-badge-icon">${smIcon}</span>
-      <div class="sector-badge-body">
-        <span class="sector-badge-title">${smTitle}</span>
-        <span class="sector-badge-sub">${escHtml(d.sector_val_label)}${analystLine}</span>
-      </div>
-    </div>`;
-  }
-
-  // Structural Transformer badge — full AI/Robotics platform reclassification (e.g. TSLA)
-  if (d.structural_transformer) {
-    const rateStr    = d.st_capex_addback_rate_pct != null ? `${d.st_capex_addback_rate_pct}%` : '50%';
-    const addbackStr = d.st_capex_addback_bn != null
-      ? ` · $${d.st_capex_addback_bn.toFixed(1)}B CapEx growth add-back`  : '';
-    const capexPctStr = d.st_capex_to_rev_pct != null
-      ? ` (CapEx ${d.st_capex_to_rev_pct.toFixed(1)}% of revenue)` : '';
-    const robotaxiStr = d.st_robotaxi_s2_applied
-      ? ' · Stage 2 +15% Robotaxi/FSD premium' : '';
-    warnHtml += `<div class="sector-badge sector-badge--transformer">
-      <span class="sector-badge-icon">⚡</span>
-      <div class="sector-badge-body">
-        <span class="sector-badge-title">Structural Transformer — AI / Robotics Platform</span>
-        <span class="sector-badge-sub">CapEx normalised: ${rateStr} of growth capex treated as investment, not cost${addbackStr}${capexPctStr} · 35× EV/EBITDA terminal multiple · WACC capped at 9%${robotaxiStr}</span>
-      </div>
-    </div>`;
-  }
-  // Platform Logistics Normalization badge — partial CapEx add-back for internet retail (e.g. AMZN)
-  else if (!d.structural_transformer && d.st_capex_addback_bn != null) {
-    const addbackStr = `$${d.st_capex_addback_bn.toFixed(1)}B`;
-    const capexPctStr = d.st_capex_to_rev_pct != null
-      ? ` (CapEx ${d.st_capex_to_rev_pct.toFixed(1)}% of revenue)` : '';
-    const rateStr = d.st_capex_addback_rate_pct != null ? `${d.st_capex_addback_rate_pct}%` : '20%';
-    warnHtml += `<div class="sector-badge sector-badge--logistics">
-      <span class="sector-badge-icon">📦</span>
-      <div class="sector-badge-body">
-        <span class="sector-badge-title">Platform Logistics Normalization</span>
-        <span class="sector-badge-sub">${rateStr} of logistics CapEx treated as growth investment (${addbackStr} add-back)${capexPctStr} · Standard DCF methodology otherwise</span>
-      </div>
-    </div>`;
-  }
-
-  // Consensus Anchor badge — shown whenever the 30%-above-consensus rule fires
-  if (d.analyst_adjusted) {
-    const preIv  = d.consensus_anchor_pre_iv != null ? ` VALUS model: $${d.consensus_anchor_pre_iv.toFixed(2)} → Blended: $${iv != null ? iv.toFixed(2) : '—'}` : '';
-    const atStr  = d.analyst_target != null ? ` · Analyst consensus: $${parseFloat(d.analyst_target).toFixed(2)}` : '';
-    warnHtml += `<div class="sector-badge sector-badge--anchor">
-      <span class="sector-badge-icon">⚖</span>
-      <div class="sector-badge-body">
-        <span class="sector-badge-title">Consensus Anchor Applied</span>
-        <span class="sector-badge-sub">Price adjusted toward analyst targets to account for near-term uncertainty. (70% model · 30% consensus)${atStr}</span>
-        ${preIv ? `<span class="sector-badge-detail">${escHtml(preIv)}</span>` : ''}
-      </div>
-    </div>`;
-  }
-
-  // Multiples fallback badge — shown when DCF is replaced by multiples
-  if (d.multiples_val && (!d.dcf_available || iv == null)) {
-    warnHtml += `<div class="multiples-badge">
-      <span class="multiples-badge-icon">◈</span>
-      <span class="multiples-badge-text"><strong>Secondary Valuation Applied:</strong> Industry Multiples Method — ${d.multiples_method}.</span>
-    </div>`;
-  }
-
-  // Methodology badges go into dcfWarning (visible at top of drawer)
-  if (warnHtml) { warnEl.innerHTML = warnHtml; warnEl.classList.remove('hidden'); }
-  else          { warnEl.classList.add('hidden'); }
-
-  // ── Technical Appendix — dcf notes + dcf_warning text ────────────────────
-  // (small explanatory notes moved to the bottom of the drawer)
-  {
-    const appendix = $('techAppendix');
-    if (appendix) {
-      let appendixHtml = '';
-      if (d.dcf_warning) {
-        appendixHtml += `<div class="dcf-note dcf-note--warn">⚠ ${escHtml(d.dcf_warning)}</div>`;
-      }
-      notes.forEach(n => {
-        const cls  = n.type === 'warn' ? 'dcf-note--warn' : 'dcf-note--info';
-        const icon = n.type === 'warn' ? '⚠' : 'ℹ';
-        appendixHtml += `<div class="dcf-note ${cls}">${icon} ${escHtml(n.text)}</div>`;
-      });
-      if (appendixHtml) {
-        appendix.innerHTML = `<div class="tech-appendix-title">Technical Appendix</div>` + appendixHtml;
-      } else {
-        appendix.innerHTML = '';
-      }
-    }
-  }
-
-  // ── Live Analyst Notes (Discovery Layer) ──────────────────────────────────
-  renderCatalystBox(d);
+  // ── Quick Insights — model flags above drawer trigger ────────────────────
+  renderQuickInsights(d);
 
   // Valuation multiples
   $('valuationMetrics').innerHTML = [
@@ -880,6 +730,116 @@ function renderCatalystBox(d) {
 
   box.innerHTML = html;
   box.classList.remove('hidden');
+}
+
+/* ── Quick Insights — model flags shown above drawer trigger ── */
+function renderQuickInsights(d) {
+  const el     = $('quickInsights');
+  const listEl = $('qiList');
+  if (!el || !listEl) return;
+
+  const iv    = d.intrinsic_value;
+  const notes = d.dcf_notes || [];
+  const items = [];
+
+  function qi(icon, html, cls = 'qi-info') {
+    items.push(`<div class="qi-item ${cls}"><span class="qi-icon">${icon}</span><span class="qi-text">${html}</span></div>`);
+  }
+
+  // ── Moat premium ──────────────────────────────────────────────────────────
+  if (d.moat_detected && d.moat_path) {
+    const waccLine = d.moat_wacc_delta  ? `WACC −${d.moat_wacc_delta.toFixed(1)}pp`        : '';
+    const multLine = d.moat_mult_premium ? `exit multiples +${d.moat_mult_premium}%`        : '';
+    const extras   = [waccLine, multLine].filter(Boolean).join(' · ');
+    qi('◆', `<strong>${escHtml(d.moat_path)}</strong> moat detected${extras ? ' — ' + extras : ''}`, 'qi-cyan');
+  }
+
+  // ── Sector specialist methodology ─────────────────────────────────────────
+  if (d.sector_val_label) {
+    const icon = d.valuation_method === 'banking'    ? '⬢'
+               : d.valuation_method === 'biotech'    ? '⬡'
+               : d.valuation_method === 'dcf_energy' ? '◉' : '◈';
+    qi(icon, `<strong>Specialist method</strong> — ${escHtml(d.sector_val_label)}`, 'qi-cyan');
+  }
+
+  // ── Structural Transformer (full — TSLA-style) ────────────────────────────
+  if (d.structural_transformer) {
+    const rate   = d.st_capex_addback_rate_pct != null ? `${d.st_capex_addback_rate_pct}%` : '50%';
+    const ab     = d.st_capex_addback_bn  != null ? ` · $${d.st_capex_addback_bn.toFixed(1)}B add-back` : '';
+    const robo   = d.st_robotaxi_s2_applied ? ' · +15% Robotaxi/FSD Stage 2 premium' : '';
+    qi('⚡', `<strong>Structural Transformer</strong> — ${rate} CapEx treated as growth investment${ab} · 35× EV/EBITDA · WACC ≤9%${robo}`, 'qi-cyan');
+  }
+  // ── Platform Logistics normalisation (partial — AMZN-style) ──────────────
+  else if (d.st_capex_addback_bn != null) {
+    const rate = d.st_capex_addback_rate_pct != null ? `${d.st_capex_addback_rate_pct}%` : '20%';
+    const ab   = `$${d.st_capex_addback_bn.toFixed(1)}B add-back`;
+    qi('📦', `<strong>Platform Logistics Normalisation</strong> — ${rate} of logistics CapEx as growth investment (${ab})`, 'qi-info');
+  }
+
+  // ── Backbone (full Stage 1 for all projection years) ──────────────────────
+  if (d.backbone_stage1_extended) {
+    qi('◆', `<strong>Backbone Platform</strong> — Stage 1 growth extended for all ${d.projection_years || 10} projection years`, 'qi-cyan');
+  }
+
+  // ── Cash-rich WACC cap ────────────────────────────────────────────────────
+  if (d.cash_rich_wacc_applied) {
+    qi('◆', `<strong>Cash-Rich</strong> — $50B+ net cash position · WACC capped at 9%`, 'qi-cyan');
+  }
+
+  // ── Momentum / catalyst premium ───────────────────────────────────────────
+  if (d.momentum_premium_pct != null && d.momentum_premium_pct > 0) {
+    qi('▲', `<strong>Catalyst Premium</strong> — +${d.momentum_premium_pct}% applied to intrinsic value`, 'qi-good');
+  }
+
+  // ── Risk WACC uplift ──────────────────────────────────────────────────────
+  if (d.wacc_risk_applied) {
+    qi('⚠', `<strong>Risk Adjustment</strong> — Material risk factor detected · WACC +1%`, 'qi-risk');
+  }
+
+  // ── Consensus anchor ──────────────────────────────────────────────────────
+  if (d.analyst_adjusted) {
+    const preIv = d.consensus_anchor_pre_iv != null
+      ? ` · Model: $${d.consensus_anchor_pre_iv.toFixed(2)} → Blended: $${iv != null ? iv.toFixed(2) : '—'}` : '';
+    const atStr = d.analyst_target != null
+      ? ` · Analyst consensus: $${parseFloat(d.analyst_target).toFixed(2)}` : '';
+    qi('⚖', `<strong>Consensus Anchor</strong> — 70% model · 30% analyst${atStr}${preIv}`, 'qi-warn');
+  }
+
+  // ── Multiples fallback ────────────────────────────────────────────────────
+  if (d.multiples_val && (!d.dcf_available || iv == null)) {
+    qi('◈', `<strong>Industry Multiples</strong> — DCF unavailable; secondary valuation applied (${escHtml(d.multiples_method || '')})`, 'qi-warn');
+  }
+
+  // ── DCF warning text ──────────────────────────────────────────────────────
+  if (d.dcf_warning) {
+    qi('⚠', escHtml(d.dcf_warning), 'qi-warn');
+  }
+
+  // ── DCF notes ─────────────────────────────────────────────────────────────
+  notes.forEach(n => {
+    const cls  = n.type === 'warn' ? 'qi-warn' : 'qi-info';
+    const icon = n.type === 'warn' ? '⚠' : 'ℹ';
+    qi(icon, escHtml(n.text), cls);
+  });
+
+  // ── Catalyst insights ─────────────────────────────────────────────────────
+  if (d.has_positive_catalyst && !(d.momentum_premium_pct > 0)) {
+    qi('◈', '<strong>Positive catalyst</strong> detected in recent filings', 'qi-good');
+  }
+  if (d.has_material_risk && !d.wacc_risk_applied) {
+    qi('⚠', '<strong>Material risk</strong> noted in recent filings', 'qi-risk');
+  }
+  (d.catalyst_insights || []).forEach(line => {
+    qi('▸', escHtml(line), 'qi-info');
+  });
+
+  if (items.length > 0) {
+    listEl.innerHTML = items.join('');
+    el.classList.remove('hidden');
+  } else {
+    listEl.innerHTML = '';
+    el.classList.add('hidden');
+  }
 }
 
 /* ── Scenario Analysis ────────────────────────────────────── */

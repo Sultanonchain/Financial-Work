@@ -143,6 +143,18 @@
     </div>
   </div>
 
+  <!-- Scenario Analysis (always visible — key valuation output) -->
+  <div class="card hidden" id="scenarioCard"></div>
+
+  <!-- Quick Insights — model assumptions & flags (above trigger) -->
+  <div class="quick-insights hidden" id="quickInsights">
+    <div class="qi-header">
+      <span class="qi-header-icon">ℹ</span>
+      <span class="qi-header-label">Model Assumptions &amp; Flags</span>
+    </div>
+    <div class="qi-list" id="qiList"></div>
+  </div>
+
   <!-- ── View Analysis trigger ─────────────────────────────── -->
   <div class="view-analysis-trigger hidden" id="viewAnalysisTrigger">
     <button class="view-analysis-btn" id="viewAnalysisBtn" onclick="toggleDetailDrawer()">
@@ -151,22 +163,29 @@
     </button>
   </div>
 
-  <!-- ── Detail Drawer (hidden until trigger clicked) ──────── -->
+  <!-- ── Detail Drawer — high-density data only ────────────── -->
   <div id="detailDrawer" class="detail-drawer">
     <div class="detail-drawer-inner">
 
-      <!-- Sector / industry context + key stats -->
-      <div class="drawer-context" id="drawerContext"></div>
-      <div class="stats-strip" id="statsStrip"></div>
-
-      <!-- Methodology badges + DCF notes -->
-      <div id="dcfWarning" class="dcf-warning hidden"></div>
-
-      <!-- Live Analyst Notes -->
-      <div id="liveCatalystBox" class="live-catalyst-box hidden"></div>
-
-      <!-- Scenario Analysis -->
-      <div class="card hidden" id="scenarioCard"></div>
+      <!-- Supporting metrics -->
+      <div class="metrics-grid">
+        <div class="card">
+          <h3 class="card-title">Valuation Multiples</h3>
+          <div class="metric-list" id="valuationMetrics"></div>
+        </div>
+        <div class="card">
+          <h3 class="card-title">DCF Assumptions <span class="info-hint" onclick="openDcfGuide()">?</span></h3>
+          <div class="metric-list" id="dcfAssumptions"></div>
+        </div>
+        <div class="card">
+          <h3 class="card-title">Financials</h3>
+          <div class="metric-list" id="financialMetrics"></div>
+        </div>
+        <div class="card">
+          <h3 class="card-title">Financial Health</h3>
+          <div class="metric-list" id="healthMetrics"></div>
+        </div>
+      </div>
 
       <!-- Price chart -->
       <div class="card">
@@ -187,27 +206,7 @@
         <div class="chart-loading hidden" id="chartLoading"><div class="spinner-sm"></div></div>
       </div>
 
-      <!-- Metrics grid -->
-      <div class="metrics-grid">
-        <div class="card">
-          <h3 class="card-title">Valuation Multiples</h3>
-          <div class="metric-list" id="valuationMetrics"></div>
-        </div>
-        <div class="card">
-          <h3 class="card-title">DCF Assumptions <span class="info-hint" onclick="openDcfGuide()">?</span></h3>
-          <div class="metric-list" id="dcfAssumptions"></div>
-        </div>
-        <div class="card">
-          <h3 class="card-title">Financials</h3>
-          <div class="metric-list" id="financialMetrics"></div>
-        </div>
-        <div class="card">
-          <h3 class="card-title">Financial Health</h3>
-          <div class="metric-list" id="healthMetrics"></div>
-        </div>
-      </div>
-
-      <!-- DCF Chart -->
+      <!-- FCF Chart -->
       <div class="card" id="dcfChartCard">
         <div class="card-header">
           <h3 class="card-title">DCF — Projected vs. Discounted Free Cash Flow</h3>
@@ -216,7 +215,7 @@
         <div class="chart-wrap chart-wrap--tall"><canvas id="dcfChart"></canvas></div>
       </div>
 
-      <!-- DCF Model table -->
+      <!-- DCF Table -->
       <div class="card" id="dcfTableCard">
         <h3 class="card-title" style="margin-bottom:14px">Full DCF Model</h3>
         <div class="table-scroll">
@@ -241,9 +240,6 @@
         <div id="statementsLoading" class="stmt-loading"><div class="spinner-sm"></div> Loading…</div>
         <div id="statementsContent" class="table-scroll hidden"></div>
       </div>
-
-      <!-- Technical Appendix -->
-      <div class="tech-appendix" id="techAppendix"></div>
 
     </div><!-- /detail-drawer-inner -->
   </div><!-- /detailDrawer -->
