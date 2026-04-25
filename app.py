@@ -69,6 +69,11 @@ INDUSTRY_PARAMS = {
     # (e.g. Tesla — classified as Auto but investing at tech-company intensity)
     # Higher TG ceiling, 8% floor, lifted Stage 1 cap for platform-scale growth
     "structural_transformer": {"max_tg": 0.030, "min_wacc": 0.080, "wacc_spread": 0.018, "max_s1": 0.35},
+    # Payment Networks / Asset-Light Credit: zero-marginal-cost scaling, global duopoly moats.
+    # 3.5% TG ceiling: meaningful premium above 2.5% default (reflects cashless tailwinds)
+    # without triggering the 42× Gordon Growth explosion of a 5%-TG / 7.5%-WACC combination.
+    # 7.5% WACC floor: very low capital risk vs. traditional financial services.
+    "payment_network": {"max_tg": 0.035, "min_wacc": 0.075, "wacc_spread": 0.020, "max_s1": 0.20},
     # Default (tech, consumer, healthcare, etc.) — global sanity floor
     "default":         {"max_tg": 0.025, "min_wacc": 0.075, "wacc_spread": 0.020, "max_s1": 0.25},
 }
@@ -463,6 +468,8 @@ def _classify_industry(sector: str, industry: str) -> str:
         return "materials"
     if any(x in ind for x in ["auto", "automobile"]):
         return "auto"
+    if any(x in ind for x in ["credit service", "payment network", "payment processing"]):
+        return "payment_network"
     return "default"
 
 def _default_beta(sector: str, industry: str) -> float:
@@ -761,10 +768,18 @@ def _get_valuation_method(sector: str, industry: str) -> str:
     if "biopharmaceutical" in ind or ("pharmaceutical" in ind and "specialty" in ind):
         return "biotech"
 
+    # Asset-light payment networks — network-effect moats; DCF is correct here.
+    # Must be checked BEFORE the broad "financial" catch-all below, because yfinance
+    # puts Visa/Mastercard/AXP in "Financial Services / Credit Services" or
+    # "Financial Services / Payment Networks" — sectors that would otherwise fall into banking.
+    _PAYMENT_INDUSTRIES = ["credit service", "payment network", "payment processing"]
+    if any(x in ind for x in _PAYMENT_INDUSTRIES):
+        return "dcf"
+
     # Banking / Financial services — interest is operating cost; DCF structurally wrong
     if any(x in s for x in ["financial", "bank"]):
         return "banking"
-    if any(x in ind for x in ["bank", "insurance", "credit service",
+    if any(x in ind for x in ["bank", "insurance",
                                "investment bank", "thrift", "mortgage", "diversified financials"]):
         return "banking"
 
@@ -1257,7 +1272,13 @@ def get_dcf_notes(sector, industry, pe, fcf_available):
     ind = (industry or "").lower()
 
     # Sector-specific DCF reliability
-    if any(x in s for x in ["financial", "bank"]) or any(x in ind for x in ["bank", "saving", "thrift"]):
+    # Payment networks (credit service / payment network / payment processing) are
+    # asset-light, fee-based businesses — the banking interest-cost warning does NOT apply.
+    _is_payment_net = any(x in ind for x in ["credit service", "payment network", "payment processing"])
+    if not _is_payment_net and (
+        any(x in s for x in ["financial", "bank"]) or
+        any(x in ind for x in ["bank", "saving", "thrift"])
+    ):
         notes.append({
             "type": "warn",
             "text": "Financials: Interest is a core operating cost, so FCF-based DCF overstates earnings power. "
@@ -1797,6 +1818,13 @@ def analyze():
         # are priced with technology-platform parameters instead.
         if is_structural_transformer:
             ind_class = "structural_transformer"
+        # Payment networks (Visa, Mastercard, AXP) use their own parameter set —
+        # asset-light moat businesses with structurally higher terminal growth ceilings.
+        _ind_lower = (industry or "").lower()
+        is_payment_network = any(x in _ind_lower for x in
+                                 ["credit service", "payment network", "payment processing"])
+        if is_payment_network:
+            ind_class = "payment_network"
         ind_params = INDUSTRY_PARAMS[ind_class]
         user_tg_override = request.args.get("terminal") is not None
 
@@ -1903,6 +1931,27 @@ def analyze():
             if wacc - tg < min_spread:
                 tg = round(wacc - min_spread, 4)
 
+            # ── Asset-Light Payment Network: WACC + TG hard pin ───────────────
+            # Visa / Mastercard / AXP have near-zero marginal cost per transaction,
+            # global duopoly pricing power, and secular cashless tailwinds — a profile
+            # that capital-structure WACC math systematically over-discounts.
+            # WACC pinned at 7.5% (low institutional risk for a global network duopoly).
+            # TG pinned at 3.5% — a meaningful premium above the 2.5% default that
+            # reflects cashless penetration tailwinds without triggering the 42× Gordon
+            # Growth explosion that a 5% TG / 7.5% WACC combination would cause.
+            # Backbone stage-1 extension is intentionally suppressed: the TG premium
+            # already encodes the long-run structural advantage; doubling up via a
+            # 10-year Stage-1 projection would double-count the same thesis.
+            if is_payment_network:
+                wacc = 0.075
+                wacc_data["wacc"] = wacc
+                if not user_tg_override:
+                    tg = 0.035
+                sector_val_label = (
+                    "Network Effect Valuation: Standard DCF applied to "
+                    "asset-light payment infrastructure."
+                )
+
             # ── Backbone moat: forward-revenue growth source enrichment ──────
             # For backbone moat companies, try to fetch the analyst forward revenue
             # estimate and log it for transparency.  We do NOT scale base_fcf here
@@ -1929,7 +1978,13 @@ def analyze():
             # Both backbone moat and structural transformer companies sustain high
             # growth for a full decade — run the entire projection at the Stage 1
             # rate.  S2 still applies in bear/bull scenario runs for extra caution.
-            backbone_stage1_years = yrs if (is_backbone_moat or is_structural_transformer) else None
+            # Payment networks are excluded: their 3.5% TG premium already encodes
+            # the structural advantage; extending Stage 1 to 10 years would double-
+            # count the same thesis and produce unrealistically high terminal values.
+            backbone_stage1_years = (
+                yrs if (is_backbone_moat or is_structural_transformer) and not is_payment_network
+                else None
+            )
 
             # ── Base case DCF ─────────────────────────────────────────────────
             intrinsic_value, projected, enterprise_value, equity_value, pv_terminal = \
@@ -2212,11 +2267,15 @@ def analyze():
                 adj_parts.append(f"terminal growth capped at {tg*100:.1f}%")
             adj_parts.append(f"WACC floor {ind_params['min_wacc']*100:.1f}%")
             adj_parts.append(f"Stage 1 cap {ind_params['max_s1']*100:.0f}%")
+            _ind_class_label = {
+                "payment_network": "Network Effect",
+                "structural_transformer": "Structural Transformer",
+            }.get(ind_class, ind_class.capitalize())
             dcf_notes.insert(0, {
                 "type": "info",
-                "text": (f"{ind_class.capitalize()} industry adjustments applied: "
+                "text": (f"{_ind_class_label} industry adjustments applied: "
                          + ", ".join(adj_parts) + ". "
-                         "These prevent mature-sector distortions in the Gordon Growth Model.")
+                         "These prevent sector distortions in the Gordon Growth Model.")
             })
 
         # ── Confidence warnings → dcf_notes ──────────────────────────────────
