@@ -130,6 +130,75 @@ function activateScenario(key) {
   });
 }
 
+/* ── Copy Analysis Summary ────────────────────────────────── */
+const VALUS_URL = 'https://valus.vercel.app'; // ← update if domain changes
+
+function _buildMethodString(d) {
+  const parts = [];
+  // Base method
+  if      (d.valuation_method === 'banking')    parts.push('Banking Specialist (P/B + ROE)');
+  else if (d.valuation_method === 'biotech')    parts.push('Biotech Specialist (EV/Rev)');
+  else if (d.valuation_method === 'dcf_energy') parts.push('Energy DCF');
+  else if (!d.dcf_available && d.multiples_val) parts.push('Industry Multiples');
+  else if (d.moat_detected)                     parts.push('Adaptive Moat DCF');
+  else                                           parts.push('DCF Model');
+  // Modifiers
+  if (d.backbone_stage1_extended) parts.push('Backbone 10-yr');
+  if (d.analyst_adjusted)         parts.push('Consensus Anchor');
+  if (d.momentum_premium_pct)     parts.push(`+${d.momentum_premium_pct}% Catalyst`);
+  return parts.join(' + ');
+}
+
+function _buildSignalString(mos) {
+  if (mos == null) return '';
+  if (mos > 20)  return '▲ Strong Value';
+  if (mos >= 0)  return '◆ Fair Value';
+  return '▼ Overvalued';
+}
+
+function copyAnalysis() {
+  if (!_activeData) return;
+  const d   = _activeData;
+  const iv  = d.intrinsic_value ?? d.multiples_val;
+  const mos = d.margin_of_safety ?? d.multiples_mos;
+  if (!iv) return;
+
+  const signal  = _buildSignalString(mos);
+  const method  = _buildMethodString(d);
+  const mosLine = mos != null
+    ? `Margin of Safety: ${mos > 0 ? '+' : ''}${mos.toFixed(1)}%`
+    : '';
+
+  const text = [
+    `VALUS Analysis: $${d.ticker}`,
+    `Intrinsic Value: $${iv.toFixed(2)}${signal ? ` (${signal.replace(/[▲◆▼] /, '')})` : ''}`,
+    `Method: ${method}`,
+    mosLine,
+    `Analyze yours at: ${VALUS_URL}`,
+  ].filter(Boolean).join('\n');
+
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = $('copyBtn');
+    if (!btn) return;
+    const lbl = btn.querySelector('.copy-btn-label');
+    btn.classList.add('copied');
+    if (lbl) lbl.textContent = 'Copied!';
+    setTimeout(() => {
+      btn.classList.remove('copied');
+      if (lbl) lbl.textContent = 'Copy Summary';
+    }, 2000);
+  }).catch(() => {
+    // Fallback for browsers that block clipboard without user gesture
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    const btn = $('copyBtn');
+    if (btn) { btn.classList.add('copied'); setTimeout(() => btn.classList.remove('copied'), 2000); }
+  });
+}
+
 /* ── Modal ────────────────────────────────────────────────── */
 function openDcfGuide()  { $('dcfModal').classList.remove('hidden'); document.body.style.overflow = 'hidden'; }
 function closeDcfGuide() { $('dcfModal').classList.add('hidden');    document.body.style.overflow = ''; }
