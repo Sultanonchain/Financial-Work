@@ -335,7 +335,7 @@ function renderResults(d) {
                   : d.valuation_method === 'dcf_energy' ? 'Energy / Commodities Methodology'
                   : 'Sector-Specific Methodology';
     const analystLine = d.analyst_adjusted
-      ? ' &nbsp;·&nbsp; <em>Analyst-aligned blend applied (&gt;50% divergence)</em>' : '';
+      ? ' &nbsp;·&nbsp; <em>Consensus Anchor applied — blended toward analyst target</em>' : '';
     warnHtml += `<div class="sector-badge">
       <span class="sector-badge-icon">${smIcon}</span>
       <div class="sector-badge-body">
@@ -343,13 +343,18 @@ function renderResults(d) {
         <span class="sector-badge-sub">${escHtml(d.sector_val_label)}${analystLine}</span>
       </div>
     </div>`;
-  } else if (d.analyst_adjusted) {
-    // Analyst alignment applied even on standard DCF
-    warnHtml += `<div class="sector-badge sector-badge--analyst">
-      <span class="sector-badge-icon">⟳</span>
+  }
+
+  // Consensus Anchor badge — shown whenever the 30%-above-consensus rule fires
+  if (d.analyst_adjusted) {
+    const preIv  = d.consensus_anchor_pre_iv != null ? ` VALUS model: $${d.consensus_anchor_pre_iv.toFixed(2)} → Blended: $${iv != null ? iv.toFixed(2) : '—'}` : '';
+    const atStr  = d.analyst_target != null ? ` · Analyst consensus: $${parseFloat(d.analyst_target).toFixed(2)}` : '';
+    warnHtml += `<div class="sector-badge sector-badge--anchor">
+      <span class="sector-badge-icon">⚖</span>
       <div class="sector-badge-body">
-        <span class="sector-badge-title">Analyst Alignment Applied</span>
-        <span class="sector-badge-sub">Model diverged &gt;50% from consensus — blended toward analyst target (67% model · 33% target)</span>
+        <span class="sector-badge-title">Consensus Anchor Applied</span>
+        <span class="sector-badge-sub">Consensus Blending Applied: Price adjusted toward analyst targets to account for near-term pipeline uncertainty. (70% model · 30% consensus)${atStr}</span>
+        ${preIv ? `<span class="sector-badge-detail">${escHtml(preIv)}</span>` : ''}
       </div>
     </div>`;
   }

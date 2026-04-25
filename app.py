@@ -720,16 +720,28 @@ def calc_biotech_val(info, fx_rate, rev_ttm=None, analyst_target=None):
 
 def _analyst_alignment_check(iv, analyst_target, price):
     """
-    If model IV diverges from analyst consensus by >50% of the current price,
-    blend 2/3 model + 1/3 analyst to anchor to professional consensus.
-    Returns (adjusted_iv, was_adjusted: bool).
+    Consensus Anchor: if VALUS IV is more than 30% above the analyst mean
+    price target, blend 70% VALUS + 30% analyst consensus.
+
+    Rationale: when sell-side consensus is materially below our model, it is
+    almost always because analysts are pricing in near-term uncertainty
+    (pipeline risk, patent cliffs, cyclical headwinds) that a clean 10-year
+    DCF cannot capture.  A 70/30 weighted blend pulls the output into a range
+    the user can cross-reference with Street estimates while still reflecting
+    the model's long-run view.
+
+    Returns (adjusted_iv, was_adjusted: bool, pre_blend_iv).
     """
     if not iv or not analyst_target or not price or price <= 0:
-        return iv, False
+        return iv, False, iv
     at = float(analyst_target)
-    if abs(iv - at) / price > 0.50:
-        return round(max(0.667 * iv + 0.333 * at, 0.0), 2), True
-    return iv, False
+    if at <= 0:
+        return iv, False, iv
+    # Trigger: IV is more than 30% above analyst consensus
+    if iv > at * 1.30:
+        blended = round(max(0.70 * iv + 0.30 * at, 0.0), 2)
+        return blended, True, round(iv, 2)
+    return iv, False, iv
 
 
 def get_quarterly_balance_data(stock, info, fx_rate):
@@ -1876,11 +1888,14 @@ def analyze():
                 if intrinsic_value and price:
                     margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
 
-        # ── Analyst Alignment Check ───────────────────────────────────────────
-        # If model IV diverges >50% from analyst consensus, blend toward consensus.
+        # ── Consensus Anchor ──────────────────────────────────────────────────
+        # If VALUS IV is >30% above analyst mean target, blend 70% model + 30%
+        # consensus.  This grounds the output when the model runs ahead of
+        # sell-side estimates due to near-term uncertainty the DCF cannot capture.
+        consensus_anchor_pre_iv = None   # original IV before anchor blending
         if intrinsic_value is not None:
-            intrinsic_value, analyst_adjusted = _analyst_alignment_check(
-                intrinsic_value, analyst_target_price, price)
+            intrinsic_value, analyst_adjusted, consensus_anchor_pre_iv = \
+                _analyst_alignment_check(intrinsic_value, analyst_target_price, price)
             if analyst_adjusted and price:
                 margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
 
@@ -2099,8 +2114,9 @@ def analyze():
             # Sector-adaptive valuation
             "valuation_method":  valuation_method,
             "sector_val_label":  sector_val_label,
-            "analyst_adjusted":  analyst_adjusted,
-            "analyst_target":    analyst_target_price,
+            "analyst_adjusted":        analyst_adjusted,
+            "consensus_anchor_pre_iv": consensus_anchor_pre_iv,
+            "analyst_target":          analyst_target_price,
             # Moat detection
             "moat_detected":    moat_detected,
             "moat_path":        moat_path,

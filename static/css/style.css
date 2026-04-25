@@ -608,19 +608,31 @@ tfoot td:first-child { text-align: left; position: sticky; left: 0; }
   border-color: rgba(120,180,120,0.40);
   border-left-color: #78b478;
 }
+/* Consensus Anchor badge — gold/amber tone to signal model adjustment */
+.sector-badge--anchor {
+  background: linear-gradient(135deg, rgba(196,154,60,0.10), rgba(196,154,60,0.05));
+  border-color: rgba(196,154,60,0.40);
+  border-left-color: var(--gold);
+}
 .sector-badge-icon {
   color: var(--cyan); font-size: 16px; line-height: 1.5;
   flex-shrink: 0; margin-top: 1px;
 }
 .sector-badge--analyst .sector-badge-icon { color: #78b478; }
+.sector-badge--anchor  .sector-badge-icon { color: var(--gold); }
 .sector-badge-body { display: flex; flex-direction: column; gap: 3px; }
 .sector-badge-title {
   font-size: 12px; font-weight: 700; color: var(--cyan);
   letter-spacing: 0.2px;
 }
 .sector-badge--analyst .sector-badge-title { color: #78b478; }
+.sector-badge--anchor  .sector-badge-title { color: var(--gold); }
 .sector-badge-sub {
   font-size: 11px; color: var(--muted2); font-family: var(--mono);
+}
+.sector-badge-detail {
+  font-size: 10px; color: var(--muted2); font-family: var(--mono);
+  opacity: 0.8; margin-top: 2px;
 }
 
 /* ── Multiples Fallback Badge ──────────────────────────────── */
