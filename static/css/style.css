@@ -279,6 +279,66 @@ body {
 }
 .detail-drawer.open .detail-drawer-inner { padding-top: 20px; }
 
+/* ── Mini Financial Highlights ────────────────────────────── */
+.mini-highlights {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+.mh-item {
+  padding: 14px 20px;
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 5px;
+  transition: background .15s;
+}
+.mh-item:last-child { border-right: none; }
+.mh-label {
+  font-size: 9px; font-weight: 700; letter-spacing: 1.2px;
+  text-transform: uppercase; color: var(--muted);
+  font-family: var(--mono);
+}
+.mh-value {
+  font-size: 17px; font-weight: 700; color: var(--text);
+  font-family: var(--mono); letter-spacing: -0.3px;
+}
+.mh-value.mh-cyan  { color: var(--cyan); }
+.mh-value.mh-green { color: var(--green); }
+.mh-value.mh-red   { color: var(--red); }
+.mh-value.mh-muted { color: var(--muted2); font-size: 14px; }
+@media (max-width: 540px) {
+  .mini-highlights { grid-template-columns: repeat(2, 1fr); }
+  .mh-item:nth-child(2) { border-right: none; }
+  .mh-item:nth-child(1),
+  .mh-item:nth-child(2) { border-bottom: 1px solid var(--border); }
+}
+
+/* ── Why Hook ──────────────────────────────────────────────── */
+.why-hook {
+  font-size: 11px; font-style: italic; color: var(--muted2);
+  line-height: 1.55; margin-top: 9px;
+  padding-top: 9px; border-top: 1px solid var(--border);
+  max-width: 300px;
+}
+.why-hook.hidden { display: none; }
+
+/* ── Drawer context strip (sector / industry) ──────────────── */
+.drawer-context {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.drawer-context:empty { display: none; }
+.drawer-ctx-label {
+  font-size: 9px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.8px; color: var(--muted); font-family: var(--mono);
+}
+
 /* ── Technical Appendix ────────────────────────────────────── */
 .tech-appendix {
   margin-top: 8px;

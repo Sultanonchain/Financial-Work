@@ -114,15 +114,6 @@ function activateScenario(key) {
     mosEl.textContent        = '—';
     $('mosFill').style.width = '0';
   }
-  const hintDir = mosVal > 0 ? 'Trading below' : 'Trading above';
-  $('mosHint').textContent  = `${hintDir} fair value · ${data.label}`;
-
-  // Verdict sub text
-  let sub = '';
-  if      (mosVal > 15)  sub = `${fmtPct(mosVal)} upside to fair value`;
-  else if (mosVal < -15) sub = `${fmtPct(Math.abs(mosVal))} above fair value`;
-  else                   sub = 'Trading near fair value';
-  $('verdictSub').textContent = sub + ' · ' + data.label;
 
   // Scenario card glow
   document.querySelectorAll('.sc-case').forEach(el => {
@@ -155,6 +146,79 @@ function _buildSignalString(mos) {
   if (mos > 20)  return '▲ Strong Value';
   if (mos >= 0)  return '◆ Fair Value';
   return '▼ Overvalued';
+}
+
+/* ── 'Why' Hook — one-sentence contextual insight ─────────── */
+function _buildWhyHook(d) {
+  const mos    = d.margin_of_safety;
+  const sector = (d.sector   || '').toLowerCase();
+  const ind    = (d.industry || '').toLowerCase();
+  const moat   = d.moat_path || '';
+  const isST   = d.structural_transformer;
+  const isAnch = d.analyst_adjusted;
+  const method = d.valuation_method || '';
+
+  if (mos == null) return '';
+
+  // Specialist methods
+  if (method === 'banking')
+    return mos < -10
+      ? 'Trading above P/B-implied fair value; net interest margin compression is priced in.'
+      : mos > 15
+        ? 'P/B discount relative to ROE suggests potential margin of safety.'
+        : 'Valuation aligned with book value and normalised earnings power.';
+  if (method === 'biotech')
+    return 'EV/Revenue blended with analyst consensus; pipeline risk drives a wide range of outcomes.';
+
+  const isOver  = mos < -10;
+  const isUnder = mos > 15;
+
+  // ── Overvalued hooks ────────────────────────────────────────
+  if (isOver) {
+    if (isST)
+      return 'Market pricing in platform optionality; DCF reflects near-term execution risk.';
+    if (sector.includes('energy') || ind.includes('oil') || ind.includes('gas') || ind.includes('petroleum'))
+      return 'Market pricing in short-term commodity premium; DCF reflects long-term production averages.';
+    if (ind.includes('semiconductor') || ind.includes('chips'))
+      return 'Market pricing in AI-cycle demand peak; DCF reflects normalised fab utilisation.';
+    if (sector.includes('tech') || ind.includes('software') || ind.includes('internet'))
+      return 'Market pricing in elevated AI/growth premium; DCF reflects normalised FCF margins.';
+    if (ind.includes('internet retail') || ind.includes('broadline'))
+      return 'Market pricing in ecosystem and logistics network premium; DCF reflects reported FCF margins.';
+    if (sector.includes('consumer') && !ind.includes('tech'))
+      return 'Market pricing in brand momentum; DCF reflects long-run structural margin mean-reversion.';
+    if (sector.includes('health') || ind.includes('pharma') || ind.includes('biotech'))
+      return 'Market pricing in pipeline optionality; DCF reflects only commercialised revenue streams.';
+    if (ind.includes('auto') || ind.includes('vehicle'))
+      return 'Market pricing in EV transition optionality; DCF reflects current unit economics.';
+    if (isAnch)
+      return 'Consensus Anchor applied; final IV blends DCF model with near-term analyst targets.';
+    return 'Current price embeds a growth premium not yet supported by DCF fundamentals.';
+  }
+
+  // ── Undervalued hooks ───────────────────────────────────────
+  if (isUnder) {
+    if (moat === 'Platform Scale Economy')
+      return 'Platform and high-margin segment economics suggest market underprices hidden earning power.';
+    if (moat === 'High-Growth Backbone')
+      return 'Durable revenue growth and margins indicate potential unrecognised intrinsic value.';
+    if (moat === 'Mature Cash Machine')
+      return 'Strong cash generation and earnings quality suggest a structural discount to fair value.';
+    if (moat === 'Capital-Light Compounder')
+      return 'Capital-efficient compounding model trades at a discount to FCF-implied intrinsic value.';
+    if (isST)
+      return 'Near-term CapEx depresses reported FCF; long-run platform value is materially higher.';
+    if (sector.includes('energy'))
+      return 'Market applying cycle-trough discount; DCF reflects long-term normalised production cash flows.';
+    if (sector.includes('financial') || ind.includes('bank'))
+      return 'Defensive balance sheet with a P/B discount versus ROE-implied intrinsic value.';
+    return 'Trading below modelled intrinsic value — potential margin of safety for long-term investors.';
+  }
+
+  // ── Fair-value hooks ────────────────────────────────────────
+  if (moat)
+    return `Quality characteristics (${moat.toLowerCase()}) at a fair price — limited near-term asymmetry.`;
+  return 'Price closely aligned with DCF intrinsic value — limited near-term asymmetry.';
 }
 
 function copyAnalysis() {
@@ -365,16 +429,50 @@ function showError(msg) { $('errorMsg').textContent = msg; show('errorState'); h
 
 /* ── Render all ───────────────────────────────────────────── */
 function renderResults(d) {
-  // Company header
-  $('companyName').textContent   = d.company_name;
-  $('tickerBadge').textContent   = d.ticker;
-  $('sectorBadge').textContent   = d.sector   || 'N/A';
-  $('industryBadge').textContent = d.industry || 'N/A';
-  $('currentPrice').textContent  = fmtPrice(d.current_price);
+  // ── Company header (hero — Name, Price, Ticker only) ──────
+  $('companyName').textContent  = d.company_name;
+  $('tickerBadge').textContent  = d.ticker;
+  $('currentPrice').textContent = fmtPrice(d.current_price);
   const parts = [];
   if (d['52w_low'] && d['52w_high']) parts.push(`52W  ${fmtPrice(d['52w_low'])} – ${fmtPrice(d['52w_high'])}`);
   if (d.currency && d.currency !== 'USD') parts.push(d.currency);
   $('priceMeta').textContent = parts.join('   ·   ');
+
+  // ── Mini Financial Highlights (hero card) ────────────────
+  const mhMarketCap = $('mhMarketCap');
+  const mhPE        = $('mhPE');
+  const mhDivYield  = $('mhDivYield');
+  const mhTarget    = $('mhTarget');
+  if (mhMarketCap) mhMarketCap.textContent = fmtBig(d.market_cap);
+  if (mhPE)        mhPE.textContent        = fmtX(d.pe_ratio);
+  if (mhDivYield) {
+    if (d.dividend_yield != null && d.dividend_yield > 0) {
+      mhDivYield.textContent = fmtPct(d.dividend_yield);
+      mhDivYield.className   = 'mh-value mh-green';
+    } else {
+      mhDivYield.textContent = '—';
+      mhDivYield.className   = 'mh-value mh-muted';
+    }
+  }
+  if (mhTarget) mhTarget.textContent = fmtPrice(d.target_price);
+
+  // ── Drawer context strip (sector / industry) ─────────────
+  const ctxEl = $('drawerContext');
+  if (ctxEl) {
+    const badges = [];
+    if (d.sector)   badges.push(`<span class="badge badge-gray">${escHtml(d.sector)}</span>`);
+    if (d.industry) badges.push(`<span class="badge badge-gray">${escHtml(d.industry)}</span>`);
+    if (d.valuation_method && d.valuation_method !== 'dcf') {
+      const mLabel = d.valuation_method === 'banking'    ? 'Banking Methodology'
+                   : d.valuation_method === 'biotech'    ? 'Biotech Specialist'
+                   : d.valuation_method === 'dcf_energy' ? 'Energy DCF'
+                   : d.valuation_method.toUpperCase();
+      badges.push(`<span class="badge badge-cyan">${mLabel}</span>`);
+    }
+    ctxEl.innerHTML = badges.length
+      ? `<span class="drawer-ctx-label">Sector Context</span>` + badges.join('')
+      : '';
+  }
 
   // Stats strip
   $('statsStrip').innerHTML = [
@@ -388,30 +486,6 @@ function renderResults(d) {
     statItem('Target',       fmtPrice(d.target_price), 'cyan'),
   ].join('');
 
-  // ── DCF Confidence Badge ───────────────────────────────────────────────────
-  const confEl = $('confBadge');
-  if (confEl) {
-    const cl = d.dcf_confidence;
-    if (cl && cl !== 'not_applicable') {
-      const confMap = {
-        high:     { cls: 'conf-high',     icon: '✦', label: 'High Confidence'     },
-        moderate: { cls: 'conf-moderate', icon: '◈', label: 'Moderate Confidence' },
-        low:      { cls: 'conf-low',      icon: '⚠', label: 'Low Confidence'      },
-      };
-      const cm = confMap[cl] || confMap.moderate;
-      confEl.className = `conf-badge ${cm.cls}`;
-      confEl.innerHTML = `${cm.icon} ${cm.label}`;
-      confEl.title = (d.dcf_confidence_warnings || []).join(' · ') || cm.label;
-      confEl.classList.remove('hidden');
-    } else if (cl === 'not_applicable') {
-      confEl.className = 'conf-badge conf-na';
-      confEl.innerHTML = `◌ ${d.dcf_confidence_label || 'Specialist Method'}`;
-      confEl.classList.remove('hidden');
-    } else {
-      confEl.classList.add('hidden');
-    }
-  }
-
   // ── Verdict — unified rendering for DCF / Specialist / Multiples ──────────
   const iv  = d.intrinsic_value;
   const mos = d.margin_of_safety;
@@ -421,7 +495,7 @@ function renderResults(d) {
 
   // Classify what kind of value we're showing
   const isDCF        = d.dcf_available && iv != null;
-  const isSpecialist = !d.dcf_available && iv != null;         // banking, biotech, etc.
+  const isSpecialist = !d.dcf_available && iv != null;
   const isMultiples  = !isDCF && !isSpecialist && d.multiples_val != null;
   const hasValue     = isDCF || isSpecialist || isMultiples;
 
@@ -437,19 +511,23 @@ function renderResults(d) {
     else                   labelEl.textContent = 'Intrinsic Value';
   }
 
+  // ── Why hook ──────────────────────────────────────────────────────────────
+  const hookEl = $('whyHook');
+
   if (!hasValue) {
-    // Truly nothing to show
     $('intrinsicValue').textContent = 'N/A';
-    $('verdictSub').textContent     = d.dcf_warning || 'Valuation not available for this security.';
     $('mosValue').textContent       = '—';
     $('mosFill').style.width        = '0';
-    $('mosHint').textContent        = '';
     card.classList.add('fair');
     hide('signalBadge');
+    if (hookEl) {
+      hookEl.textContent = d.dcf_warning || 'Valuation not available for this security.';
+      hookEl.classList.remove('hidden');
+    }
   } else {
     $('intrinsicValue').textContent = fmtPrice(displayVal);
 
-    // ── Signal badge (Buy / Hold / Sell) ──────────────────────────────────
+    // ── Signal badge ──────────────────────────────────────────────────────
     const sigEl = $('signalBadge');
     if (sigEl) {
       if (displayMos == null) {
@@ -469,41 +547,34 @@ function renderResults(d) {
       }
     }
 
-    // ── Verdict card colouring + sub text ─────────────────────────────────
-    let sub = '';
-    if (displayMos > 15)       { card.classList.add('undervalued'); sub = `${fmtPct(displayMos)} upside to fair value`; }
-    else if (displayMos < -15) { card.classList.add('overvalued');  sub = `${fmtPct(Math.abs(displayMos))} above fair value`; }
-    else                       { card.classList.add('fair');        sub = 'Trading near fair value'; }
+    // ── Verdict card colouring ────────────────────────────────────────────
+    if (displayMos > 15)       card.classList.add('undervalued');
+    else if (displayMos < -15) card.classList.add('overvalued');
+    else                       card.classList.add('fair');
 
-    if (isDCF) {
-      sub += ' · 50/25/25 probability-weighted';
-    } else if (isSpecialist) {
-      const vm = d.valuation_method || '';
-      const methodLine = vm === 'banking' ? 'P/B + P/E methodology'
-                       : vm === 'biotech' ? 'EV/Revenue + analyst blend'
-                       : d.sector_val_label ? d.sector_val_label.split('+')[0].trim() : 'Sector method';
-      sub += ` · ${methodLine}`;
-    } else if (isMultiples) {
-      sub += ` · ${d.multiples_method || 'Industry multiples'}`;
+    // ── Why hook — contextual insight ─────────────────────────────────────
+    if (hookEl) {
+      const hook = _buildWhyHook(d);
+      if (hook) {
+        hookEl.textContent = hook;
+        hookEl.classList.remove('hidden');
+      } else {
+        hookEl.classList.add('hidden');
+      }
     }
-    $('verdictSub').textContent = sub;
 
     // ── MoS track ─────────────────────────────────────────────────────────
     const color = displayMos > 15 ? 'var(--green)' : displayMos < -15 ? 'var(--red)' : 'var(--gold)';
     const mosEl = $('mosValue');
     if (displayMos != null) {
-      mosEl.textContent       = (displayMos > 0 ? '+' : '') + fmtPct(displayMos);
-      mosEl.style.color       = color;
+      mosEl.textContent             = (displayMos > 0 ? '+' : '') + fmtPct(displayMos);
+      mosEl.style.color             = color;
       $('mosFill').style.width      = Math.min(Math.abs(displayMos), 100) + '%';
       $('mosFill').style.background = color;
     } else {
-      mosEl.textContent = '—';
+      mosEl.textContent        = '—';
       $('mosFill').style.width = '0';
     }
-    const mosHintBase = displayMos > 0 ? 'Trading below fair value' : 'Trading above fair value';
-    const multRef = (d.dcf_confidence === 'moderate' || d.dcf_confidence === 'low') && d.multiples_val && !isMultiples
-      ? ` · Multiples ref ${fmtPrice(d.multiples_val)}` : '';
-    $('mosHint').textContent = mosHintBase + multRef;
   }
 
   // Store data for toggle interactions

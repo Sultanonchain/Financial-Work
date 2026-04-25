@@ -67,16 +67,13 @@
 <main id="results" class="results hidden">
 
   <!-- ── HERO (always visible) ─────────────────────────────── -->
-  <!-- Company header -->
+  <!-- Company header — Name · Price · Ticker only -->
   <div class="company-header">
     <div class="company-info">
-      <div class="company-top">
-        <h2 id="companyName"></h2>
-        <div class="company-meta">
-          <span id="tickerBadge" class="badge badge-cyan"></span>
-          <span id="sectorBadge" class="badge badge-gray"></span>
-          <span id="industryBadge" class="badge badge-gray"></span>
-        </div>
+      <h2 id="companyName"></h2>
+      <div class="company-meta">
+        <span id="tickerBadge" class="badge badge-cyan"></span>
+        <!-- sector / industry rendered inside drawer context strip -->
       </div>
     </div>
     <div class="price-block">
@@ -89,7 +86,7 @@
     </div>
   </div>
 
-  <!-- Verdict card -->
+  <!-- Verdict card — IV · Signal · Toggle · MoS -->
   <div class="verdict-card" id="verdictCard">
     <div class="verdict-accent"></div>
     <div class="verdict-main">
@@ -107,23 +104,42 @@
         <div class="verdict-section-left">
           <div class="verdict-label-row">
             <span class="verdict-label" id="verdictLabel">Intrinsic Value</span>
-            <span class="conf-badge hidden" id="confBadge"></span>
           </div>
           <div class="verdict-value-row">
             <div class="verdict-value" id="intrinsicValue"></div>
             <span class="signal-badge hidden" id="signalBadge"></span>
           </div>
-          <div class="verdict-sub" id="verdictSub"></div>
+          <!-- One-sentence 'Why' hook — contextual insight next to signal -->
+          <div class="why-hook hidden" id="whyHook"></div>
         </div>
         <div class="verdict-divider"></div>
         <div class="verdict-section-right">
           <div class="mos-label">Margin of Safety</div>
           <div class="mos-value" id="mosValue"></div>
           <div class="mos-track"><div class="mos-fill" id="mosFill"></div></div>
-          <div class="mos-hint" id="mosHint"></div>
         </div>
       </div>
 
+    </div>
+  </div>
+
+  <!-- Mini Financial Highlights — 4 key metrics at a glance -->
+  <div class="mini-highlights" id="miniHighlights">
+    <div class="mh-item">
+      <div class="mh-label">Market Cap</div>
+      <div class="mh-value" id="mhMarketCap">—</div>
+    </div>
+    <div class="mh-item">
+      <div class="mh-label">P/E Ratio</div>
+      <div class="mh-value" id="mhPE">—</div>
+    </div>
+    <div class="mh-item">
+      <div class="mh-label">Div. Yield</div>
+      <div class="mh-value" id="mhDivYield">—</div>
+    </div>
+    <div class="mh-item">
+      <div class="mh-label">Analyst Target</div>
+      <div class="mh-value mh-cyan" id="mhTarget">—</div>
     </div>
   </div>
 
@@ -139,7 +155,8 @@
   <div id="detailDrawer" class="detail-drawer">
     <div class="detail-drawer-inner">
 
-      <!-- Key stats strip -->
+      <!-- Sector / industry context + key stats -->
+      <div class="drawer-context" id="drawerContext"></div>
       <div class="stats-strip" id="statsStrip"></div>
 
       <!-- Methodology badges + DCF notes -->
