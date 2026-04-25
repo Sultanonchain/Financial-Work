@@ -73,11 +73,11 @@ function activateScenario(key) {
   if (!sc) return;
 
   const map = {
-    // Base uses the final displayed IV (post-consensus-anchor, post-blend) so that
-    // clicking "Base" always snaps back to the exact number the verdict card opened with.
-    base: { iv: d.intrinsic_value,  mos: d.margin_of_safety, label: 'Base Case' },
-    bull: { iv: sc.bull?.value,     mos: sc.bull?.upside,     label: 'Bull Case' },
-    bear: { iv: sc.bear?.value,     mos: sc.bear?.upside,     label: 'Bear Case' },
+    // Base now reads sc.base.value which is synced to d.intrinsic_value on the
+    // backend when the Consensus Anchor fires, ensuring toggle ≡ card.
+    base: { iv: sc.base?.value, mos: sc.base?.upside, label: 'Base Case' },
+    bull: { iv: sc.bull?.value, mos: sc.bull?.upside, label: 'Bull Case' },
+    bear: { iv: sc.bear?.value, mos: sc.bear?.upside, label: 'Bear Case' },
   };
   const data = map[key];
   if (!data || data.iv == null) return;
@@ -679,11 +679,20 @@ function renderScenarios(sc, price) {
   const weightedUpCls = sc.weighted_upside > 0 ? 'green' : 'red';
   const weightedSign  = sc.weighted_upside > 0 ? '+' : '';
 
+  // Transparency note — shown when Consensus Anchor was applied to scenarios
+  const anchorNote = sc.consensus_anchored
+    ? `<div class="sc-anchor-note">
+        <span class="sc-anchor-icon">⚖</span>
+        Values adjusted by Consensus Anchor for market alignment. (70% model · 30% analyst consensus)
+       </div>`
+    : '';
+
   el.innerHTML = `
     <div class="sc-header">
       <h3 class="card-title">Scenario Analysis</h3>
       <span class="card-sub">50% Base · 25% Bull · 25% Bear</span>
     </div>
+    ${anchorNote}
     <div class="sc-grid">
       ${scCard('Base Case',    sc.base, 'base')}
       ${scCard('Bull Case',    sc.bull, 'bull')}

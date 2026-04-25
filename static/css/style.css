@@ -585,6 +585,17 @@ tfoot td:first-child { text-align: left; position: sticky; left: 0; }
   display: flex; align-items: baseline; justify-content: space-between;
   margin-bottom: 18px;
 }
+/* Consensus Anchor transparency note inside the scenario section */
+.sc-anchor-note {
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(196,154,60,0.07);
+  border: 1px solid rgba(196,154,60,0.22);
+  border-radius: var(--radius); padding: 8px 14px;
+  margin-bottom: 14px;
+  font-size: 11px; color: var(--gold); font-family: var(--mono);
+  line-height: 1.5;
+}
+.sc-anchor-icon { font-size: 13px; flex-shrink: 0; }
 .sc-grid {
   display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
   margin-bottom: 20px;

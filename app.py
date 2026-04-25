@@ -1899,6 +1899,44 @@ def analyze():
             if analyst_adjusted and price:
                 margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
 
+        # ── Scenario Sync after Consensus Anchor ──────────────────────────────
+        # When the anchor fired, propagate the same 70/30 blend to each scenario
+        # case individually so that the Scenario Analysis cards and the
+        # Bear/Base/Bull toggle always display consistent, anchored numbers.
+        # Base → synced to the final intrinsic_value (anchored weighted IV)
+        # Bull → individually anchored (almost always above the 30% threshold)
+        # Bear → individually anchored only if it too exceeds the threshold
+        #        (conservative bear cases typically fall below it — left intact)
+        if analyst_adjusted and scenarios and analyst_target_price:
+            _at = float(analyst_target_price)
+
+            # Sync Base to the final displayed value so toggle ≡ card
+            scenarios["base"]["value"]  = intrinsic_value
+            scenarios["base"]["upside"] = margin_of_safety
+
+            # Individually anchor Bull and Bear
+            for _key in ("bull", "bear"):
+                _sv = scenarios[_key].get("value")
+                if _sv is not None and _sv > _at * 1.30:
+                    _blended = round(0.70 * _sv + 0.30 * _at, 2)
+                    scenarios[_key]["value"]  = _blended
+                    scenarios[_key]["upside"] = (
+                        round((_blended - price) / price * 100, 1) if price else None
+                    )
+
+            # Recompute probability-weighted fair value from anchored numbers
+            _bv = scenarios["base"]["value"]
+            _uv = scenarios["bull"]["value"]
+            _dv = scenarios["bear"]["value"]
+            if all(v is not None for v in [_bv, _uv, _dv]):
+                _new_w = round(0.50 * _bv + 0.25 * _uv + 0.25 * _dv, 2)
+                scenarios["weighted"]        = _new_w
+                scenarios["weighted_upside"] = (
+                    round((_new_w - price) / price * 100, 1) if price else None
+                )
+
+            scenarios["consensus_anchored"] = True
+
         # ── Catalyst Momentum Premium ─────────────────────────────────────────
         # Applied AFTER analyst alignment so the premium stacks on the blended value.
         # Only fires when a strong positive catalyst was found in the last 7 days.
