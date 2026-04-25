@@ -65,6 +65,10 @@ INDUSTRY_PARAMS = {
     "materials":       {"max_tg": 0.015, "min_wacc": 0.075, "wacc_spread": 0.022, "max_s1": 0.12},
     # Autos: cyclical, capital-intensive
     "auto":            {"max_tg": 0.025, "min_wacc": 0.075, "wacc_spread": 0.020, "max_s1": 0.15},
+    # Structural Transformer: traditional-sector company reinventing itself via AI/Robotics capex
+    # (e.g. Tesla — classified as Auto but investing at tech-company intensity)
+    # Higher TG ceiling, 8% floor, lifted Stage 1 cap for platform-scale growth
+    "structural_transformer": {"max_tg": 0.030, "min_wacc": 0.080, "wacc_spread": 0.018, "max_s1": 0.35},
     # Default (tech, consumer, healthcare, etc.) — global sanity floor
     "default":         {"max_tg": 0.025, "min_wacc": 0.075, "wacc_spread": 0.020, "max_s1": 0.25},
 }
@@ -326,6 +330,67 @@ def _analyst_divergence_note(iv, analyst_target, price, rev_growth_pct, forward_
         return {"type": "info", "text": text}
 
 
+def _detect_structural_transformer(info: dict, sector: str, industry: str,
+                                    cashflow, rev_ttm=None):
+    """
+    Detect companies undergoing structural transformation via massive AI/Robotics CapEx.
+
+    These are companies listed in 'traditional' sectors (auto, industrial, consumer)
+    that are investing at technology-company intensity.  The canonical example is Tesla:
+    classified as Consumer Cyclical / Auto Manufacturers but deploying capital into
+    AI inference, robotics (Optimus), and autonomous-vehicle infrastructure at a rate
+    that makes standard auto-sector DCF parameters badly wrong.
+
+    Criteria (ALL must be met):
+      1. Sector is auto / industrial / consumer (otherwise already priced as tech)
+      2. Annual CapEx / TTM Revenue > 8%  (high capex intensity signal)
+
+    Returns:
+      (is_transformer: bool, capex_abs: float, capex_to_rev: float)
+      capex_abs  – absolute CapEx value in reporting currency (positive)
+      capex_to_rev – CapEx as a fraction of revenue (e.g. 0.087 for Tesla)
+    """
+    # Must be in a traditionally-priced sector to qualify
+    s   = (sector   or "").lower()
+    ind = (industry or "").lower()
+    is_traditional = (
+        any(x in ind for x in ["auto", "automobile", "vehicle", "motor"]) or
+        "industrial" in s or
+        ("consumer" in s and "tech" not in s)
+    )
+    if not is_traditional:
+        return False, 0.0, 0.0
+
+    # Extract annual CapEx from the income / cashflow statement
+    capex_abs = 0.0
+    try:
+        if cashflow is not None and not cashflow.empty:
+            cpx_key = next(
+                (k for k in cashflow.index if "Capital Expenditure" in str(k)), None
+            )
+            if cpx_key:
+                raw = safe(cashflow.loc[cpx_key, cashflow.columns[0]])
+                if raw is not None:
+                    capex_abs = abs(float(raw))
+    except Exception:
+        pass
+
+    # Fallback: yfinance capitalExpenditures field (quarterly × 4 annualised)
+    if capex_abs == 0.0:
+        _ce = safe(info.get("capitalExpenditures"))
+        if _ce:
+            capex_abs = abs(float(_ce)) * 4  # quarterly → annual
+
+    if capex_abs == 0.0 or not rev_ttm or rev_ttm <= 0:
+        return False, 0.0, 0.0
+
+    capex_to_rev = capex_abs / rev_ttm
+    if capex_to_rev < 0.08:          # < 8% of revenue → standard company, not a transformer
+        return False, 0.0, capex_to_rev
+
+    return True, capex_abs, capex_to_rev
+
+
 def _classify_industry(sector: str, industry: str) -> str:
     """Map yfinance sector/industry strings to one of our INDUSTRY_PARAMS keys."""
     s   = (sector   or "").lower()
@@ -380,13 +445,15 @@ def _sector_to_mult_key(sector: str) -> str:
     return "default"
 
 
-def calc_multiples_val(info, sector, industry, fx_rate, ebitda_ttm=None, moat_premium=1.0):
+def calc_multiples_val(info, sector, industry, fx_rate, ebitda_ttm=None, moat_premium=1.0,
+                       override_ev_ebitda=None):
     """
     Fallback valuation when DCF is unavailable (negative equity or negative FCF).
     Method 1: Forward EPS × sector median Forward P/E
     Method 2: (EBITDA × sector EV/EBITDA − Net Debt) / Shares
-    moat_premium: multiplier applied to both sector multiples for High-Moat companies
-                  (1.0 = no change, 1.20 = 20% expansion above sector median).
+    moat_premium:       multiplier applied to both sector multiples for High-Moat companies.
+    override_ev_ebitda: if set, forces EV/EBITDA to this value (used for Structural Transformers
+                        to apply an AI-platform 35× multiple rather than auto 7×).
     Returns (value, method_label) or (None, None).
     """
     ind_class = _classify_industry(sector, industry)
@@ -397,6 +464,10 @@ def calc_multiples_val(info, sector, industry, fx_rate, ebitda_ttm=None, moat_pr
     }
     mk = class_to_mult.get(ind_class, "default")
     base_fpe, base_ev = SECTOR_MULT_PARAMS.get(mk, SECTOR_MULT_PARAMS["default"])
+
+    # Structural Transformer override: replace sector EV/EBITDA with AI-platform multiple
+    if override_ev_ebitda is not None:
+        base_ev = override_ev_ebitda
 
     # Apply moat expansion — 20% above sector median for backbone companies
     fpe_mult      = round(base_fpe * moat_premium, 1) if base_fpe else None
@@ -1542,6 +1613,14 @@ def analyze():
         fcf_series = [v * fx_rate for v in fcf_series]
         dcf_available = base_fcf is not None and base_fcf > 0
 
+        # ── Structural Transformer detection ──────────────────────────────────
+        # Must run after rev_ttm is known; rev_ttm is computed below in the
+        # income-statement block so we defer the call — state vars initialised here.
+        is_structural_transformer = False
+        st_capex_abs     = 0.0
+        st_capex_to_rev  = 0.0
+        st_capex_addback = 0.0
+
         # ── Tax rate ──────────────────────────────────────────────────────────
         tax_rate = calc_tax_rate(info, income_stmt)
 
@@ -1568,6 +1647,19 @@ def analyze():
         gross_margin_ttm = round(gp_ttm / rev_ttm * 100, 2) if gp_ttm and rev_ttm else None
         operating_margin_ttm = round(oi_ttm / rev_ttm * 100, 2) if oi_ttm and rev_ttm else None
         net_margin_ttm = round(ni_ttm / rev_ttm * 100, 2) if ni_ttm and rev_ttm else None
+
+        # ── Structural Transformer: detect + FCF normalisation ────────────────
+        # Now that rev_ttm is available, run the detection and adjust base_fcf.
+        is_structural_transformer, st_capex_abs, st_capex_to_rev = \
+            _detect_structural_transformer(info, sector, industry, cashflow, rev_ttm)
+
+        if is_structural_transformer and st_capex_abs > 0:
+            # 50% of CapEx reclassified as growth investment → add back to FCF.
+            # The remaining 50% stays as a maintenance cost (conservative).
+            st_capex_addback = 0.50 * st_capex_abs * fx_rate
+            _pre_st_fcf = base_fcf or 0.0
+            base_fcf    = (_pre_st_fcf + st_capex_addback)
+            dcf_available = base_fcf > 0  # re-evaluate now that FCF may have flipped positive
 
         # ── Moat Detection ───────────────────────────────────────────────────
         # Run before DCF so the classification can adjust WACC and TG ceilings.
@@ -1610,8 +1702,9 @@ def analyze():
         dcf_warning           = None
         growth_source         = None
         scenarios             = None
-        backbone_stage1_years = None   # set inside DCF block for backbone moat
-        cash_rich_wacc_applied = False  # set inside DCF block
+        backbone_stage1_years    = None   # set inside DCF block for backbone moat
+        cash_rich_wacc_applied   = False  # set inside DCF block
+        st_robotaxi_s2_applied   = False  # set inside DCF block for structural transformer
         net_debt         = ((safe(info.get("totalDebt"), 0) or 0) - (safe(info.get("totalCash"), 0) or 0)) * fx_rate
 
         # Banking: force DCF off unconditionally (whether or not FCF happens to be
@@ -1626,6 +1719,10 @@ def analyze():
 
         # ── Industry guardrails ───────────────────────────────────────────────
         ind_class  = _classify_industry(sector, industry)
+        # Structural transformers escape their traditional-sector guardrails and
+        # are priced with technology-platform parameters instead.
+        if is_structural_transformer:
+            ind_class = "structural_transformer"
         ind_params = INDUSTRY_PARAMS[ind_class]
         user_tg_override = request.args.get("terminal") is not None
 
@@ -1662,6 +1759,19 @@ def analyze():
             else:
                 s2 = max(s1 * 0.55, tg + 0.005)
 
+            # ── Structural Transformer: Robotaxi / FSD Stage 2 premium ────────
+            # Tesla launched unsupervised Robotaxis (Dallas/Houston, Q1 2026) with
+            # 1.3M paid FSD subscribers.  New recurring revenue streams materially
+            # lift the mid-period growth rate.  Apply a 15% uplift to Stage 2 when
+            # the user hasn't manually overridden s2.
+            st_robotaxi_s2_applied = False
+            if is_structural_transformer and not s2_ov:
+                _s2_pre = s2
+                s2 = min(s2 * 1.15, ind_params["max_s1"] * 0.65)  # 15% lift, capped
+                if s2 > _s2_pre:
+                    st_robotaxi_s2_applied = True
+                    growth_source = (growth_source or "") + " · +15% Robotaxi/FSD Stage 2 premium"
+
             wacc_data = calc_wacc(info, income_stmt, tax_rate, fx_rate)
             # Apply industry WACC floor (pure capital-structure math can give unrealistically
             # low WACC for junk-rated, highly-levered companies like airlines)
@@ -1686,12 +1796,21 @@ def analyze():
                 if not user_tg_override:
                     tg = min(tg, 0.030)
 
+            # ── Structural Transformer WACC ceiling ───────────────────────────
+            # High-beta auto/industrial tickers get a market beta that reflects
+            # legacy cyclical risk — not appropriate for an AI-platform company.
+            # Cap at 11.5% so the discount rate reflects a diversified tech business.
+            if is_structural_transformer and wacc > 0.115:
+                wacc = 0.115
+                wacc_data["wacc"] = wacc
+
             # ── Cash-Rich WACC Optimisation ───────────────────────────────────
-            # Companies with $50B+ in cash have institutional-grade balance sheets;
-            # cap WACC at 9% to match how buyside models price these securities.
+            # Companies with $50B+ in cash (or $25B+ for Structural Transformers)
+            # have institutional-grade balance sheets; cap WACC at 9%.
             total_cash_abs = (safe(info.get("totalCash"), 0) or 0) * fx_rate
             cash_rich_wacc_applied = False
-            if total_cash_abs > 50e9:
+            cash_rich_threshold = 25e9 if is_structural_transformer else 50e9
+            if total_cash_abs > cash_rich_threshold:
                 if wacc > 0.09:
                     wacc = 0.09
                     wacc_data["wacc"] = wacc
@@ -1732,11 +1851,11 @@ def analyze():
                 except Exception:
                     pass
 
-            # ── Extended Stage 1 for Backbone moat ───────────────────────────
-            # Backbone companies sustain high growth for a full decade — use all
-            # projection years at the Stage 1 rate instead of cutting to Stage 2
-            # at the midpoint.  S2 still applies in scenario runs for extra caution.
-            backbone_stage1_years = yrs if is_backbone_moat else None
+            # ── Extended Stage 1 for Backbone moat / Structural Transformer ─────
+            # Both backbone moat and structural transformer companies sustain high
+            # growth for a full decade — run the entire projection at the Stage 1
+            # rate.  S2 still applies in bear/bull scenario runs for extra caution.
+            backbone_stage1_years = yrs if (is_backbone_moat or is_structural_transformer) else None
 
             # ── Base case DCF ─────────────────────────────────────────────────
             intrinsic_value, projected, enterprise_value, equity_value, pv_terminal = \
@@ -1964,10 +2083,13 @@ def analyze():
         multiples_val    = None
         multiples_method = None
         multiples_reason = None
-        # Always compute multiples so we can use them for confidence blending too
+        # Always compute multiples so we can use them for confidence blending too.
+        # Structural Transformers use a 35× EV/EBITDA (AI-platform multiple) rather
+        # than the standard auto 7× to reflect the robotics/software platform value.
         _mult_v, _mult_m = calc_multiples_val(
             info, sector, industry, fx_rate, ebitda_ttm,
-            moat_premium=moat_mult_premium
+            moat_premium=moat_mult_premium,
+            override_ev_ebitda=35.0 if is_structural_transformer else None,
         )
         if intrinsic_value is None:
             multiples_reason = (
@@ -2176,6 +2298,11 @@ def analyze():
             "risk_labels":               risk_labels,
             "backbone_stage1_extended":  bool(backbone_stage1_years),
             "cash_rich_wacc_applied":    cash_rich_wacc_applied,
+            # Structural Transformer fields
+            "structural_transformer":    is_structural_transformer,
+            "st_capex_addback_bn":       round(st_capex_addback / 1e9, 2) if is_structural_transformer and st_capex_addback else None,
+            "st_capex_to_rev_pct":       round(st_capex_to_rev * 100, 1)  if is_structural_transformer else None,
+            "st_robotaxi_s2_applied":    st_robotaxi_s2_applied if is_structural_transformer else False,
         }
 
         return jsonify(clean(result))

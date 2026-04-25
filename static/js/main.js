@@ -140,6 +140,7 @@ function _buildMethodString(d) {
   else if (d.valuation_method === 'biotech')    parts.push('Biotech Specialist (EV/Rev)');
   else if (d.valuation_method === 'dcf_energy') parts.push('Energy DCF');
   else if (!d.dcf_available && d.multiples_val) parts.push('Industry Multiples');
+  else if (d.structural_transformer)            parts.push('Structural Transformer DCF');
   else if (d.moat_detected)                     parts.push('Adaptive Moat DCF');
   else                                           parts.push('DCF Model');
   // Modifiers
@@ -526,6 +527,23 @@ function renderResults(d) {
       <div class="sector-badge-body">
         <span class="sector-badge-title">${smTitle}</span>
         <span class="sector-badge-sub">${escHtml(d.sector_val_label)}${analystLine}</span>
+      </div>
+    </div>`;
+  }
+
+  // Structural Transformer badge — AI/Robotics platform reclassification
+  if (d.structural_transformer) {
+    const addbackStr = d.st_capex_addback_bn != null
+      ? ` · $${d.st_capex_addback_bn.toFixed(1)}B CapEx growth add-back`  : '';
+    const capexPctStr = d.st_capex_to_rev_pct != null
+      ? ` (CapEx ${d.st_capex_to_rev_pct.toFixed(1)}% of revenue)` : '';
+    const robotaxiStr = d.st_robotaxi_s2_applied
+      ? ' · Stage 2 +15% Robotaxi/FSD premium' : '';
+    warnHtml += `<div class="sector-badge sector-badge--transformer">
+      <span class="sector-badge-icon">⚡</span>
+      <div class="sector-badge-body">
+        <span class="sector-badge-title">Structural Transformer — AI / Robotics Platform</span>
+        <span class="sector-badge-sub">CapEx normalised: 50% of growth capex treated as investment, not cost${addbackStr}${capexPctStr} · 35× EV/EBITDA terminal multiple · WACC capped at 9%${robotaxiStr}</span>
       </div>
     </div>`;
   }

@@ -706,6 +706,15 @@ tfoot td:first-child { text-align: left; position: sticky; left: 0; }
   border-color: rgba(120,180,120,0.40);
   border-left-color: #78b478;
 }
+/* Structural Transformer badge — violet/purple for AI-platform reclassification */
+.sector-badge--transformer {
+  background: linear-gradient(135deg, rgba(147,112,219,0.11), rgba(147,112,219,0.05));
+  border-color: rgba(147,112,219,0.40);
+  border-left-color: #9b7fe8;
+}
+.sector-badge--transformer .sector-badge-icon  { color: #9b7fe8; }
+.sector-badge--transformer .sector-badge-title { color: #9b7fe8; }
+
 /* Consensus Anchor badge — gold/amber tone to signal model adjustment */
 .sector-badge--anchor {
   background: linear-gradient(135deg, rgba(196,154,60,0.10), rgba(196,154,60,0.05));
