@@ -289,10 +289,24 @@ body {
 .verdict-card.fair        .verdict-accent { background: linear-gradient(180deg,var(--gold),#8a6a1a); }
 .verdict-body { display: flex; flex: 1; flex-wrap: wrap; padding: 20px 24px; gap: 24px; align-items: center; }
 .verdict-section-left, .verdict-section-right { flex: 1; min-width: 150px; }
+/* Verdict label row — holds the label + confidence badge inline */
+.verdict-label-row {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap;
+}
 .verdict-label, .mos-label {
   font-size: 9px; font-weight: 700; letter-spacing: 1.2px;
-  color: var(--muted); text-transform: uppercase; margin-bottom: 4px; font-family: var(--mono);
+  color: var(--muted); text-transform: uppercase; font-family: var(--mono);
 }
+/* ── DCF Confidence Badge ──────────────────────────────────── */
+.conf-badge {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.5px;
+  padding: 2px 7px; border-radius: 4px; font-family: var(--mono);
+  cursor: default; white-space: nowrap; text-transform: uppercase;
+}
+.conf-high     { background: rgba(46,204,138,0.14); color: #2ECC8A; border: 1px solid rgba(46,204,138,0.30); }
+.conf-moderate { background: rgba(196,154,60,0.14); color: var(--gold); border: 1px solid rgba(196,154,60,0.30); }
+.conf-low      { background: rgba(224,84,105,0.14); color: var(--red);  border: 1px solid rgba(224,84,105,0.30); }
+.conf-na       { background: rgba(107,122,153,0.14); color: var(--muted2); border: 1px solid rgba(107,122,153,0.25); }
 .verdict-value {
   font-size: clamp(26px, 4vw, 40px); font-weight: 700;
   letter-spacing: -1px; line-height: 1; color: #fff; font-family: var(--mono);

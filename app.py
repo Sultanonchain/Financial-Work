@@ -450,6 +450,135 @@ def _bear_floor_iv(info, sector, industry, fx_rate, ebitda_ttm=None):
     return max(eq_floor / shares, 0.0)
 
 
+def _calc_dcf_confidence(info, sector, industry, fcf_series, dcf_available, valuation_method):
+    """
+    DCF Reliability Score — rates how trustworthy the model output is for this security.
+
+    Factors penalised:
+      • FCF inconsistency (negative years in recent history)
+      • Thin FCF margin (< 5%) — small assumption changes swing IV wildly
+      • High financial leverage (D/E > 150%) — debt amplifies model error
+      • Cyclical / commodity sectors with unpredictable cash flows
+      • Shrinking revenue base
+
+    Returns (level, label, strengths, weaknesses):
+      level: "high" | "moderate" | "low" | "not_applicable"
+    """
+    s   = (sector   or "").lower()
+    ind = (industry or "").lower()
+
+    # ── Not applicable ───────────────────────────────────────────────────────
+    if valuation_method in ("banking", "biotech"):
+        reason = ("Banks and financial companies are valued via P/B + P/E — "
+                  "DCF is structurally inappropriate (interest is operating cost)."
+                  if valuation_method == "banking"
+                  else "Biotech uses EV/Revenue + pipeline analysis — "
+                       "FCF-based DCF doesn't capture pipeline optionality.")
+        return "not_applicable", "Specialist Method", [], [reason]
+
+    if not dcf_available:
+        return "not_applicable", "DCF N/A", [],  [
+            "No positive free cash flow — DCF intrinsic value cannot be computed. "
+            "Multiples-based valuation is used instead."
+        ]
+
+    score     = 100
+    strengths = []
+    warnings  = []
+
+    # ── 1. FCF consistency ────────────────────────────────────────────────────
+    if fcf_series:
+        n_pos = sum(1 for f in fcf_series if f > 0)
+        n_tot = len(fcf_series)
+        n_neg = n_tot - n_pos
+        ratio = n_pos / n_tot
+        if ratio < 0.50:
+            score -= 35
+            warnings.append(
+                f"FCF negative in {n_neg} of last {n_tot} years — "
+                "model is extrapolating from an unstable earnings base"
+            )
+        elif ratio < 0.80:
+            score -= 15
+            warnings.append(
+                f"FCF inconsistent ({n_neg} negative year{'s' if n_neg > 1 else ''} "
+                f"in last {n_tot}) — projections carry elevated uncertainty"
+            )
+        else:
+            strengths.append(f"FCF positive in {n_pos}/{n_tot} years — consistent cash generation")
+
+    # ── 2. FCF margin (thin = high IV sensitivity) ────────────────────────────
+    rev_v = safe(info.get("totalRevenue"))
+    fcf_v = safe(info.get("freeCashflow"))
+    if rev_v and fcf_v and rev_v > 0:
+        fcf_pct = fcf_v / rev_v * 100
+        if fcf_pct < 3:
+            score -= 25
+            warnings.append(
+                f"Thin FCF margin ({fcf_pct:.1f}%) — a 1pp change in cost assumptions "
+                "can move IV by 20%+ ; treat output as a range, not a point estimate"
+            )
+        elif fcf_pct < 8:
+            score -= 10
+            warnings.append(
+                f"Moderate FCF margin ({fcf_pct:.1f}%) — cost structure adds model sensitivity"
+            )
+        else:
+            strengths.append(f"Strong FCF margin ({fcf_pct:.1f}%)")
+
+    # ── 3. Leverage (D/E amplifies error) ─────────────────────────────────────
+    de = safe(info.get("debtToEquity"))
+    if de is not None:
+        if de > 250:
+            score -= 20
+            warnings.append(
+                f"High leverage ({de/100:.1f}× D/E) — large interest obligations "
+                "make FCF projections fragile; EV/EBITDA is often more reliable here"
+            )
+        elif de > 130:
+            score -= 8
+            warnings.append(f"Above-average leverage ({de/100:.1f}× D/E) — monitor debt service")
+        else:
+            strengths.append(f"Conservative balance sheet ({de/100:.1f}× D/E)")
+
+    # ── 4. Cyclicality penalty ─────────────────────────────────────────────────
+    if any(x in ind for x in ["airline", "air freight", "airport"]):
+        score -= 22
+        warnings.append(
+            "Airlines: boom/bust FCF cycle makes any 10-year projection speculative; "
+            "EV/EBITDA through-the-cycle is the standard institutional approach"
+        )
+    elif any(x in ind for x in ["auto", "automobile", "vehicle"]):
+        score -= 14
+        warnings.append(
+            "Autos: cyclical demand + high CapEx intensity — "
+            "DCF terminal value is highly sensitive to assumed peak-cycle margins"
+        )
+    elif any(x in s + ind for x in ["oil", "gas", "coal", "metal", "mining"]):
+        score -= 12
+        warnings.append(
+            "Commodities: FCF is correlated with spot prices — "
+            "terminal value embeds commodity-price risk not visible in the model"
+        )
+
+    # ── 5. Shrinking revenue ───────────────────────────────────────────────────
+    rev_g = safe(info.get("revenueGrowth"))
+    if rev_g is not None and rev_g < -0.05:
+        score -= 15
+        warnings.append(
+            f"Revenue declining {rev_g*100:.1f}% YoY — "
+            "growth assumptions may be overstated relative to recent trajectory"
+        )
+
+    # ── Determine level ────────────────────────────────────────────────────────
+    if score >= 75:
+        return "high",     "High Confidence",     strengths, warnings
+    elif score >= 48:
+        return "moderate", "Moderate Confidence", strengths, warnings
+    else:
+        return "low",      "Low Confidence",      strengths, warnings
+
+
 def _detect_moat(net_margin, revenue_growth, earnings_growth, fcf_margin, roe):
     """
     Three-path moat classifier. All inputs are already in percentage form (e.g. 20 = 20%).
@@ -1764,27 +1893,60 @@ def analyze():
         if intrinsic_value is not None:
             intrinsic_value = max(round(intrinsic_value, 2), 0.0)
 
+        # ── DCF Confidence Score ──────────────────────────────────────────────
+        # Assess model reliability BEFORE deciding whether to blend with multiples.
+        dcf_conf_level, dcf_conf_label, dcf_conf_strengths, dcf_conf_warnings = \
+            _calc_dcf_confidence(
+                info, sector, industry, fcf_series,
+                dcf_available, valuation_method
+            )
+
         # ── Multiples fallback when DCF is unavailable ───────────────────────
         # Triggered when: (a) no positive FCF, or (b) net debt exceeds DCF enterprise value.
         # Never leaves the user without a value — industry multiples serve as the primary metric.
         multiples_val    = None
         multiples_method = None
         multiples_reason = None
+        # Always compute multiples so we can use them for confidence blending too
+        _mult_v, _mult_m = calc_multiples_val(
+            info, sector, industry, fx_rate, ebitda_ttm,
+            moat_premium=moat_mult_premium
+        )
         if intrinsic_value is None:
             multiples_reason = (
                 "High Debt Profile" if (dcf_available and equity_value is not None and equity_value < 0)
                 else "Negative/Missing Free Cash Flow"
             )
-            multiples_val, multiples_method = calc_multiples_val(
-                info, sector, industry, fx_rate, ebitda_ttm,
-                moat_premium=moat_mult_premium
-            )
+            multiples_val    = _mult_v
+            multiples_method = _mult_m
             if multiples_val and price:
                 multiples_mos = round((multiples_val - price) / price * 100, 1)
             else:
                 multiples_mos = None
         else:
-            multiples_mos = None
+            # ── Low-confidence blend: DCF + Multiples ─────────────────────────
+            # When model reliability is low AND multiples are available, blend the
+            # two approaches equally so users see a more anchored, conservative estimate.
+            # This prevents a fragile DCF from being taken as a precise price target.
+            if dcf_conf_level == "low" and _mult_v is not None:
+                _pre_blend_iv   = intrinsic_value
+                intrinsic_value = round(0.50 * intrinsic_value + 0.50 * _mult_v, 2)
+                multiples_val   = _mult_v
+                multiples_method = _mult_m
+                multiples_reason = (
+                    f"Low-Confidence Blend: DCF (${_pre_blend_iv:.2f}) 50% + "
+                    f"Multiples (${_mult_v:.2f}) 50%"
+                )
+                if price:
+                    margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
+                multiples_mos = round((_mult_v - price) / price * 100, 1) if price else None
+            elif dcf_conf_level == "moderate" and _mult_v is not None:
+                # Moderate: show multiples alongside but don't blend IV
+                multiples_val    = _mult_v
+                multiples_method = _mult_m
+                multiples_mos    = round((_mult_v - price) / price * 100, 1) if price else None
+            else:
+                multiples_mos = None
 
         # ── Sector / P/E context notes ────────────────────────────────────────
         pe_ttm    = safe(info.get("trailingPE"))
@@ -1803,6 +1965,12 @@ def analyze():
                          + ", ".join(adj_parts) + ". "
                          "These prevent mature-sector distortions in the Gordon Growth Model.")
             })
+
+        # ── Confidence warnings → dcf_notes ──────────────────────────────────
+        # Insert confidence warnings at the top of the notes stack so users see
+        # the reliability context before reading the contextual sector notes.
+        for warn_text in dcf_conf_warnings:
+            dcf_notes.insert(0, {"type": "warn", "text": warn_text})
 
         # ── Analyst Consensus Cross-Reference Note ────────────────────────────
         # Explain large divergences between VALUS model IV and sell-side consensus.
@@ -1935,6 +2103,11 @@ def analyze():
             "moat_reasons":     moat_reasons,
             "moat_wacc_delta":  round(moat_wacc_delta * 100, 2) if moat_wacc_delta else None,
             "moat_mult_premium":round((moat_mult_premium - 1) * 100) if moat_detected else None,
+            # DCF Confidence Score
+            "dcf_confidence":            dcf_conf_level,
+            "dcf_confidence_label":      dcf_conf_label,
+            "dcf_confidence_strengths":  dcf_conf_strengths,
+            "dcf_confidence_warnings":   dcf_conf_warnings,
             # Discovery Layer — catalyst research
             "catalyst_insights":         catalyst_insights,
             "has_positive_catalyst":     has_positive_catalyst,

@@ -184,6 +184,30 @@ function renderResults(d) {
     statItem('Target',       fmtPrice(d.target_price), 'cyan'),
   ].join('');
 
+  // ── DCF Confidence Badge ───────────────────────────────────────────────────
+  const confEl = $('confBadge');
+  if (confEl) {
+    const cl = d.dcf_confidence;
+    if (cl && cl !== 'not_applicable') {
+      const confMap = {
+        high:     { cls: 'conf-high',     icon: '✦', label: 'High Confidence'     },
+        moderate: { cls: 'conf-moderate', icon: '◈', label: 'Moderate Confidence' },
+        low:      { cls: 'conf-low',      icon: '⚠', label: 'Low Confidence'      },
+      };
+      const cm = confMap[cl] || confMap.moderate;
+      confEl.className = `conf-badge ${cm.cls}`;
+      confEl.innerHTML = `${cm.icon} ${cm.label}`;
+      confEl.title = (d.dcf_confidence_warnings || []).join(' · ') || cm.label;
+      confEl.classList.remove('hidden');
+    } else if (cl === 'not_applicable') {
+      confEl.className = 'conf-badge conf-na';
+      confEl.innerHTML = `◌ ${d.dcf_confidence_label || 'Specialist Method'}`;
+      confEl.classList.remove('hidden');
+    } else {
+      confEl.classList.add('hidden');
+    }
+  }
+
   // Verdict — use probability-weighted fair value
   const iv  = d.intrinsic_value;   // already set to weighted by backend
   const mos = d.margin_of_safety;
@@ -231,7 +255,10 @@ function renderResults(d) {
     mosEl.style.color  = color;
     $('mosFill').style.width      = Math.min(Math.abs(mos), 100) + '%';
     $('mosFill').style.background = color;
-    $('mosHint').textContent      = mos > 0 ? 'Trading below weighted fair value' : 'Trading above weighted fair value';
+    // Multiples reference for moderate-confidence models
+    const multRef = (d.dcf_confidence === 'moderate' || d.dcf_confidence === 'low') && d.multiples_val
+      ? ` · Multiples ref ${fmtPrice(d.multiples_val)}` : '';
+    $('mosHint').textContent = (mos > 0 ? 'Trading below weighted fair value' : 'Trading above weighted fair value') + multRef;
   }
 
   // Scenario analysis
