@@ -289,10 +289,24 @@ body {
 .verdict-card.fair        .verdict-accent { background: linear-gradient(180deg,var(--gold),#8a6a1a); }
 .verdict-body { display: flex; flex: 1; flex-wrap: wrap; padding: 20px 24px; gap: 24px; align-items: center; }
 .verdict-section-left, .verdict-section-right { flex: 1; min-width: 150px; }
-/* Verdict label row — holds the label + confidence badge inline */
+/* Verdict label row — label + confidence badge */
 .verdict-label-row {
   display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap;
 }
+/* Verdict value row — big number + signal badge side by side */
+.verdict-value-row {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 4px; flex-wrap: wrap;
+}
+/* ── Buy / Hold / Sell Signal Badge ───────────────────────── */
+.signal-badge {
+  font-size: 10px; font-weight: 800; letter-spacing: 0.5px;
+  padding: 4px 10px; border-radius: 5px;
+  font-family: var(--mono); text-transform: uppercase;
+  white-space: nowrap; flex-shrink: 0;
+}
+.signal-strong { background: rgba(46,204,138,0.15); color: var(--green); border: 1px solid rgba(46,204,138,0.35); }
+.signal-fair   { background: rgba(196,154,60,0.15); color: var(--gold);  border: 1px solid rgba(196,154,60,0.35); }
+.signal-over   { background: rgba(224,84,105,0.15); color: var(--red);   border: 1px solid rgba(224,84,105,0.35); }
 .verdict-label, .mos-label {
   font-size: 9px; font-weight: 700; letter-spacing: 1.2px;
   color: var(--muted); text-transform: uppercase; font-family: var(--mono);

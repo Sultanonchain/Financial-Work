@@ -1602,13 +1602,15 @@ def analyze():
         cash_rich_wacc_applied = False  # set inside DCF block
         net_debt         = ((safe(info.get("totalDebt"), 0) or 0) - (safe(info.get("totalCash"), 0) or 0)) * fx_rate
 
-        # Banking: force DCF off — interest income/expense are operating items,
-        # not financing, so FCF-based DCF systematically misprices financials.
-        if valuation_method == "banking" and dcf_available:
+        # Banking: force DCF off unconditionally (whether or not FCF happens to be
+        # positive in a given period) — interest is a core operating cost for banks,
+        # not a financing item, so FCF-based DCF systematically misprices them.
+        if valuation_method == "banking":
             dcf_available = False
-            dcf_warning   = ("Banking / Financial sector: DCF not applicable — "
-                             "interest items are core operating costs. "
-                             "Valuing via Price-to-Book and Price-to-Earnings.")
+            dcf_warning   = ("Traditional DCF is not applicable for banks — "
+                             "interest income/expense are core operating costs, not financing items. "
+                             "Value derived from sector-specific capital efficiency: "
+                             "Price-to-Book (P/B) and Return on Equity (ROE).")
 
         # ── Industry guardrails ───────────────────────────────────────────────
         ind_class  = _classify_industry(sector, industry)
@@ -1616,14 +1618,16 @@ def analyze():
         user_tg_override = request.args.get("terminal") is not None
 
         if not dcf_available:
-            if not fcf_series:
-                dcf_warning = "No Free Cash Flow data available — DCF not computed."
-            else:
-                most_recent = fcf_series[0] if fcf_series else 0
-                dcf_warning = (
-                    f"Most recent FCF is negative (${most_recent/1e9:.1f}B) — "
-                    "DCF intrinsic value is unreliable. Showing multiples-based analysis only."
-                )
+            # Banking warning already set above; set generic message for all other cases
+            if valuation_method != "banking":
+                if not fcf_series:
+                    dcf_warning = "No Free Cash Flow data available — DCF not computed."
+                else:
+                    most_recent = fcf_series[0] if fcf_series else 0
+                    dcf_warning = (
+                        f"Most recent FCF is negative (${most_recent/1e9:.1f}B) — "
+                        "DCF intrinsic value is unreliable. Showing multiples-based analysis only."
+                    )
         else:
             # ── Growth rate ───────────────────────────────────────────────────
             # Backbone moat companies (High-Growth / Mature Cash Machine) get a

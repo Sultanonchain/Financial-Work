@@ -208,57 +208,98 @@ function renderResults(d) {
     }
   }
 
-  // Verdict — use probability-weighted fair value
-  const iv  = d.intrinsic_value;   // already set to weighted by backend
+  // ── Verdict — unified rendering for DCF / Specialist / Multiples ──────────
+  const iv  = d.intrinsic_value;
   const mos = d.margin_of_safety;
   const sc  = d.scenarios;
   const card = $('verdictCard');
   card.className = 'verdict-card';
 
-  if (!d.dcf_available || iv == null) {
-    // Show multiples-based fallback if available
-    if (d.multiples_val) {
-      $('intrinsicValue').textContent = fmtPrice(d.multiples_val);
-      const mmos = d.multiples_mos;
-      let mtxt = '';
-      if (mmos > 15)       { card.classList.add('undervalued'); mtxt = `${fmtPct(mmos)} upside to multiples fair value`; }
-      else if (mmos < -15) { card.classList.add('overvalued');  mtxt = `${fmtPct(Math.abs(mmos))} above multiples fair value`; }
-      else                 { card.classList.add('fair');        mtxt = 'Trading near multiples-based fair value'; }
-      $('verdictSub').textContent = mtxt;
-      const mcolor = mmos > 15 ? 'var(--green)' : mmos < -15 ? 'var(--red)' : 'var(--gold)';
-      const mosEl = $('mosValue');
-      mosEl.textContent  = (mmos > 0 ? '+' : '') + fmtPct(mmos);
-      mosEl.style.color  = mcolor;
-      $('mosFill').style.width      = Math.min(Math.abs(mmos), 100) + '%';
-      $('mosFill').style.background = mcolor;
-      $('mosHint').textContent      = mmos > 0 ? 'Trading below multiples fair value' : 'Trading above multiples fair value';
-    } else {
-      $('intrinsicValue').textContent = 'N/A';
-      $('verdictSub').textContent     = d.dcf_warning || 'DCF not available';
-      $('mosValue').textContent       = '—';
-      $('mosFill').style.width        = '0';
-      $('mosHint').textContent        = '';
-      card.classList.add('fair');
-    }
-  } else {
-    $('intrinsicValue').textContent = fmtPrice(iv);
-    $('verdictSub').textContent     = '50/25/25 probability-weighted across 3 scenarios';
-    let txt = '';
-    if (mos > 15)       { card.classList.add('undervalued'); txt = `${fmtPct(mos)} upside to fair value — potentially undervalued`; }
-    else if (mos < -15) { card.classList.add('overvalued');  txt = `${fmtPct(Math.abs(mos))} above fair value — potentially overvalued`; }
-    else                { card.classList.add('fair');         txt = 'Trading near probability-weighted fair value'; }
-    $('verdictSub').textContent = txt;
+  // Classify what kind of value we're showing
+  const isDCF        = d.dcf_available && iv != null;
+  const isSpecialist = !d.dcf_available && iv != null;         // banking, biotech, etc.
+  const isMultiples  = !isDCF && !isSpecialist && d.multiples_val != null;
+  const hasValue     = isDCF || isSpecialist || isMultiples;
 
-    const color = mos > 15 ? 'var(--green)' : mos < -15 ? 'var(--red)' : 'var(--gold)';
+  const displayVal = isMultiples ? d.multiples_val : iv;
+  const displayMos = isMultiples ? d.multiples_mos : mos;
+
+  // ── Verdict label ──────────────────────────────────────────────────────────
+  const labelEl = $('verdictLabel');
+  if (labelEl) {
+    if      (isDCF)        labelEl.textContent = 'DCF Intrinsic Value';
+    else if (isSpecialist) labelEl.textContent = 'Specialist Valuation';
+    else if (isMultiples)  labelEl.textContent = 'Multiples-Based Value';
+    else                   labelEl.textContent = 'Intrinsic Value';
+  }
+
+  if (!hasValue) {
+    // Truly nothing to show
+    $('intrinsicValue').textContent = 'N/A';
+    $('verdictSub').textContent     = d.dcf_warning || 'Valuation not available for this security.';
+    $('mosValue').textContent       = '—';
+    $('mosFill').style.width        = '0';
+    $('mosHint').textContent        = '';
+    card.classList.add('fair');
+    hide('signalBadge');
+  } else {
+    $('intrinsicValue').textContent = fmtPrice(displayVal);
+
+    // ── Signal badge (Buy / Hold / Sell) ──────────────────────────────────
+    const sigEl = $('signalBadge');
+    if (sigEl) {
+      if (displayMos == null) {
+        sigEl.classList.add('hidden');
+      } else if (displayMos > 20) {
+        sigEl.className   = 'signal-badge signal-strong';
+        sigEl.textContent = '▲ Strong Value';
+        sigEl.classList.remove('hidden');
+      } else if (displayMos >= 0) {
+        sigEl.className   = 'signal-badge signal-fair';
+        sigEl.textContent = '◆ Fair Value';
+        sigEl.classList.remove('hidden');
+      } else {
+        sigEl.className   = 'signal-badge signal-over';
+        sigEl.textContent = '▼ Overvalued';
+        sigEl.classList.remove('hidden');
+      }
+    }
+
+    // ── Verdict card colouring + sub text ─────────────────────────────────
+    let sub = '';
+    if (displayMos > 15)       { card.classList.add('undervalued'); sub = `${fmtPct(displayMos)} upside to fair value`; }
+    else if (displayMos < -15) { card.classList.add('overvalued');  sub = `${fmtPct(Math.abs(displayMos))} above fair value`; }
+    else                       { card.classList.add('fair');        sub = 'Trading near fair value'; }
+
+    if (isDCF) {
+      sub += ' · 50/25/25 probability-weighted';
+    } else if (isSpecialist) {
+      const vm = d.valuation_method || '';
+      const methodLine = vm === 'banking' ? 'P/B + P/E methodology'
+                       : vm === 'biotech' ? 'EV/Revenue + analyst blend'
+                       : d.sector_val_label ? d.sector_val_label.split('+')[0].trim() : 'Sector method';
+      sub += ` · ${methodLine}`;
+    } else if (isMultiples) {
+      sub += ` · ${d.multiples_method || 'Industry multiples'}`;
+    }
+    $('verdictSub').textContent = sub;
+
+    // ── MoS track ─────────────────────────────────────────────────────────
+    const color = displayMos > 15 ? 'var(--green)' : displayMos < -15 ? 'var(--red)' : 'var(--gold)';
     const mosEl = $('mosValue');
-    mosEl.textContent  = (mos > 0 ? '+' : '') + fmtPct(mos);
-    mosEl.style.color  = color;
-    $('mosFill').style.width      = Math.min(Math.abs(mos), 100) + '%';
-    $('mosFill').style.background = color;
-    // Multiples reference for moderate-confidence models
-    const multRef = (d.dcf_confidence === 'moderate' || d.dcf_confidence === 'low') && d.multiples_val
+    if (displayMos != null) {
+      mosEl.textContent       = (displayMos > 0 ? '+' : '') + fmtPct(displayMos);
+      mosEl.style.color       = color;
+      $('mosFill').style.width      = Math.min(Math.abs(displayMos), 100) + '%';
+      $('mosFill').style.background = color;
+    } else {
+      mosEl.textContent = '—';
+      $('mosFill').style.width = '0';
+    }
+    const mosHintBase = displayMos > 0 ? 'Trading below fair value' : 'Trading above fair value';
+    const multRef = (d.dcf_confidence === 'moderate' || d.dcf_confidence === 'low') && d.multiples_val && !isMultiples
       ? ` · Multiples ref ${fmtPrice(d.multiples_val)}` : '';
-    $('mosHint').textContent = (mos > 0 ? 'Trading below weighted fair value' : 'Trading above weighted fair value') + multRef;
+    $('mosHint').textContent = mosHintBase + multRef;
   }
 
   // Scenario analysis
