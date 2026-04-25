@@ -66,6 +66,7 @@
 <!-- RESULTS -->
 <main id="results" class="results hidden">
 
+  <!-- ── HERO (always visible) ─────────────────────────────── -->
   <!-- Company header -->
   <div class="company-header">
     <div class="company-info">
@@ -88,15 +89,12 @@
     </div>
   </div>
 
-  <!-- Key stats strip -->
-  <div class="stats-strip" id="statsStrip"></div>
-
-  <!-- Verdict -->
+  <!-- Verdict card -->
   <div class="verdict-card" id="verdictCard">
     <div class="verdict-accent"></div>
     <div class="verdict-main">
 
-      <!-- Bear / Base / Bull scenario toggle — hidden until DCF scenarios exist -->
+      <!-- Bear / Base / Bull scenario toggle -->
       <div class="sc-toggle hidden" id="scenarioToggle">
         <div class="sc-tog-wrap">
           <button class="sc-tog-btn" data-scenario="bear" onclick="activateScenario('bear')">▼ Bear</button>
@@ -129,88 +127,109 @@
     </div>
   </div>
 
-  <!-- DCF Warning -->
-  <div id="dcfWarning" class="dcf-warning hidden"></div>
+  <!-- ── View Analysis trigger ─────────────────────────────── -->
+  <div class="view-analysis-trigger hidden" id="viewAnalysisTrigger">
+    <button class="view-analysis-btn" id="viewAnalysisBtn" onclick="toggleDetailDrawer()">
+      <span id="viewAnalysisBtnText">View Detailed Analysis &amp; Assumptions</span>
+      <span class="view-analysis-arrow" id="viewAnalysisArrow">▾</span>
+    </button>
+  </div>
 
-  <!-- Live Analyst Notes (Discovery Layer) -->
-  <div id="liveCatalystBox" class="live-catalyst-box hidden"></div>
+  <!-- ── Detail Drawer (hidden until trigger clicked) ──────── -->
+  <div id="detailDrawer" class="detail-drawer">
+    <div class="detail-drawer-inner">
 
-  <!-- Scenario Analysis -->
-  <div class="card hidden" id="scenarioCard"></div>
+      <!-- Key stats strip -->
+      <div class="stats-strip" id="statsStrip"></div>
 
-  <!-- Price chart -->
-  <div class="card">
-    <div class="card-header">
-      <h3 class="card-title">Price Chart</h3>
-      <div class="period-btns">
-        <button class="period-btn" data-period="1d">1D</button>
-        <button class="period-btn" data-period="5d">5D</button>
-        <button class="period-btn" data-period="1m">1M</button>
-        <button class="period-btn" data-period="3m">3M</button>
-        <button class="period-btn" data-period="6m">6M</button>
-        <button class="period-btn" data-period="ytd">YTD</button>
-        <button class="period-btn active" data-period="1y">1Y</button>
-        <button class="period-btn" data-period="5y">5Y</button>
+      <!-- Methodology badges + DCF notes -->
+      <div id="dcfWarning" class="dcf-warning hidden"></div>
+
+      <!-- Live Analyst Notes -->
+      <div id="liveCatalystBox" class="live-catalyst-box hidden"></div>
+
+      <!-- Scenario Analysis -->
+      <div class="card hidden" id="scenarioCard"></div>
+
+      <!-- Price chart -->
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Price Chart</h3>
+          <div class="period-btns">
+            <button class="period-btn" data-period="1d">1D</button>
+            <button class="period-btn" data-period="5d">5D</button>
+            <button class="period-btn" data-period="1m">1M</button>
+            <button class="period-btn" data-period="3m">3M</button>
+            <button class="period-btn" data-period="6m">6M</button>
+            <button class="period-btn" data-period="ytd">YTD</button>
+            <button class="period-btn active" data-period="1y">1Y</button>
+            <button class="period-btn" data-period="5y">5Y</button>
+          </div>
+        </div>
+        <div class="chart-wrap"><canvas id="priceChart"></canvas></div>
+        <div class="chart-loading hidden" id="chartLoading"><div class="spinner-sm"></div></div>
       </div>
-    </div>
-    <div class="chart-wrap"><canvas id="priceChart"></canvas></div>
-    <div class="chart-loading hidden" id="chartLoading"><div class="spinner-sm"></div></div>
-  </div>
 
-  <!-- Metrics grid -->
-  <div class="metrics-grid">
-    <div class="card">
-      <h3 class="card-title">Valuation Multiples</h3>
-      <div class="metric-list" id="valuationMetrics"></div>
-    </div>
-    <div class="card">
-      <h3 class="card-title">DCF Assumptions <span class="info-hint" onclick="openDcfGuide()">?</span></h3>
-      <div class="metric-list" id="dcfAssumptions"></div>
-    </div>
-    <div class="card">
-      <h3 class="card-title">Financials</h3>
-      <div class="metric-list" id="financialMetrics"></div>
-    </div>
-    <div class="card">
-      <h3 class="card-title">Financial Health</h3>
-      <div class="metric-list" id="healthMetrics"></div>
-    </div>
-  </div>
-
-  <!-- DCF Chart -->
-  <div class="card" id="dcfChartCard">
-    <div class="card-header">
-      <h3 class="card-title">DCF — Projected vs. Discounted Free Cash Flow</h3>
-      <span class="card-sub">Billions USD</span>
-    </div>
-    <div class="chart-wrap chart-wrap--tall"><canvas id="dcfChart"></canvas></div>
-  </div>
-
-  <!-- DCF Model table -->
-  <div class="card" id="dcfTableCard">
-    <h3 class="card-title" style="margin-bottom:14px">Full DCF Model</h3>
-    <div class="table-scroll">
-      <table>
-        <thead><tr><th>Year</th><th>Stage</th><th>Growth</th><th>Projected FCF</th><th>Present Value</th></tr></thead>
-        <tbody id="projectionBody"></tbody>
-        <tfoot id="projectionFoot"></tfoot>
-      </table>
-    </div>
-  </div>
-
-  <!-- Financial Statements -->
-  <div class="card">
-    <div class="card-header">
-      <h3 class="card-title">Financial Statements</h3>
-      <div class="stmt-tabs">
-        <button class="stmt-tab active" data-tab="income">Income</button>
-        <button class="stmt-tab" data-tab="balance">Balance Sheet</button>
-        <button class="stmt-tab" data-tab="cashflow">Cash Flow</button>
+      <!-- Metrics grid -->
+      <div class="metrics-grid">
+        <div class="card">
+          <h3 class="card-title">Valuation Multiples</h3>
+          <div class="metric-list" id="valuationMetrics"></div>
+        </div>
+        <div class="card">
+          <h3 class="card-title">DCF Assumptions <span class="info-hint" onclick="openDcfGuide()">?</span></h3>
+          <div class="metric-list" id="dcfAssumptions"></div>
+        </div>
+        <div class="card">
+          <h3 class="card-title">Financials</h3>
+          <div class="metric-list" id="financialMetrics"></div>
+        </div>
+        <div class="card">
+          <h3 class="card-title">Financial Health</h3>
+          <div class="metric-list" id="healthMetrics"></div>
+        </div>
       </div>
-    </div>
-    <div id="statementsLoading" class="stmt-loading"><div class="spinner-sm"></div> Loading…</div>
-    <div id="statementsContent" class="table-scroll hidden"></div>
-  </div>
+
+      <!-- DCF Chart -->
+      <div class="card" id="dcfChartCard">
+        <div class="card-header">
+          <h3 class="card-title">DCF — Projected vs. Discounted Free Cash Flow</h3>
+          <span class="card-sub">Billions USD</span>
+        </div>
+        <div class="chart-wrap chart-wrap--tall"><canvas id="dcfChart"></canvas></div>
+      </div>
+
+      <!-- DCF Model table -->
+      <div class="card" id="dcfTableCard">
+        <h3 class="card-title" style="margin-bottom:14px">Full DCF Model</h3>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Year</th><th>Stage</th><th>Growth</th><th>Projected FCF</th><th>Present Value</th></tr></thead>
+            <tbody id="projectionBody"></tbody>
+            <tfoot id="projectionFoot"></tfoot>
+          </table>
+        </div>
+      </div>
+
+      <!-- Financial Statements -->
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Financial Statements</h3>
+          <div class="stmt-tabs">
+            <button class="stmt-tab active" data-tab="income">Income</button>
+            <button class="stmt-tab" data-tab="balance">Balance Sheet</button>
+            <button class="stmt-tab" data-tab="cashflow">Cash Flow</button>
+          </div>
+        </div>
+        <div id="statementsLoading" class="stmt-loading"><div class="spinner-sm"></div> Loading…</div>
+        <div id="statementsContent" class="table-scroll hidden"></div>
+      </div>
+
+      <!-- Technical Appendix -->
+      <div class="tech-appendix" id="techAppendix"></div>
+
+    </div><!-- /detail-drawer-inner -->
+  </div><!-- /detailDrawer -->
 
 </main>
 

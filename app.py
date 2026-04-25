@@ -343,25 +343,72 @@ def _detect_structural_transformer(info: dict, sector: str, industry: str,
 
     Criteria (ALL must be met):
       1. Sector is auto / industrial / consumer (otherwise already priced as tech)
-      2. Annual CapEx / TTM Revenue > 8%  (high capex intensity signal)
+      2. Industry is NOT retail / e-commerce / logistics (their CapEx is for
+         fulfilment centres & data-centre capacity, not AI moonshots)
+      3. Annual CapEx / TTM Revenue > 8%  (high capex intensity signal)
 
     Returns:
-      (is_transformer: bool, capex_abs: float, capex_to_rev: float)
-      capex_abs  – absolute CapEx value in reporting currency (positive)
-      capex_to_rev – CapEx as a fraction of revenue (e.g. 0.087 for Tesla)
+      (is_transformer: bool, capex_abs: float, capex_to_rev: float, addback_rate: float)
+      capex_abs     – absolute CapEx in reporting currency (positive)
+      capex_to_rev  – CapEx as fraction of revenue (e.g. 0.087 for Tesla)
+      addback_rate  – fraction of CapEx treated as growth investment (0.50 or 0.20)
     """
-    # Must be in a traditionally-priced sector to qualify
     s   = (sector   or "").lower()
     ind = (industry or "").lower()
+
+    # Must be in a traditionally-priced sector to qualify
     is_traditional = (
         any(x in ind for x in ["auto", "automobile", "vehicle", "motor"]) or
         "industrial" in s or
         ("consumer" in s and "tech" not in s)
     )
     if not is_traditional:
-        return False, 0.0, 0.0
+        return False, 0.0, 0.0, 0.50
 
-    # Extract annual CapEx from the income / cashflow statement
+    # For internet / broadline retail: CapEx funds fulfilment centres and commercial
+    # cloud, NOT proprietary AI moonshots → exclude from full Structural Transformer.
+    # HOWEVER, for mega-scale platform retailers (AMZN, Alibaba) a partial 20%
+    # logistics-investment normalization is still warranted.  We return the CapEx
+    # data with addback_rate=0.20 and is_transformer=False so downstream code can
+    # apply just the FCF normalisation without the full overlay.
+    _RETAIL_PARTIAL = [
+        "internet retail", "broadline retail", "e-commerce", "catalog retail",
+    ]
+    _RETAIL_FULL_EXCL = [
+        "specialty retail", "home improvement retail", "discount stores",
+        "department stores", "grocery stores", "food distribution",
+        "wholesale", "wholesale distributors", "general merchandise",
+    ]
+    is_retail_partial = any(x in ind for x in _RETAIL_PARTIAL)
+    is_retail_full_excl = any(x in ind for x in _RETAIL_FULL_EXCL)
+    if is_retail_full_excl:
+        return False, 0.0, 0.0, 0.50   # no addback at all
+    if is_retail_partial:
+        # Compute CapEx, then return partial normalization (no full transformer)
+        capex_abs = 0.0
+        try:
+            if cashflow is not None and not cashflow.empty:
+                cpx_key = next(
+                    (k for k in cashflow.index if "Capital Expenditure" in str(k)), None
+                )
+                if cpx_key:
+                    raw = safe(cashflow.loc[cpx_key, cashflow.columns[0]])
+                    if raw is not None:
+                        capex_abs = abs(float(raw))
+        except Exception:
+            pass
+        if capex_abs == 0.0:
+            _ce = safe(info.get("capitalExpenditures"))
+            if _ce:
+                capex_abs = abs(float(_ce)) * 4
+        if capex_abs > 0 and rev_ttm and rev_ttm > 0:
+            capex_to_rev = capex_abs / rev_ttm
+            # Only normalise if CapEx intensity is meaningfully high (>= 6%)
+            if capex_to_rev >= 0.06:
+                return False, capex_abs, capex_to_rev, 0.20
+        return False, 0.0, 0.0, 0.50
+
+    # Extract annual CapEx from the cashflow statement
     capex_abs = 0.0
     try:
         if cashflow is not None and not cashflow.empty:
@@ -382,13 +429,22 @@ def _detect_structural_transformer(info: dict, sector: str, industry: str,
             capex_abs = abs(float(_ce)) * 4  # quarterly → annual
 
     if capex_abs == 0.0 or not rev_ttm or rev_ttm <= 0:
-        return False, 0.0, 0.0
+        return False, 0.0, 0.0, 0.50
 
     capex_to_rev = capex_abs / rev_ttm
-    if capex_to_rev < 0.08:          # < 8% of revenue → standard company, not a transformer
-        return False, 0.0, capex_to_rev
+    if capex_to_rev < 0.08:      # < 8% of revenue → standard company, not a transformer
+        return False, 0.0, capex_to_rev, 0.50
 
-    return True, capex_abs, capex_to_rev
+    # Addback rate: auto/industrial companies (TSLA, etc.) have highly purposeful
+    # growth CapEx → treat 50% as investment.  Consumer non-auto companies that
+    # somehow pass the above filters are more mixed → conservative 20% addback.
+    is_auto_or_industrial = (
+        any(x in ind for x in ["auto", "automobile", "vehicle", "motor"]) or
+        "industrial" in s
+    )
+    addback_rate = 0.50 if is_auto_or_industrial else 0.20
+
+    return True, capex_abs, capex_to_rev, addback_rate
 
 
 def _classify_industry(sector: str, industry: str) -> str:
@@ -650,13 +706,18 @@ def _calc_dcf_confidence(info, sector, industry, fcf_series, dcf_available, valu
         return "low",      "Low Confidence",      strengths, warnings
 
 
-def _detect_moat(net_margin, revenue_growth, earnings_growth, fcf_margin, roe):
+def _detect_moat(net_margin, revenue_growth, earnings_growth, fcf_margin, roe,
+                  rev_ttm_bn=None):
     """
-    Three-path moat classifier. All inputs are already in percentage form (e.g. 20 = 20%).
+    Four-path moat classifier.  All percentage inputs are already in % form (e.g. 20 = 20%).
 
     Path A — High-Growth Backbone:      Net margin > 20%  AND  Revenue growth > 15%
     Path B — Mature Cash Machine:       Net margin > 25%  AND  Earnings growth > 15%
     Path C — Capital-Light Compounder:  Net margin > 20%  AND  FCF margin > 20%  AND  ROE > 25%
+    Path D — Platform Scale Economy:    Revenue > $200B   AND  Revenue growth > 8%
+                                        AND  FCF margin > 2%
+              (catches mega-cap platform cos like AMZN whose blended margins are low
+               because they reinvest aggressively — AWS/Advertising drive hidden economics)
 
     Returns (is_high_moat: bool, path_label: str | None, reasons: list[str])
     """
@@ -665,6 +726,7 @@ def _detect_moat(net_margin, revenue_growth, earnings_growth, fcf_margin, roe):
     eg    = earnings_growth or 0
     fm    = fcf_margin      or 0
     roe_v = roe             or 0
+    rev_b = rev_ttm_bn      or 0   # billions
 
     if nm > 20 and rg > 15:
         return True, "High-Growth Backbone", [
@@ -675,6 +737,13 @@ def _detect_moat(net_margin, revenue_growth, earnings_growth, fcf_margin, roe):
     if nm > 20 and fm > 20 and roe_v > 25:
         return True, "Capital-Light Compounder", [
             f"Net margin {nm:.1f}%", f"FCF margin {fm:.1f}%", f"ROE {roe_v:.1f}%"]
+    # Path D: Platform Scale Economy — massive revenue with profitable FCF and solid growth.
+    # Low blended margins don't tell the full story for platform companies that run
+    # high-margin digital segments (cloud, advertising) alongside capital-intensive logistics.
+    if rev_b > 200 and rg > 8 and fm > 2:
+        return True, "Platform Scale Economy", [
+            f"${rev_b:.0f}B revenue scale", f"Revenue growth {rg:.1f}%",
+            f"FCF margin {fm:.1f}%"]
     return False, None, []
 
 
@@ -1616,10 +1685,11 @@ def analyze():
         # ── Structural Transformer detection ──────────────────────────────────
         # Must run after rev_ttm is known; rev_ttm is computed below in the
         # income-statement block so we defer the call — state vars initialised here.
-        is_structural_transformer = False
-        st_capex_abs     = 0.0
-        st_capex_to_rev  = 0.0
-        st_capex_addback = 0.0
+        is_structural_transformer  = False
+        st_capex_abs               = 0.0
+        st_capex_to_rev            = 0.0
+        st_capex_addback           = 0.0
+        st_capex_addback_rate      = 0.50
 
         # ── Tax rate ──────────────────────────────────────────────────────────
         tax_rate = calc_tax_rate(info, income_stmt)
@@ -1650,16 +1720,18 @@ def analyze():
 
         # ── Structural Transformer: detect + FCF normalisation ────────────────
         # Now that rev_ttm is available, run the detection and adjust base_fcf.
-        is_structural_transformer, st_capex_abs, st_capex_to_rev = \
+        is_structural_transformer, st_capex_abs, st_capex_to_rev, st_capex_addback_rate = \
             _detect_structural_transformer(info, sector, industry, cashflow, rev_ttm)
 
-        if is_structural_transformer and st_capex_abs > 0:
-            # 50% of CapEx reclassified as growth investment → add back to FCF.
-            # The remaining 50% stays as a maintenance cost (conservative).
-            st_capex_addback = 0.50 * st_capex_abs * fx_rate
+        # Apply CapEx normalization for:
+        #   a) Full structural transformers (TSLA) — 50% addback
+        #   b) Partial platform normalization (AMZN) — 20% logistics addback
+        # The addback runs whenever st_capex_abs > 0, regardless of is_structural_transformer.
+        if st_capex_abs > 0 and st_capex_addback_rate > 0:
+            st_capex_addback = st_capex_addback_rate * st_capex_abs * fx_rate
             _pre_st_fcf = base_fcf or 0.0
             base_fcf    = (_pre_st_fcf + st_capex_addback)
-            dcf_available = base_fcf > 0  # re-evaluate now that FCF may have flipped positive
+            dcf_available = base_fcf > 0  # re-evaluate now that FCF may have changed
 
         # ── Moat Detection ───────────────────────────────────────────────────
         # Run before DCF so the classification can adjust WACC and TG ceilings.
@@ -1676,8 +1748,10 @@ def analyze():
             round(_fcf_preview / _rev_preview * 100, 1)
             if _fcf_preview and _rev_preview and _rev_preview > 0 else None
         )
+        _rev_ttm_bn = round(rev_ttm / 1e9, 1) if rev_ttm else None
         moat_detected, moat_path, moat_reasons = _detect_moat(
-            net_margin_ttm, rev_growth_pct, earn_growth_pct, fcf_margin_preview, roe_pct
+            net_margin_ttm, rev_growth_pct, earn_growth_pct, fcf_margin_preview, roe_pct,
+            rev_ttm_bn=_rev_ttm_bn
         )
         moat_wacc_delta   = 0.0      # how many pp of WACC were removed (filled below)
         moat_mult_premium = 1.20 if moat_detected else 1.0  # 20% multiple expansion
@@ -2300,8 +2374,10 @@ def analyze():
             "cash_rich_wacc_applied":    cash_rich_wacc_applied,
             # Structural Transformer fields
             "structural_transformer":    is_structural_transformer,
-            "st_capex_addback_bn":       round(st_capex_addback / 1e9, 2) if is_structural_transformer and st_capex_addback else None,
-            "st_capex_to_rev_pct":       round(st_capex_to_rev * 100, 1)  if is_structural_transformer else None,
+            # st_capex fields are populated for both full transformers and partial normalizations
+            "st_capex_addback_bn":       round(st_capex_addback / 1e9, 2) if st_capex_addback else None,
+            "st_capex_addback_rate_pct": round(st_capex_addback_rate * 100) if st_capex_abs > 0 else None,
+            "st_capex_to_rev_pct":       round(st_capex_to_rev * 100, 1) if st_capex_to_rev else None,
             "st_robotaxi_s2_applied":    st_robotaxi_s2_applied if is_structural_transformer else False,
         }
 

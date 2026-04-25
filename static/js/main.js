@@ -200,6 +200,46 @@ function copyAnalysis() {
   });
 }
 
+/* ── Detail drawer ────────────────────────────────────────── */
+function toggleDetailDrawer() {
+  const drawer = $('detailDrawer');
+  const arrow  = $('viewAnalysisArrow');
+  const label  = $('viewAnalysisBtnText');
+  const btn    = $('viewAnalysisBtn');
+  if (!drawer) return;
+  const isOpen = drawer.classList.toggle('open');
+  if (arrow) arrow.classList.toggle('rotated', isOpen);
+  if (btn)   btn.classList.toggle('open', isOpen);
+  if (label) label.textContent = isOpen
+    ? 'Hide Detailed Analysis'
+    : 'View Detailed Analysis \u0026 Assumptions';
+  if (isOpen) {
+    // Scroll trigger into view
+    setTimeout(() => {
+      const trigger = $('viewAnalysisTrigger');
+      if (trigger) trigger.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
+    // Chart.js renders at zero size when the container is collapsed.
+    // Resize after the CSS grid animation completes (~700ms).
+    setTimeout(() => {
+      if (priceChart) priceChart.resize();
+      if (dcfChart)   dcfChart.resize();
+    }, 750);
+  }
+}
+
+function _resetDrawer() {
+  const drawer = $('detailDrawer');
+  const arrow  = $('viewAnalysisArrow');
+  const btn    = $('viewAnalysisBtn');
+  const label  = $('viewAnalysisBtnText');
+  if (drawer) drawer.classList.remove('open');
+  if (arrow)  arrow.classList.remove('rotated');
+  if (btn)    btn.classList.remove('open');
+  if (label)  label.textContent = 'View Detailed Analysis \u0026 Assumptions';
+  hide('viewAnalysisTrigger');
+}
+
 /* ── Modal ────────────────────────────────────────────────── */
 function openDcfGuide()  { $('dcfModal').classList.remove('hidden'); document.body.style.overflow = 'hidden'; }
 function closeDcfGuide() { $('dcfModal').classList.add('hidden');    document.body.style.overflow = ''; }
@@ -292,9 +332,10 @@ async function runAnalysis() {
   $('loadingTicker').textContent = ticker;
   show('loadingState'); hide('results'); hide('errorState');
   $('analyzeBtn').disabled = true;
-  // Cancel any in-flight IV animation and reset toggle state
+  // Cancel any in-flight IV animation and reset toggle + drawer state
   if (_ivAnimRaf) { cancelAnimationFrame(_ivAnimRaf); _ivAnimRaf = null; }
   _activeData = null;
+  _resetDrawer();
   const _prevTog = $('scenarioToggle');
   if (_prevTog) _prevTog.classList.add('hidden');
 
@@ -531,8 +572,9 @@ function renderResults(d) {
     </div>`;
   }
 
-  // Structural Transformer badge — AI/Robotics platform reclassification
+  // Structural Transformer badge — full AI/Robotics platform reclassification (e.g. TSLA)
   if (d.structural_transformer) {
+    const rateStr    = d.st_capex_addback_rate_pct != null ? `${d.st_capex_addback_rate_pct}%` : '50%';
     const addbackStr = d.st_capex_addback_bn != null
       ? ` · $${d.st_capex_addback_bn.toFixed(1)}B CapEx growth add-back`  : '';
     const capexPctStr = d.st_capex_to_rev_pct != null
@@ -543,7 +585,21 @@ function renderResults(d) {
       <span class="sector-badge-icon">⚡</span>
       <div class="sector-badge-body">
         <span class="sector-badge-title">Structural Transformer — AI / Robotics Platform</span>
-        <span class="sector-badge-sub">CapEx normalised: 50% of growth capex treated as investment, not cost${addbackStr}${capexPctStr} · 35× EV/EBITDA terminal multiple · WACC capped at 9%${robotaxiStr}</span>
+        <span class="sector-badge-sub">CapEx normalised: ${rateStr} of growth capex treated as investment, not cost${addbackStr}${capexPctStr} · 35× EV/EBITDA terminal multiple · WACC capped at 9%${robotaxiStr}</span>
+      </div>
+    </div>`;
+  }
+  // Platform Logistics Normalization badge — partial CapEx add-back for internet retail (e.g. AMZN)
+  else if (!d.structural_transformer && d.st_capex_addback_bn != null) {
+    const addbackStr = `$${d.st_capex_addback_bn.toFixed(1)}B`;
+    const capexPctStr = d.st_capex_to_rev_pct != null
+      ? ` (CapEx ${d.st_capex_to_rev_pct.toFixed(1)}% of revenue)` : '';
+    const rateStr = d.st_capex_addback_rate_pct != null ? `${d.st_capex_addback_rate_pct}%` : '20%';
+    warnHtml += `<div class="sector-badge sector-badge--logistics">
+      <span class="sector-badge-icon">📦</span>
+      <div class="sector-badge-body">
+        <span class="sector-badge-title">Platform Logistics Normalization</span>
+        <span class="sector-badge-sub">${rateStr} of logistics CapEx treated as growth investment (${addbackStr} add-back)${capexPctStr} · Standard DCF methodology otherwise</span>
       </div>
     </div>`;
   }
@@ -556,27 +612,45 @@ function renderResults(d) {
       <span class="sector-badge-icon">⚖</span>
       <div class="sector-badge-body">
         <span class="sector-badge-title">Consensus Anchor Applied</span>
-        <span class="sector-badge-sub">Consensus Blending Applied: Price adjusted toward analyst targets to account for near-term pipeline uncertainty. (70% model · 30% consensus)${atStr}</span>
+        <span class="sector-badge-sub">Price adjusted toward analyst targets to account for near-term uncertainty. (70% model · 30% consensus)${atStr}</span>
         ${preIv ? `<span class="sector-badge-detail">${escHtml(preIv)}</span>` : ''}
       </div>
     </div>`;
   }
 
-  // Multiples fallback badge — shown prominently when DCF is replaced by multiples
+  // Multiples fallback badge — shown when DCF is replaced by multiples
   if (d.multiples_val && (!d.dcf_available || iv == null)) {
     warnHtml += `<div class="multiples-badge">
       <span class="multiples-badge-icon">◈</span>
-      <span class="multiples-badge-text"><strong>Secondary Valuation Applied:</strong> Industry Multiples Method used due to ${d.multiples_reason || 'DCF unavailability'} — ${d.multiples_method}.</span>
+      <span class="multiples-badge-text"><strong>Secondary Valuation Applied:</strong> Industry Multiples Method — ${d.multiples_method}.</span>
     </div>`;
   }
-  if (d.dcf_warning) warnHtml += `<div class="dcf-note dcf-note--warn">⚠ ${d.dcf_warning}</div>`;
-  notes.forEach(n => {
-    const cls = n.type === 'warn' ? 'dcf-note--warn' : 'dcf-note--info';
-    const icon = n.type === 'warn' ? '⚠' : 'ℹ';
-    warnHtml += `<div class="dcf-note ${cls}">${icon} ${n.text}</div>`;
-  });
+
+  // Methodology badges go into dcfWarning (visible at top of drawer)
   if (warnHtml) { warnEl.innerHTML = warnHtml; warnEl.classList.remove('hidden'); }
   else          { warnEl.classList.add('hidden'); }
+
+  // ── Technical Appendix — dcf notes + dcf_warning text ────────────────────
+  // (small explanatory notes moved to the bottom of the drawer)
+  {
+    const appendix = $('techAppendix');
+    if (appendix) {
+      let appendixHtml = '';
+      if (d.dcf_warning) {
+        appendixHtml += `<div class="dcf-note dcf-note--warn">⚠ ${escHtml(d.dcf_warning)}</div>`;
+      }
+      notes.forEach(n => {
+        const cls  = n.type === 'warn' ? 'dcf-note--warn' : 'dcf-note--info';
+        const icon = n.type === 'warn' ? '⚠' : 'ℹ';
+        appendixHtml += `<div class="dcf-note ${cls}">${icon} ${escHtml(n.text)}</div>`;
+      });
+      if (appendixHtml) {
+        appendix.innerHTML = `<div class="tech-appendix-title">Technical Appendix</div>` + appendixHtml;
+      } else {
+        appendix.innerHTML = '';
+      }
+    }
+  }
 
   // ── Live Analyst Notes (Discovery Layer) ──────────────────────────────────
   renderCatalystBox(d);
@@ -670,6 +744,9 @@ function renderResults(d) {
   } else {
     hide('dcfChartCard'); hide('dcfTableCard');
   }
+
+  // Show the "View Detailed Analysis" trigger now that everything is rendered
+  show('viewAnalysisTrigger');
 }
 
 /* ── Live Analyst Notes (Discovery Layer) ─────────────────── */
