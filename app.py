@@ -14,7 +14,7 @@ app = Flask(__name__)
 CORS(app)
 
 RISK_FREE_RATE   = 0.043   # 10-yr US Treasury proxy (Apr 2025 ~4.3%)
-EQUITY_RISK_PREM = 0.050   # Damodaran ERP 2025 estimate (~4.6–5.0%)
+EQUITY_RISK_PREM = 0.060   # FIN 415 template MRP (6.0% — matches academic standard)
 
 # FX rate cache (in-memory, lives for the process lifetime — good enough for a session)
 _fx_cache: dict = {}
@@ -887,15 +887,13 @@ def calc_biotech_val(info, fx_rate, rev_ttm=None, analyst_target=None):
 
 def _analyst_alignment_check(iv, analyst_target, price):
     """
-    Consensus Anchor: if VALUS IV is more than 30% above the analyst mean
-    price target, blend 70% VALUS + 30% analyst consensus.
+    Sultan Split: unconditionally blend 70% VALUS model IV + 30% analyst
+    consensus target whenever an analyst target is available.
 
-    Rationale: when sell-side consensus is materially below our model, it is
-    almost always because analysts are pricing in near-term uncertainty
-    (pipeline risk, patent cliffs, cyclical headwinds) that a clean 10-year
-    DCF cannot capture.  A 70/30 weighted blend pulls the output into a range
-    the user can cross-reference with Street estimates while still reflecting
-    the model's long-run view.
+    Rationale (FIN 415 template): The model captures long-run intrinsic value;
+    the analyst consensus anchors the near-term Street view.  A fixed 70/30
+    split gives users a single price that is both fundamentally grounded and
+    cross-referenceable with professional estimates.
 
     Returns (adjusted_iv, was_adjusted: bool, pre_blend_iv).
     """
@@ -904,11 +902,9 @@ def _analyst_alignment_check(iv, analyst_target, price):
     at = float(analyst_target)
     if at <= 0:
         return iv, False, iv
-    # Trigger: IV is more than 25% above analyst consensus
-    if iv > at * 1.25:
-        blended = round(max(0.70 * iv + 0.30 * at, 0.0), 2)
-        return blended, True, round(iv, 2)
-    return iv, False, iv
+    # Unconditional Sultan Split: 70% model + 30% analyst (always fires)
+    blended = round(max(0.70 * iv + 0.30 * at, 0.0), 2)
+    return blended, True, round(iv, 2)
 
 
 def get_quarterly_balance_data(stock, info, fx_rate):
@@ -1086,6 +1082,180 @@ def calc_wacc(info, income_stmt, tax_rate=0.21, fx_rate=1.0):
         "coe": coe, "cod": cod,
         "tax": tax_rate, "beta": beta,
         "we": we, "wd": wd,
+    }
+
+
+# ── FIN 415 FCFE Model ─────────────────────────────────────────────────────────
+# Implements the exact bottom-up FCFE formula from the FIN 415 DCF Equity Analyst
+# Template (Spring 2026). Discount rate = Cost of Equity (Ke), not WACC.
+# No net-debt bridge needed — FCFE is already an equity cash flow.
+
+def run_fin415_fcfe(
+    revenue_base, cogs_base, fixed_costs_base, da_base, amort_base,
+    ppe_base, ltd_base, interest_rate, tax_rate, shares,
+    rev_growths,      # list[float] length=yrs — one rate per year
+    cogs_growth,      # float — applied uniformly (COGS/rev margin management)
+    fc_growth,        # float — operating leverage: fixed costs grow slower than rev
+    da_growth,        # float — D&A tracks capex intensity
+    amort_growth,     # float — amortization (usually slow/flat)
+    ppe_growth,       # float — net PPE asset base growth
+    ltd_growth,       # float — LTD growth (negative = debt paydown)
+    ke,               # float — cost of equity (CAPM discount rate)
+    tgr,              # float — terminal growth rate
+    yrs=10,
+):
+    """
+    FIN 415 bottom-up FCFE DCF — exact cell-by-cell logic from the Excel NPV tab.
+
+    FCFE[y] = EBIT − NetCapex + D&A + Amort − Interest×(1−Tax) + ΔDebt
+    TV      = FCFE[10] × (1+TGR) / (Ke − TGR) / (1+Ke)^10
+    NPV     = Σ PV(FCFE) + TV
+    Price   = NPV / Shares
+
+    Returns (fair_price, fcfe_rows, pv_terminal, npv, op_margins_by_year).
+    """
+    if ke <= tgr:
+        tgr = ke - 0.005
+
+    rev   = revenue_base
+    cogs  = cogs_base
+    fc    = fixed_costs_base
+    da    = da_base
+    amort = amort_base
+    ppe   = ppe_base
+    ltd   = ltd_base
+
+    fcfe_rows = []
+    total_pv  = 0.0
+
+    for y in range(1, yrs + 1):
+        g_rev = rev_growths[y - 1]
+
+        # Income statement projections
+        rev   = rev   * (1 + g_rev)
+        cogs  = cogs  * (1 + cogs_growth)
+        fc    = fc    * (1 + fc_growth)
+        da    = da    * (1 + da_growth)
+        amort = amort * (1 + amort_growth)
+        ebit  = rev - cogs - fc - da
+
+        # Debt / interest
+        interest   = ltd * interest_rate          # interest on beginning-of-year LTD
+        taxes      = max((ebit - interest) * tax_rate, 0.0)
+
+        # CapEx (net fixed asset change)
+        beg_ppe   = ppe
+        ppe       = ppe * (1 + ppe_growth)
+        net_capex = (ppe - beg_ppe) + da          # mirrors Excel: EndPPE − BegPPE + DA
+
+        # Debt change
+        beg_ltd    = ltd
+        ltd        = ltd * (1 + ltd_growth)
+        delta_debt = ltd - beg_ltd                # positive = new borrowing
+
+        # FCFE — FIN 415 NPV tab formula (row 25)
+        fcfe = (ebit
+                - net_capex
+                + da
+                + amort
+                - interest * (1 - tax_rate)
+                + delta_debt)
+
+        pv        = fcfe / ((1 + ke) ** y)
+        total_pv += pv
+
+        fcfe_rows.append({
+            "year":      y,
+            "revenue":   round(rev, 0),
+            "ebit":      round(ebit, 0),
+            "fcfe":      round(fcfe, 0),
+            "pv":        round(pv, 0),
+            "op_margin": round(ebit / rev * 100, 2) if rev > 0 else 0.0,
+        })
+
+    # Terminal value — Gordon Growth on Year-N FCFE, discounted back N years
+    tv_fcfe      = fcfe_rows[-1]["fcfe"] * (1 + tgr)
+    terminal_val = tv_fcfe / (ke - tgr)
+    pv_terminal  = terminal_val / ((1 + ke) ** yrs)
+
+    npv        = total_pv + pv_terminal
+    fair_price = npv / shares if shares > 0 else None
+    op_margins = [r["op_margin"] for r in fcfe_rows]
+
+    return fair_price, fcfe_rows, pv_terminal, npv, op_margins
+
+
+def _extract_fin415_inputs(info, income_stmt, cashflow, balance_sheet, fx_rate):
+    """
+    Pull base-year (TTM / most-recent annual) line items needed by run_fin415_fcfe().
+    Applies fallback heuristics when individual items are unavailable.
+    Returns a dict, or None if critical base data is missing.
+    """
+    def _get(stmt, *labels):
+        """Read first matching label from a DataFrame index; returns abs value × fx."""
+        if stmt is None or stmt.empty:
+            return None
+        for lbl in labels:
+            if lbl in stmt.index:
+                v = safe(stmt.loc[lbl].iloc[0])
+                if v is not None:
+                    return abs(float(v)) * fx_rate
+        return None
+
+    # ── Revenue and COGS ──────────────────────────────────────────────────────
+    revenue = (safe(info.get("totalRevenue"), 0) or 0) * fx_rate
+    cogs    = (safe(info.get("costOfRevenue"), 0) or 0) * fx_rate
+    if not revenue or revenue <= 0:
+        return None
+
+    # ── Fixed (operating) costs = total opex minus COGS ─────────────────────
+    total_opex  = _get(income_stmt, "Total Expenses", "Operating Expense",
+                       "Total Operating Expenses") or 0
+    fixed_costs = max(total_opex - cogs, revenue * 0.10)   # floor 10% of revenue
+
+    # ── D&A and amortisation ──────────────────────────────────────────────────
+    da    = (_get(cashflow, "Depreciation And Amortization", "Depreciation",
+                  "Depreciation Depletion And Amortization")
+             or revenue * 0.04)
+    amort = (_get(cashflow, "Amortization Of Intangibles", "Amortization")
+             or 0.0)
+
+    # ── Net PPE ───────────────────────────────────────────────────────────────
+    ppe = (_get(balance_sheet, "Net PPE", "Net Property Plant And Equipment",
+                "Property Plant And Equipment Net",
+                "Properties")
+           or revenue * 0.25)
+
+    # ── Long-term debt ────────────────────────────────────────────────────────
+    ltd = (safe(info.get("longTermDebt") or info.get("totalDebt"), 0) or 0) * fx_rate
+
+    # ── Interest rate on LTD ─────────────────────────────────────────────────
+    iexp          = (_get(income_stmt, "Interest Expense Non Operating",
+                          "Interest Expense") or 0.0)
+    interest_rate = (iexp / ltd) if ltd > 0 else 0.05
+    interest_rate = min(max(interest_rate, 0.01), 0.15)
+
+    # ── Effective tax rate ────────────────────────────────────────────────────
+    tax_raw  = safe(info.get("effectiveTaxRate"))
+    tax_rate = float(min(max(tax_raw, 0.10), 0.35)) if tax_raw else 0.21
+
+    # ── Shares outstanding ────────────────────────────────────────────────────
+    shares = safe(info.get("sharesOutstanding")
+                  or info.get("impliedSharesOutstanding"), 0) or 0
+    if shares <= 0:
+        return None
+
+    return {
+        "revenue":      revenue,
+        "cogs":         cogs,
+        "fixed_costs":  fixed_costs,
+        "da":           da,
+        "amort":        amort,
+        "ppe":          ppe,
+        "ltd":          ltd,
+        "interest_rate": interest_rate,
+        "tax_rate":     tax_rate,
+        "shares":       shares,
     }
 
 
@@ -1683,8 +1853,9 @@ def analyze():
         if not price:
             return jsonify({"error": f"No data for '{ticker}'. Check the symbol."}), 404
 
-        cashflow    = stock.cashflow
-        income_stmt = stock.income_stmt
+        cashflow      = stock.cashflow
+        income_stmt   = stock.income_stmt
+        balance_sheet = stock.balance_sheet    # annual — for FIN 415 PPE lookup
 
         # ── Currency handling ─────────────────────────────────────────────────
         # yfinance returns financial statements in the company's REPORTING currency
@@ -1850,6 +2021,15 @@ def analyze():
         cash_rich_wacc_applied   = False  # set inside DCF block
         st_robotaxi_s2_applied   = False  # set inside DCF block for structural transformer
         net_debt         = ((safe(info.get("totalDebt"), 0) or 0) - (safe(info.get("totalCash"), 0) or 0)) * fx_rate
+        # FIN 415 defaults — overridden inside DCF block when data is available
+        fin415_used         = False
+        fin415_price        = None
+        fin415_fcfe_rows    = None
+        fin415_op_margins   = None
+        fin415_bear_wacc_iv = None
+        fin415_bear_grow_iv = None
+        conservative_target = None
+        ke                  = 0.0
 
         # Banking: force DCF off unconditionally (whether or not FCF happens to be
         # positive in a given period) — interest is a core operating cost for banks,
@@ -2038,7 +2218,7 @@ def analyze():
                 else None
             )
 
-            # ── Base case DCF ─────────────────────────────────────────────────
+            # ── Base case DCF (FCFF fallback) ────────────────────────────────
             intrinsic_value, projected, enterprise_value, equity_value, pv_terminal = \
                 run_dcf_single(fwd_base_fcf, s1, s2, tg, wacc, yrs, info, fx_rate,
                                stage1_years=backbone_stage1_years)
@@ -2055,81 +2235,159 @@ def analyze():
                 }
             }
 
-            # ── Scenario analysis — probability-weighted outcomes ─────────────
-            # Net debt: always use quarterly balance sheet data so cash piles
-            # (especially for mega-caps) are never understated in any scenario.
-            scenario_net_debt = bal_data["total_debt"] - bal_data["total_cash"]
+            # ── FIN 415 FCFE bottom-up model ──────────────────────────────────
+            # Runs alongside the FCFF base case.  When data is available, the
+            # FIN 415 Conservative Target (60/20/20 blend) replaces the primary IV.
+            # Ke (cost of equity) is used as the discount rate — no net-debt bridge.
+            fin415_inputs   = _extract_fin415_inputs(
+                info, income_stmt, cashflow, balance_sheet, fx_rate)
+            fin415_price        = None
+            fin415_fcfe_rows    = None
+            fin415_op_margins   = None
+            fin415_used         = False
+            fin415_bear_wacc_iv = None
+            fin415_bear_grow_iv = None
+            conservative_target = None
 
-            # ── Dynamic scenario weights based on FCF quality ─────────────────
-            # Standard weights: 50% Base / 25% Bull / 25% Bear.
-            # When FCF history is inconsistent or margins are thin, the base-case
-            # projection is inherently less reliable — shift probability mass toward
-            # the bear case to avoid overconfident "buy" signals on fragile companies.
-            _neg_fcf_yrs  = sum(1 for f in fcf_series if f < 0) if fcf_series else 0
-            _fcf_margin_q = (base_fcf / rev_ttm * 100) if base_fcf and rev_ttm and rev_ttm > 0 else 10.0
-            if _neg_fcf_yrs >= 2 or _fcf_margin_q < 3.0:
-                # Low reliability: heavily skew toward bear (base / bull / bear = 45/15/40)
-                _w_base, _w_bull, _w_bear = 0.45, 0.15, 0.40
-                _scenario_weight_note = "bear-skewed (low FCF quality)"
-            elif _neg_fcf_yrs >= 1 or _fcf_margin_q < 8.0:
-                # Moderate: modest bear skew (50/20/30)
-                _w_base, _w_bull, _w_bear = 0.50, 0.20, 0.30
-                _scenario_weight_note = "bear-tilted (moderate FCF quality)"
+            ke = wacc_data.get("coe", wacc)   # Cost of Equity from CAPM
+
+            if fin415_inputs and dcf_available:
+                # Year-by-year revenue growth: Stage 1 for first half, Stage 2 for rest
+                _rev_growths   = [s1 if y <= yrs // 2 else s2 for y in range(1, yrs + 1)]
+                _cogs_growth   = s1 * 0.90    # COGS grows slightly slower → margin expansion
+                _fc_growth     = s1 * 0.65    # Operating leverage: fixed costs < revenue growth
+                _da_growth     = s1 * 0.80    # D&A tracks capex intensity
+                _amort_growth  = 0.02         # Amortisation: slow/flat
+                _ppe_growth    = s1 * 0.85    # Asset base grows with CapEx
+                _ltd_growth    = -0.03        # Moderate debt paydown (-3%/yr)
+
+                _f415_kwargs = dict(
+                    revenue_base    = fin415_inputs["revenue"],
+                    cogs_base       = fin415_inputs["cogs"],
+                    fixed_costs_base= fin415_inputs["fixed_costs"],
+                    da_base         = fin415_inputs["da"],
+                    amort_base      = fin415_inputs["amort"],
+                    ppe_base        = fin415_inputs["ppe"],
+                    ltd_base        = fin415_inputs["ltd"],
+                    interest_rate   = fin415_inputs["interest_rate"],
+                    tax_rate        = fin415_inputs["tax_rate"],
+                    shares          = fin415_inputs["shares"],
+                    rev_growths     = _rev_growths,
+                    cogs_growth     = _cogs_growth,
+                    fc_growth       = _fc_growth,
+                    da_growth       = _da_growth,
+                    amort_growth    = _amort_growth,
+                    ppe_growth      = _ppe_growth,
+                    ltd_growth      = _ltd_growth,
+                    ke              = ke,
+                    tgr             = tg,
+                    yrs             = yrs,
+                )
+
+                try:
+                    (fin415_price, fin415_fcfe_rows,
+                     _f415_tv, _f415_npv, fin415_op_margins) = run_fin415_fcfe(**_f415_kwargs)
+
+                    if fin415_price is not None:
+                        fin415_used = True
+
+                        # ── FIN 415 Scenario 1: WACC (Ke) + 3% ───────────────
+                        _kw_bear = {**_f415_kwargs, "ke": ke + 0.03}
+                        fin415_bear_wacc_iv, *_ = run_fin415_fcfe(**_kw_bear)
+
+                        # ── FIN 415 Scenario 2: Revenue growth − 2pp ─────────
+                        _rev_bear = [max(g - 0.02, 0.0) for g in _rev_growths]
+                        _kw_grow  = {**_f415_kwargs, "rev_growths": _rev_bear}
+                        fin415_bear_grow_iv, *_ = run_fin415_fcfe(**_kw_grow)
+
+                        # ── FIN 415 Conservative Target (Scenario Analysis tab)
+                        # Formula: 0.60 × base + 0.20 × bear_wacc + 0.20 × bear_growth
+                        # Floor negative scenario prices to $0 (distressed floor)
+                        _bw = max(fin415_bear_wacc_iv, 0.0) if fin415_bear_wacc_iv is not None else fin415_price
+                        _bg = max(fin415_bear_grow_iv, 0.0) if fin415_bear_grow_iv is not None else fin415_price
+                        conservative_target = (0.60 * fin415_price
+                                               + 0.20 * _bw
+                                               + 0.20 * _bg)
+
+                        # Override primary intrinsic value with FIN 415 result
+                        intrinsic_value  = conservative_target
+                        margin_of_safety = ((intrinsic_value - price) / price * 100) if price else None
+                except Exception:
+                    fin415_used = False   # silent fallback to FCFF path
+
+            # ── Scenario weights ──────────────────────────────────────────────
+            if fin415_used:
+                # FIN 415 fixed weighting: 60% base / 20% bear-WACC / 20% bear-growth
+                _w_base, _w_bull, _w_bear = 0.60, 0.20, 0.20
+                _scenario_weight_note = "FIN 415: 60% base / 20% Ke+3% / 20% Rev−2%"
+                iv_bull = fin415_price                            # "Bull" = raw base
+                iv_bear = min(_bw, _bg) if fin415_used else intrinsic_value
+                # Scenario WACC labels (informational in UI)
+                wacc_bull = ke - 0.03
+                wacc_bear = ke + 0.03
+                s1_bull   = s1
+                s1_bear   = s1
+                bear_floored = bear_recalculated = bull_recalculated = False
+                bull_distressed = bear_distressed = False
             else:
-                # High reliability: standard equal tails
-                _w_base, _w_bull, _w_bear = 0.50, 0.25, 0.25
-                _scenario_weight_note = "balanced"
+                # ── Legacy dynamic FCF quality weights (fallback) ─────────────
+                scenario_net_debt = bal_data["total_debt"] - bal_data["total_cash"]
+                _neg_fcf_yrs  = sum(1 for f in fcf_series if f < 0) if fcf_series else 0
+                _fcf_margin_q = (base_fcf / rev_ttm * 100) if base_fcf and rev_ttm and rev_ttm > 0 else 10.0
+                if _neg_fcf_yrs >= 2 or _fcf_margin_q < 3.0:
+                    _w_base, _w_bull, _w_bear = 0.45, 0.15, 0.40
+                    _scenario_weight_note = "bear-skewed (low FCF quality)"
+                elif _neg_fcf_yrs >= 1 or _fcf_margin_q < 8.0:
+                    _w_base, _w_bull, _w_bear = 0.50, 0.20, 0.30
+                    _scenario_weight_note = "bear-tilted (moderate FCF quality)"
+                else:
+                    _w_base, _w_bull, _w_bear = 0.50, 0.25, 0.25
+                    _scenario_weight_note = "balanced"
 
-            # Rule 1 — WACC Stability: max ±1% from base (prevents distorted discounting)
-            wacc_bull = max(wacc - 0.010, 0.04)
-            wacc_bear = min(wacc + 0.010, 0.18)
+                wacc_bull = max(wacc - 0.010, 0.04)
+                wacc_bear = min(wacc + 0.010, 0.18)
 
-            # Bull case: growth premium, WACC at floor, TG at industry ceiling
-            s1_bull = min(s1 * 1.5, 0.45)
-            s2_bull = max(s1_bull * 0.55, tg + 0.01)
-            tg_bull = min(tg + 0.005, ind_params["max_tg"])
-            iv_bull, _, _, _, _ = run_dcf_single(
-                fwd_base_fcf, s1_bull, s2_bull, tg_bull, wacc_bull, yrs, info, fx_rate,
-                net_debt_override=scenario_net_debt,
-                stage1_years=backbone_stage1_years)
+                s1_bull = min(s1 * 1.5, 0.45)
+                s2_bull = max(s1_bull * 0.55, tg + 0.01)
+                tg_bull = min(tg + 0.005, ind_params["max_tg"])
+                iv_bull, _, _, _, _ = run_dcf_single(
+                    fwd_base_fcf, s1_bull, s2_bull, tg_bull, wacc_bull, yrs, info, fx_rate,
+                    net_debt_override=scenario_net_debt,
+                    stage1_years=backbone_stage1_years)
 
-            # Bear case: measured growth haircut, WACC at cap, modest TG trim
-            s1_bear = max(s1 * 0.50, 0.01)   # 50% of base (was 40% — too aggressive)
-            s2_bear = max(s1_bear * 0.55, 0.005)
-            tg_bear = max(tg - 0.005, 0.010)  # trim 0.5pp (was 1.0pp)
-            iv_bear, _, _, _, _ = run_dcf_single(
-                fwd_base_fcf, s1_bear, s2_bear, tg_bear, wacc_bear, yrs, info, fx_rate,
-                net_debt_override=scenario_net_debt,
-                stage1_years=backbone_stage1_years)
+                s1_bear = max(s1 * 0.50, 0.01)
+                s2_bear = max(s1_bear * 0.55, 0.005)
+                tg_bear = max(tg - 0.005, 0.010)
+                iv_bear, _, _, _, _ = run_dcf_single(
+                    fwd_base_fcf, s1_bear, s2_bear, tg_bear, wacc_bear, yrs, info, fx_rate,
+                    net_debt_override=scenario_net_debt,
+                    stage1_years=backbone_stage1_years)
 
-            # Rule 2 — Institutional Floor: bear can't fall below sector EV/EBITDA floor
-            bear_floored = False
-            if iv_bear is not None:
-                floor_iv = _bear_floor_iv(info, sector, industry, fx_rate, ebitda_ttm)
-                if floor_iv > 0 and iv_bear < floor_iv:
-                    iv_bear = floor_iv
-                    bear_floored = True
+                bear_floored = False
+                if iv_bear is not None:
+                    floor_iv = _bear_floor_iv(info, sector, industry, fx_rate, ebitda_ttm)
+                    if floor_iv > 0 and iv_bear < floor_iv:
+                        iv_bear = floor_iv
+                        bear_floored = True
 
-            # Rule 4 — Reasonability Check: clamp any scenario beyond ±90% of market price
-            bull_recalculated = bear_recalculated = False
-            if price and intrinsic_value:
-                if iv_bull is not None and abs(iv_bull - price) / price > 0.90:
-                    iv_bull = (iv_bull + intrinsic_value) / 2
-                    bull_recalculated = True
-                if iv_bear is not None and abs(iv_bear - price) / price > 0.90:
-                    iv_bear = (iv_bear + intrinsic_value) / 2
-                    bear_recalculated = True
+                bull_recalculated = bear_recalculated = False
+                if price and intrinsic_value:
+                    if iv_bull is not None and abs(iv_bull - price) / price > 0.90:
+                        iv_bull = (iv_bull + intrinsic_value) / 2
+                        bull_recalculated = True
+                    if iv_bear is not None and abs(iv_bear - price) / price > 0.90:
+                        iv_bear = (iv_bear + intrinsic_value) / 2
+                        bear_recalculated = True
 
-            # Rule 5 — Negative Value Ban: hard floor at $0.00
-            bull_distressed = bear_distressed = False
-            if iv_bull is not None and iv_bull < 0:
-                iv_bull = 0.0
-                bull_distressed = True
-            if iv_bear is not None and iv_bear < 0:
-                iv_bear = 0.0
-                bear_distressed = True
+                bull_distressed = bear_distressed = False
+                if iv_bull is not None and iv_bull < 0:
+                    iv_bull = 0.0
+                    bull_distressed = True
+                if iv_bear is not None and iv_bear < 0:
+                    iv_bear = 0.0
+                    bear_distressed = True
 
-            # Probability-weighted fair value (uses dynamic quality-based weights)
+            # ── Probability-weighted fair value ───────────────────────────────
             if all(v is not None for v in [intrinsic_value, iv_bull, iv_bear]):
                 iv_weighted = _w_base * intrinsic_value + _w_bull * iv_bull + _w_bear * iv_bear
             else:
@@ -2485,6 +2743,14 @@ def analyze():
             "net_debt":          net_debt if dcf_available else ((safe(info.get("totalDebt"), 0) or 0) - (safe(info.get("totalCash"), 0) or 0)) * fx_rate,
             "scenarios":         scenarios if dcf_available else None,
             "sensitivity_grid":  sensitivity_grid,
+            # ── FIN 415 FCFE model outputs ────────────────────────────────────
+            "fin415_used":          fin415_used,
+            "fin415_ke":            round(ke * 100, 2) if fin415_used else None,
+            "fin415_conservative":  round(conservative_target, 2) if fin415_used and conservative_target else None,
+            "fin415_bear_wacc":     round(fin415_bear_wacc_iv, 2) if fin415_used and fin415_bear_wacc_iv else None,
+            "fin415_bear_growth":   round(fin415_bear_grow_iv, 2) if fin415_used and fin415_bear_grow_iv else None,
+            "fin415_op_margins":    fin415_op_margins if fin415_op_margins else None,
+            "fin415_fcfe_rows":     fin415_fcfe_rows if fin415_fcfe_rows else None,
             "shares_outstanding": bal_data["shares"],
             "financial_currency": financial_ccy,
             "trading_currency":   trading_ccy,

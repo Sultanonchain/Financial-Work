@@ -72,12 +72,12 @@ function activateScenario(key) {
   const sc = d.scenarios;
   if (!sc) return;
 
+  // FIN 415: relabel scenarios to match template (Base / Bull WACC−3% / Bear WACC+3%)
+  const fin415 = !!d.fin415_used;
   const map = {
-    // Base now reads sc.base.value which is synced to d.intrinsic_value on the
-    // backend when the Consensus Anchor fires, ensuring toggle ≡ card.
-    base: { iv: sc.base?.value, mos: sc.base?.upside, label: 'Base Case' },
-    bull: { iv: sc.bull?.value, mos: sc.bull?.upside, label: 'Bull Case' },
-    bear: { iv: sc.bear?.value, mos: sc.bear?.upside, label: 'Bear Case' },
+    base: { iv: sc.base?.value, mos: sc.base?.upside, label: 'Base (60%)' },
+    bull: { iv: sc.bull?.value, mos: sc.bull?.upside, label: fin415 ? 'Bull WACC−3%' : 'Bull Case' },
+    bear: { iv: sc.bear?.value, mos: sc.bear?.upside, label: fin415 ? 'Bear (20%)'   : 'Bear Case' },
   };
   const data = map[key];
   if (!data || data.iv == null) return;
@@ -796,13 +796,34 @@ function renderQuickInsights(d) {
     qi('⚠', `<strong>Risk Adjustment</strong> — Material risk factor detected · WACC +1%`, 'qi-risk');
   }
 
-  // ── Consensus anchor ──────────────────────────────────────────────────────
+  // ── FIN 415 FCFE model badge ───────────────────────────────────────────────
+  if (d.fin415_used) {
+    const keStr   = d.fin415_ke   != null ? `Ke = ${d.fin415_ke}%` : '';
+    const ctStr   = d.fin415_conservative != null ? ` · Conservative Target: $${d.fin415_conservative.toFixed(2)}` : '';
+    const bwStr   = d.fin415_bear_wacc   != null ? ` · Bear WACC (Ke+3%): $${d.fin415_bear_wacc.toFixed(2)}` : '';
+    const bgStr   = d.fin415_bear_growth != null ? ` · Bear Growth (Rev−2%): $${d.fin415_bear_growth.toFixed(2)}` : '';
+    // Verification console log — FIN 415 Sultan Split accuracy check
+    const preIV   = d.consensus_anchor_pre_iv ?? iv;
+    const atNum   = parseFloat(d.target_price  ?? 0);
+    const expected = preIV != null && atNum ? (0.70 * preIV + 0.30 * atNum) : null;
+    const diff     = expected != null && iv != null ? Math.abs(iv - expected) : null;
+    console.log(
+      `[FIN 415] Source: FIN 415 Template | ${keStr}${ctStr}${bwStr}${bgStr}`,
+      diff != null
+        ? `| Sultan Split diff: $${diff.toFixed(4)} (${diff < 0.01 ? '✅ within $0.01' : '⚠ exceeds $0.01'})`
+        : ''
+    );
+    qi('📐', `<strong>FIN 415 FCFE Model</strong> — ${keStr}${ctStr} · Sultan Split: 70% model + 30% analyst`
+      + `<span style="font-size:10px;opacity:.55;margin-left:6px;">Source: FIN 415 Template</span>`, 'qi-cyan');
+  }
+
+  // ── Sultan Split (consensus anchor) ───────────────────────────────────────
   if (d.analyst_adjusted) {
     const preIv = d.consensus_anchor_pre_iv != null
       ? ` · Model: $${d.consensus_anchor_pre_iv.toFixed(2)} → Blended: $${iv != null ? iv.toFixed(2) : '—'}` : '';
-    const atStr = d.analyst_target != null
-      ? ` · Analyst consensus: $${parseFloat(d.analyst_target).toFixed(2)}` : '';
-    qi('⚖', `<strong>Consensus Anchor</strong> — 70% model · 30% analyst${atStr}${preIv}`, 'qi-warn');
+    const atStr = d.target_price != null
+      ? ` · Analyst target: $${parseFloat(d.target_price).toFixed(2)}` : '';
+    qi('⚖', `<strong>Sultan Split</strong> — 70% model · 30% analyst${atStr}${preIv}`, 'qi-warn');
   }
 
   // ── Multiples fallback ────────────────────────────────────────────────────
