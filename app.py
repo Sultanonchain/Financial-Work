@@ -13,8 +13,8 @@ from datetime import datetime
 app = Flask(__name__)
 CORS(app)
 
-RISK_FREE_RATE   = 0.045   # 10-yr US Treasury proxy
-EQUITY_RISK_PREM = 0.055   # Damodaran ERP
+RISK_FREE_RATE   = 0.043   # 10-yr US Treasury proxy (Apr 2025 ~4.3%)
+EQUITY_RISK_PREM = 0.050   # Damodaran ERP 2025 estimate (~4.6–5.0%)
 
 # FX rate cache (in-memory, lives for the process lifetime — good enough for a session)
 _fx_cache: dict = {}
@@ -133,6 +133,12 @@ INDUSTRY_BETA_DEFAULTS = {
     "industrials":       1.10,
     "real_estate":       1.00,
     "communication":     0.90,
+    # Asset-light network businesses: low capital risk, recurring fee revenue
+    "payment_network":   0.85,
+    # Biotech: high binary risk on pipeline events, but diversified portfolio beta
+    "biotech":           1.45,
+    # Semiconductors: cyclical demand but large-cap leaders trend toward tech beta
+    "semiconductors":    1.35,
 }
 
 # ── Discovery Layer helpers ────────────────────────────────────────────────────
@@ -481,7 +487,13 @@ def _default_beta(sector: str, industry: str) -> float:
     if "energy" in s:                       return INDUSTRY_BETA_DEFAULTS["energy"]
     if "materials" in s or "mining" in ind: return INDUSTRY_BETA_DEFAULTS["materials"]
     if any(x in ind for x in ["auto","automobile"]): return INDUSTRY_BETA_DEFAULTS["auto"]
+    # Payment networks before broad 'financial' catch-all
+    if any(x in ind for x in ["credit service","payment network","payment processing"]):
+        return INDUSTRY_BETA_DEFAULTS["payment_network"]
     if "financial" in s or "bank" in ind:   return INDUSTRY_BETA_DEFAULTS["financial"]
+    # Biotech / semiconductors before broad technology / health
+    if "biotech" in ind or "biopharmaceutic" in ind: return INDUSTRY_BETA_DEFAULTS["biotech"]
+    if "semiconductor" in ind:              return INDUSTRY_BETA_DEFAULTS["semiconductors"]
     if "technology" in s or "software" in ind: return INDUSTRY_BETA_DEFAULTS["technology"]
     if "health" in s:                       return INDUSTRY_BETA_DEFAULTS["healthcare"]
     if "consumer" in s and "cycl" in s:     return INDUSTRY_BETA_DEFAULTS["consumer_cyclical"]
@@ -892,8 +904,8 @@ def _analyst_alignment_check(iv, analyst_target, price):
     at = float(analyst_target)
     if at <= 0:
         return iv, False, iv
-    # Trigger: IV is more than 30% above analyst consensus
-    if iv > at * 1.30:
+    # Trigger: IV is more than 25% above analyst consensus
+    if iv > at * 1.25:
         blended = round(max(0.70 * iv + 0.30 * at, 0.0), 2)
         return blended, True, round(iv, 2)
     return iv, False, iv
@@ -1216,15 +1228,21 @@ def get_base_fcf(info, stock):
 def get_forward_growth(stock, info, fcf_series):
     """
     Best available forward FCF/earnings growth for Stage 1.
-    Priority: analyst +1y EPS → analyst trend → earnings growth (bounded) → historical FCF CAGR.
+    Priority: analyst +1y EPS → analyst trend → earnings growth (bounded) →
+              conservative historical FCF CAGR (min of 3yr and 5yr) → revenue proxy.
     Returns (rate, source_label).
+
+    Caps:
+      • Analyst estimates: 35% max  (50% was too aggressive for high-growth outliers)
+      • Historical CAGR:   20% max  (beyond this, mean-reversion is almost certain)
+      • Revenue proxy:     25% max, discounted to 75% of revenue growth
     """
     # 1. Analyst earnings estimate growth for next fiscal year
     try:
         ee = stock.earnings_estimate
         if ee is not None and not ee.empty and '+1y' in ee.index:
             v = safe(ee.loc['+1y', 'growth'])
-            if v is not None and 0.02 < v < 0.50:
+            if v is not None and 0.02 < v < 0.35:          # was 0.50 — too permissive
                 return float(v), "Analyst EPS est. (+1y)"
     except Exception:
         pass
@@ -1237,30 +1255,43 @@ def get_forward_growth(stock, info, fcf_series):
             for col in ["stockTrend", "stock"]:
                 if col in ge.columns:
                     v = safe(ge.loc['+1y', col])
-                    if v is not None and 0.02 < v < 0.50:
+                    if v is not None and 0.02 < v < 0.35:  # was 0.50
                         return float(v), "Analyst consensus (+1y)"
     except Exception:
         pass
 
     # 3. Trailing earnings growth (YoY) — bounded conservatively
+    # Cap at 25%: a single-year spike in earnings is not a sustainable run-rate
     ag = safe(info.get("earningsGrowth"))
-    if ag is not None and 0.02 < ag < 0.30:
+    if ag is not None and 0.02 < ag < 0.25:
         return float(ag), "Trailing EPS growth (YoY)"
 
-    # 4. Historical FCF CAGR from annual statement
+    # 4. Conservative historical FCF CAGR — take the LOWER of 3-year and 5-year CAGR
+    # so that a recent strong year doesn't inflate the long-run projection.
     positives = [f for f in fcf_series if f > 0]
     if len(positives) >= 3:
-        span = len(positives) - 1
-        hg = (positives[0] / positives[-1]) ** (1 / span) - 1
-        hg = min(max(hg, 0.02), 0.18)
-        return hg, "Historical FCF CAGR"
+        cagr_candidates = []
+        # 3-year CAGR (if enough data)
+        if len(positives) >= 3:
+            hg3 = (positives[0] / positives[2]) ** (1 / 2) - 1
+            cagr_candidates.append(hg3)
+        # 5-year CAGR (if enough data)
+        if len(positives) >= 5:
+            hg5 = (positives[0] / positives[4]) ** (1 / 4) - 1
+            cagr_candidates.append(hg5)
+        # Use minimum to be conservative; cap at 20%, floor at 2%
+        hg = min(cagr_candidates)
+        hg = min(max(hg, 0.02), 0.20)
+        label = "Historical FCF CAGR (3yr)" if len(cagr_candidates) == 1 else "Historical FCF CAGR (min 3yr/5yr)"
+        return hg, label
 
-    # 5. Default
+    # 5. Revenue growth proxy — discount to 75% (FCF grows slower than revenue when
+    # margins are compressing), cap at 25%
     rev_g = safe(info.get("revenueGrowth"))
-    if rev_g and 0.02 < rev_g < 0.30:
-        return float(rev_g * 0.8), "Revenue growth proxy"
+    if rev_g and 0.02 < rev_g < 0.40:
+        return float(min(rev_g * 0.75, 0.25)), "Revenue growth proxy"
 
-    return 0.07, "Default (7%)"
+    return 0.06, "Default (6%)"     # lowered from 7% — more conservative baseline
 
 
 # ── Sector / P/E context ───────────────────────────────────────────────────────
@@ -1754,6 +1785,24 @@ def analyze():
             base_fcf    = (_pre_st_fcf + st_capex_addback)
             dcf_available = base_fcf > 0  # re-evaluate now that FCF may have changed
 
+        # ── FCF Volatility Normalization ──────────────────────────────────────
+        # When TTM FCF is 2× or more above the recent 3-year positive average,
+        # the number likely reflects a one-off working-capital release, asset sale,
+        # or timing difference — not a sustainable run rate.  Normalize to
+        # 60% TTM + 40% 3-year mean so the DCF doesn't extrapolate an outlier.
+        # Structural Transformer and partial logistics add-backs are exempt because
+        # their base_fcf has already been deliberately adjusted upward.
+        fcf_normalized = False
+        if (dcf_available and base_fcf is not None
+                and not is_structural_transformer and st_capex_addback == 0):
+            _pos_hist = [f for f in fcf_series[:4] if f > 0]
+            if len(_pos_hist) >= 2:
+                _hist_avg = sum(_pos_hist) / len(_pos_hist)
+                if _hist_avg > 0 and base_fcf > _hist_avg * 2.0:
+                    base_fcf = round(0.60 * base_fcf + 0.40 * _hist_avg, 0)
+                    fcf_source = (fcf_source or "ttm") + " (normalized: TTM was 2×+ hist. avg)"
+                    fcf_normalized = True
+
         # ── Moat Detection ───────────────────────────────────────────────────
         # Run before DCF so the classification can adjust WACC and TG ceilings.
         _rev_g_raw  = safe(info.get("revenueGrowth"))
@@ -1859,7 +1908,10 @@ def analyze():
             if s2_ov:
                 s2 = float(s2_ov) / 100 if float(s2_ov) > 1 else float(s2_ov)
             else:
-                s2 = max(s1 * 0.55, tg + 0.005)
+                # Stage 2 = 55% of Stage 1 (standard mean-reversion taper), with:
+                #   • floor of (TG + 0.5pp) — prevents S2 falling below terminal rate
+                #   • absolute floor of 2% — even mature companies grow at nominal GDP pace
+                s2 = max(s1 * 0.55, tg + 0.005, 0.02)
 
             # ── Structural Transformer: Robotaxi / FSD Stage 2 premium ────────
             # Tesla launched unsupervised Robotaxis (Dallas/Houston, Q1 2026) with
@@ -2003,10 +2055,30 @@ def analyze():
                 }
             }
 
-            # ── Scenario analysis (50 / 25 / 25 probability weights) ─────────
+            # ── Scenario analysis — probability-weighted outcomes ─────────────
             # Net debt: always use quarterly balance sheet data so cash piles
             # (especially for mega-caps) are never understated in any scenario.
             scenario_net_debt = bal_data["total_debt"] - bal_data["total_cash"]
+
+            # ── Dynamic scenario weights based on FCF quality ─────────────────
+            # Standard weights: 50% Base / 25% Bull / 25% Bear.
+            # When FCF history is inconsistent or margins are thin, the base-case
+            # projection is inherently less reliable — shift probability mass toward
+            # the bear case to avoid overconfident "buy" signals on fragile companies.
+            _neg_fcf_yrs  = sum(1 for f in fcf_series if f < 0) if fcf_series else 0
+            _fcf_margin_q = (base_fcf / rev_ttm * 100) if base_fcf and rev_ttm and rev_ttm > 0 else 10.0
+            if _neg_fcf_yrs >= 2 or _fcf_margin_q < 3.0:
+                # Low reliability: heavily skew toward bear (base / bull / bear = 45/15/40)
+                _w_base, _w_bull, _w_bear = 0.45, 0.15, 0.40
+                _scenario_weight_note = "bear-skewed (low FCF quality)"
+            elif _neg_fcf_yrs >= 1 or _fcf_margin_q < 8.0:
+                # Moderate: modest bear skew (50/20/30)
+                _w_base, _w_bull, _w_bear = 0.50, 0.20, 0.30
+                _scenario_weight_note = "bear-tilted (moderate FCF quality)"
+            else:
+                # High reliability: standard equal tails
+                _w_base, _w_bull, _w_bear = 0.50, 0.25, 0.25
+                _scenario_weight_note = "balanced"
 
             # Rule 1 — WACC Stability: max ±1% from base (prevents distorted discounting)
             wacc_bull = max(wacc - 0.010, 0.04)
@@ -2057,9 +2129,9 @@ def analyze():
                 iv_bear = 0.0
                 bear_distressed = True
 
-            # Probability-weighted fair value
+            # Probability-weighted fair value (uses dynamic quality-based weights)
             if all(v is not None for v in [intrinsic_value, iv_bull, iv_bear]):
-                iv_weighted = 0.50 * intrinsic_value + 0.25 * iv_bull + 0.25 * iv_bear
+                iv_weighted = _w_base * intrinsic_value + _w_bull * iv_bull + _w_bear * iv_bear
             else:
                 iv_weighted = intrinsic_value
 
@@ -2069,14 +2141,14 @@ def analyze():
             scenarios = {
                 "base": {
                     "value":  round(intrinsic_value, 2) if intrinsic_value else None,
-                    "weight": 50,
+                    "weight": round(_w_base * 100),
                     "s1":     round(s1 * 100, 2),
                     "wacc":   round(wacc * 100, 2),
                     "upside": round((intrinsic_value - price) / price * 100, 1) if intrinsic_value and price else None,
                 },
                 "bull": {
                     "value":  round(iv_bull, 2) if iv_bull else None,
-                    "weight": 25,
+                    "weight": round(_w_bull * 100),
                     "s1":     round(s1_bull * 100, 2),
                     "wacc":   round(wacc_bull * 100, 2),
                     "upside": round((iv_bull - price) / price * 100, 1) if iv_bull and price else None,
@@ -2085,7 +2157,7 @@ def analyze():
                 },
                 "bear": {
                     "value":  round(iv_bear, 2) if iv_bear else None,
-                    "weight": 25,
+                    "weight": round(_w_bear * 100),
                     "s1":     round(s1_bear * 100, 2),
                     "wacc":   round(wacc_bear * 100, 2),
                     "upside": round((iv_bear - price) / price * 100, 1) if iv_bear and price else None,
@@ -2095,6 +2167,7 @@ def analyze():
                 },
                 "weighted": round(iv_weighted, 2) if iv_weighted else None,
                 "weighted_upside": round((iv_weighted - price) / price * 100, 1) if iv_weighted and price else None,
+                "weight_basis": _scenario_weight_note,
             }
             intrinsic_value = round(iv_weighted, 2) if iv_weighted else intrinsic_value
 
@@ -2293,6 +2366,31 @@ def analyze():
         if div_note:
             dcf_notes.append(div_note)
 
+        # ── Terminal Value % warning ──────────────────────────────────────────
+        # High TV% means the valuation is almost entirely driven by a terminal
+        # assumption rather than observable near-term cash flows.
+        if (enterprise_value and pv_terminal and enterprise_value > 0
+                and pv_terminal / enterprise_value > 0.85):
+            tv_pct_val = round(pv_terminal / enterprise_value * 100, 1)
+            dcf_notes.append({
+                "type": "warn",
+                "text": (
+                    f"Terminal value accounts for {tv_pct_val}% of enterprise value. "
+                    "The valuation is highly sensitive to WACC and terminal growth assumptions — "
+                    "small changes in either can materially shift the fair value estimate."
+                ),
+            })
+
+        # ── Default growth source note ────────────────────────────────────────
+        if growth_source and "Default" in growth_source:
+            dcf_notes.append({
+                "type": "info",
+                "text": (
+                    "No analyst coverage or historical FCF trend was available. "
+                    "Stage 1 growth defaulted to 6% — treat this estimate with extra caution."
+                ),
+            })
+
         # ── PEG ratio ─────────────────────────────────────────────────────────
         peg = safe(info.get("pegRatio"))
         # If not in info, compute: TTM P/E ÷ consensus growth
@@ -2315,6 +2413,38 @@ def analyze():
         def f2(v, d=2):
             x = safe(v)
             return round(x, d) if x is not None else None
+
+        # ── Sensitivity Grid (3×3 WACC / TG) ─────────────────────────────────
+        # Compute intrinsic value across ±1% WACC and ±0.5pp TG shifts.
+        # Gives users a quick feel for how sensitive the valuation is to assumptions.
+        sensitivity_grid = None
+        if dcf_available and base_fcf and wacc and tg and s1 and s2:
+            try:
+                _wacc_deltas = [-0.010, 0.0, 0.010]
+                _tg_deltas   = [-0.005, 0.0, 0.005]
+                _grid_rows = []
+                for _dw in _wacc_deltas:
+                    _row = []
+                    for _dt in _tg_deltas:
+                        _gw = round(wacc + _dw, 4)
+                        _gt = round(tg  + _dt, 4)
+                        # Ensure WACC > TG (Gordon Growth stability)
+                        if _gw <= _gt:
+                            _gt = _gw - 0.005
+                        _giv, _, _, _, _ = run_dcf_single(
+                            base_fcf, s1, s2, _gt, _gw, yrs, info, fx_rate,
+                            net_debt_override=net_debt,
+                            stage1_years=backbone_stage1_years,
+                        )
+                        _row.append(round(_giv, 2) if _giv else None)
+                    _grid_rows.append(_row)
+                sensitivity_grid = {
+                    "wacc_labels": [f"{(wacc + d)*100:.1f}%" for d in _wacc_deltas],
+                    "tg_labels":   [f"{(tg   + d)*100:.1f}%" for d in _tg_deltas],
+                    "values":      _grid_rows,
+                }
+            except Exception:
+                sensitivity_grid = None
 
         result = {
             "ticker":       ticker,
@@ -2354,6 +2484,7 @@ def analyze():
                                   if enterprise_value and pv_terminal else None,
             "net_debt":          net_debt if dcf_available else ((safe(info.get("totalDebt"), 0) or 0) - (safe(info.get("totalCash"), 0) or 0)) * fx_rate,
             "scenarios":         scenarios if dcf_available else None,
+            "sensitivity_grid":  sensitivity_grid,
             "shares_outstanding": bal_data["shares"],
             "financial_currency": financial_ccy,
             "trading_currency":   trading_ccy,
