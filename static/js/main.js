@@ -872,6 +872,37 @@ function renderQuickInsights(d) {
     qi('▴', `<strong>Market Divergence</strong> — ${escHtml(d.reality_reason)}`, 'qi-warn');
   }
 
+  // ── "Priced For" Verdict (replaces simple over/undervalued tag) ─────────
+  if (d.priced_for) {
+    const pf = d.priced_for;
+    const colorMap = { green: 'qi-good', blue: 'qi-cyan', amber: 'qi-warn', red: 'qi-risk', neutral: 'qi-cyan' };
+    const cls = colorMap[pf.color] || 'qi-cyan';
+    const ceiling = d.sector_growth_ceiling_label ? ` · Sector: ${escHtml(d.sector_growth_ceiling_label)} (${d.sector_growth_ceiling_pct}% ceiling)` : '';
+    qi('🎯', `<strong>${escHtml(pf.label)}</strong> — ${escHtml(pf.narrative)}${ceiling}`, cls);
+  }
+
+  // ── Mag 7 Concentration Tag ─────────────────────────────────────────────
+  if (d.is_mag7) {
+    qi('★', `<strong>Mag 7 Member</strong> — Concentration risk: 6 of 7 Mag 7 stocks tend to correlate with the AI productivity thesis. A 10–15% pullback in that thesis could unwind multiple positions simultaneously.`, 'qi-warn');
+  }
+
+  // ── Debt + Momentum Classifier ──────────────────────────────────────────
+  if (d.debt_momentum && d.debt_momentum.classification && d.debt_momentum.classification !== 'stable') {
+    const dm = d.debt_momentum;
+    const colorMap = { green: 'qi-good', blue: 'qi-cyan', amber: 'qi-warn', red: 'qi-risk', neutral: 'qi-cyan' };
+    const cls = colorMap[dm.color] || 'qi-cyan';
+    const icon = { deleveraging: '↓', speculative_distress: '⚠', recovery_watch: '👀', healthy_leverage: '✓' }[dm.classification] || '◆';
+    const stats = [];
+    if (dm.debt_to_ebitda    != null) stats.push(`Debt/EBITDA ${dm.debt_to_ebitda}×`);
+    if (dm.interest_coverage != null) stats.push(`Coverage ${dm.interest_coverage}×`);
+    if (dm.debt_trend_pct    != null) stats.push(`Debt trend ${dm.debt_trend_pct > 0 ? '+' : ''}${dm.debt_trend_pct}%`);
+    const statStr = stats.length ? ` · ${stats.join(' · ')}` : '';
+    const flagStr = (dm.flags && dm.flags.length)
+      ? `<div style="font-size:11px;opacity:.7;margin-top:4px;">${dm.flags.map(f => '▸ ' + escHtml(f)).join('<br>')}</div>`
+      : '';
+    qi(icon, `<strong>${escHtml(dm.label)}</strong> — ${escHtml(dm.narrative)}${statStr}${flagStr}`, cls);
+  }
+
   // ── Multiples fallback ────────────────────────────────────────────────────
   if (d.multiples_val && (!d.dcf_available || iv == null)) {
     qi('◈', `<strong>Industry Multiples</strong> — DCF unavailable; secondary valuation applied (${escHtml(d.multiples_method || '')})`, 'qi-warn');

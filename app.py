@@ -1134,6 +1134,331 @@ def solve_implied_growth(price, base_fcf, s2_ratio, tg, wacc, yrs,
         return None, False
 
 
+# ── Mag 7 Tag ───────────────────────────────────────────────────────────────
+MAG_7_TICKERS = {"AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "META", "NVDA", "TSLA"}
+
+
+def _is_mag7(ticker):
+    return (ticker or "").upper() in MAG_7_TICKERS
+
+
+# ── "Priced For" Verdict ────────────────────────────────────────────────────
+
+def _priced_for_verdict(implied_g, sector_ceiling, price, iv):
+    """
+    Replace the binary overvalued/undervalued tag with a 6-tier verdict driven
+    by the growth rate the market is pricing in versus what's credible for
+    the sector.  Sector ceiling comes from _reality_reconciliation's ladder.
+
+    Returns dict: {tier, label, color, narrative}
+    """
+    if implied_g is None or sector_ceiling is None or sector_ceiling <= 0:
+        # Fall back to simple discount/premium-to-IV when reverse-DCF unavailable
+        if iv is not None and price and price > 0:
+            mos = (iv - price) / price
+            if   mos >  0.20: return {"tier": "discount",   "label": "Priced for Discount",   "color": "green",  "narrative": "Trading well below fundamental value."}
+            elif mos >  0.05: return {"tier": "fair_value", "label": "Priced for Fair Value", "color": "blue",   "narrative": "Trading near fundamental value."}
+            elif mos > -0.10: return {"tier": "growth",     "label": "Priced for Growth",     "color": "blue",   "narrative": "Modest growth premium baked in."}
+            elif mos > -0.25: return {"tier": "excellence", "label": "Priced for Excellence", "color": "amber",  "narrative": "Premium pricing — execution must continue."}
+            else:             return {"tier": "miracle",    "label": "Priced for Miracle",    "color": "red",    "narrative": "Speculative — requires extraordinary outcomes."}
+        return None
+
+    ratio = implied_g / sector_ceiling   # 0 means flat, 1 = at ceiling, >1.2 = miracle
+
+    if implied_g < -0.02:
+        return {"tier": "decline", "label": "Priced for Decline",
+                "color": "red",
+                "narrative": f"Market implies a {abs(implied_g)*100:.1f}% contraction — distress pricing."}
+    if ratio < 0.20:
+        return {"tier": "distress", "label": "Priced for Distress",
+                "color": "red",
+                "narrative": f"Market implies just {implied_g*100:.1f}% growth — well below sector norms."}
+    if ratio < 0.55:
+        return {"tier": "discount", "label": "Priced for Discount",
+                "color": "green",
+                "narrative": f"Market implies {implied_g*100:.1f}% — material discount to sector growth ceiling."}
+    if ratio < 0.85:
+        return {"tier": "fair_value", "label": "Priced for Fair Value",
+                "color": "blue",
+                "narrative": f"Market implies {implied_g*100:.1f}% — broadly aligned with sector growth norms."}
+    if ratio < 1.00:
+        return {"tier": "growth", "label": "Priced for Growth",
+                "color": "blue",
+                "narrative": f"Market implies {implied_g*100:.1f}% — top-of-band growth expectations."}
+    if ratio < 1.20:
+        return {"tier": "excellence", "label": "Priced for Excellence",
+                "color": "amber",
+                "narrative": f"Market implies {implied_g*100:.1f}% — at sector ceiling; execution must be flawless."}
+    return {"tier": "miracle", "label": "Priced for Miracle",
+            "color": "red",
+            "narrative": f"Market implies {implied_g*100:.1f}% — exceeds sector ceiling × 1.2; speculative."}
+
+
+def _sector_growth_ceiling(sector, industry, is_structural_transformer=False, moat_detected=False):
+    """Same ladder as _reality_reconciliation, exposed for the verdict layer."""
+    s_lower   = (sector   or "").lower()
+    ind_lower = (industry or "").lower()
+    if is_structural_transformer:
+        return 0.50, "Structural Transformer"
+    if moat_detected and ("technology" in s_lower or "communication" in s_lower):
+        return 0.45, "Moat-Tech"
+    if "technology" in s_lower or "communication" in s_lower:
+        return 0.40, "Tech / Comms"
+    if any(x in ind_lower for x in [
+            "capital markets", "securities brokerage", "consumer lending",
+            "online lending", "fintech", "financial exchanges"]):
+        return 0.40, "Growth Fintech"
+    if "healthcare" in s_lower or "biotech" in ind_lower:
+        return 0.35, "Healthcare"
+    if "financial" in s_lower or "bank" in ind_lower or "insurance" in ind_lower:
+        return 0.20, "Banking / Insurance"
+    if "energy" in s_lower or "materials" in s_lower or "mining" in ind_lower:
+        return 0.15, "Energy / Materials"
+    return 0.25, "Default"
+
+
+# ── Debt + Momentum Classifier ──────────────────────────────────────────────
+
+def _debt_momentum_classifier(info, balance_sheet, fcf_series, price_history):
+    """
+    Classify leveraged stocks into:
+      - "Deleveraging Story":   debt falling, FCF positive, interest cov > 2× — apply uplift
+      - "Speculative Distress": debt growing OR FCF negative, momentum without fundamentals
+      - "Recovery Watch":       leverage high, mixed signals
+      - "Healthy Leverage":     debt low or improving with stable cash flow
+      - "Stable":               low leverage, no special handling needed
+
+    Returns dict: {classification, label, color, narrative, premium_pct, flags}
+    premium_pct is an IV-uplift factor: e.g. 0.10 = +10% IV (only for Deleveraging).
+    """
+    total_debt = safe(info.get("totalDebt"), 0) or 0
+    total_cash = safe(info.get("totalCash"), 0) or 0
+    ebitda     = safe(info.get("ebitda"), 0) or 0
+    ebit       = safe(info.get("ebitda"), 0) or 0   # proxy when EBIT not available
+    interest   = safe(info.get("interestExpense")) or 0
+
+    # Debt-to-EBITDA (leverage)
+    debt_to_ebitda = (total_debt / ebitda) if ebitda > 0 else None
+    net_debt_to_ebitda = ((total_debt - total_cash) / ebitda) if ebitda > 0 else None
+
+    # Interest coverage (how easily can EBIT pay interest)
+    interest_cov = (ebit / abs(interest)) if interest and abs(interest) > 0 else None
+
+    # FCF trajectory (last 2 years)
+    fcf_positive_recent = bool(fcf_series and fcf_series[0] > 0)
+    fcf_improving       = bool(fcf_series and len(fcf_series) >= 2 and fcf_series[0] > fcf_series[1])
+
+    # Debt trend (use balance_sheet quarterly comparison if available)
+    debt_trend = None    # negative = deleveraging
+    try:
+        if balance_sheet is not None and not balance_sheet.empty:
+            for label in ["Total Debt", "Long Term Debt"]:
+                if label in balance_sheet.index:
+                    series = balance_sheet.loc[label].dropna()
+                    if len(series) >= 2:
+                        recent, prior = float(series.iloc[0]), float(series.iloc[1])
+                        if prior > 0:
+                            debt_trend = (recent - prior) / prior
+                        break
+    except Exception:
+        pass
+
+    # 1-year price momentum
+    price_1yr_pct = None
+    try:
+        if price_history and len(price_history) >= 30:
+            recent = price_history[-1].get("close") if isinstance(price_history[-1], dict) else None
+            old    = price_history[0].get("close")  if isinstance(price_history[0], dict)  else None
+            if recent and old and old > 0:
+                price_1yr_pct = (recent - old) / old
+    except Exception:
+        pass
+
+    flags = []
+    is_leveraged = (debt_to_ebitda is not None and debt_to_ebitda > 3.0)
+    has_momentum = (price_1yr_pct is not None and price_1yr_pct > 0.20)
+
+    # Stable: low leverage — no classification needed
+    if not is_leveraged and (debt_to_ebitda is None or debt_to_ebitda < 2.0):
+        return {
+            "classification": "stable",
+            "label": "Stable Capital Structure",
+            "color": "neutral",
+            "narrative": "Low-leverage profile — no debt-momentum signal.",
+            "premium_pct": 0.0,
+            "flags": [],
+            "debt_to_ebitda": round(debt_to_ebitda, 2) if debt_to_ebitda is not None else None,
+            "interest_coverage": round(interest_cov, 2) if interest_cov is not None else None,
+            "debt_trend_pct": round(debt_trend * 100, 1) if debt_trend is not None else None,
+        }
+
+    # Healthy Leverage: leveraged but cash flow strong
+    if is_leveraged and fcf_positive_recent and (interest_cov is None or interest_cov > 4.0):
+        return {
+            "classification": "healthy_leverage",
+            "label": "Healthy Leverage",
+            "color": "blue",
+            "narrative": (f"Debt/EBITDA {debt_to_ebitda:.1f}× — high but covered by strong cash flow "
+                          f"(coverage {interest_cov:.1f}×)." if interest_cov else
+                          f"Debt/EBITDA {debt_to_ebitda:.1f}× — supported by positive FCF."),
+            "premium_pct": 0.0,
+            "flags": [],
+            "debt_to_ebitda": round(debt_to_ebitda, 2),
+            "interest_coverage": round(interest_cov, 2) if interest_cov is not None else None,
+            "debt_trend_pct": round(debt_trend * 100, 1) if debt_trend is not None else None,
+        }
+
+    # Deleveraging Story: high leverage + falling debt + improving FCF + momentum
+    if (is_leveraged and has_momentum
+            and debt_trend is not None and debt_trend < -0.05
+            and fcf_positive_recent
+            and (interest_cov is None or interest_cov > 2.0)):
+        # Deleveraging velocity → premium between 5% and 15%
+        velocity = min(abs(debt_trend), 0.30)              # cap at 30% YoY paydown
+        premium_pct = round(0.05 + (velocity / 0.30) * 0.10, 3)   # 5–15% IV uplift
+        flags.append(f"Debt down {abs(debt_trend)*100:.1f}% YoY — equity rerating opportunity")
+        if interest_cov: flags.append(f"Interest coverage improving: {interest_cov:.1f}×")
+        return {
+            "classification": "deleveraging",
+            "label": "Deleveraging Story",
+            "color": "green",
+            "narrative": (
+                f"Debt/EBITDA {debt_to_ebitda:.1f}× and falling — paying down debt while "
+                f"FCF is positive.  Equity becomes safer (and more valuable) as leverage "
+                f"normalises.  Applying +{premium_pct*100:.1f}% rerating premium."
+            ),
+            "premium_pct": premium_pct,
+            "flags": flags,
+            "debt_to_ebitda": round(debt_to_ebitda, 2),
+            "interest_coverage": round(interest_cov, 2) if interest_cov is not None else None,
+            "debt_trend_pct": round(debt_trend * 100, 1),
+        }
+
+    # Speculative Distress: high leverage + price momentum + bad fundamentals
+    if (is_leveraged and has_momentum and (
+            (debt_trend is not None and debt_trend > 0.05) or
+            (not fcf_positive_recent) or
+            (interest_cov is not None and interest_cov < 1.5))):
+        if not fcf_positive_recent:    flags.append("Free cash flow negative")
+        if debt_trend and debt_trend > 0.05: flags.append(f"Debt growing {debt_trend*100:.1f}% YoY")
+        if interest_cov and interest_cov < 1.5: flags.append(f"Interest coverage critically low: {interest_cov:.1f}×")
+        flags.append("Price momentum decoupled from fundamentals — high reversal risk")
+        return {
+            "classification": "speculative_distress",
+            "label": "Speculative Distress",
+            "color": "red",
+            "narrative": (
+                f"Debt/EBITDA {debt_to_ebitda:.1f}× combined with weak fundamentals "
+                f"and price momentum.  Rally is not supported by improving cash flow "
+                f"or deleveraging — treat as momentum-driven, not fundamental."
+            ),
+            "premium_pct": 0.0,
+            "flags": flags,
+            "debt_to_ebitda": round(debt_to_ebitda, 2),
+            "interest_coverage": round(interest_cov, 2) if interest_cov is not None else None,
+            "debt_trend_pct": round(debt_trend * 100, 1) if debt_trend is not None else None,
+        }
+
+    # Recovery Watch: leveraged, mixed signals, no clear classification
+    if is_leveraged:
+        return {
+            "classification": "recovery_watch",
+            "label": "Recovery Watch",
+            "color": "amber",
+            "narrative": (
+                f"Debt/EBITDA {debt_to_ebitda:.1f}× — leveraged but signals mixed.  "
+                f"Watch for FCF stability and continued debt paydown."
+            ),
+            "premium_pct": 0.0,
+            "flags": flags,
+            "debt_to_ebitda": round(debt_to_ebitda, 2),
+            "interest_coverage": round(interest_cov, 2) if interest_cov is not None else None,
+            "debt_trend_pct": round(debt_trend * 100, 1) if debt_trend is not None else None,
+        }
+
+    # Default: not flagged
+    return {
+        "classification": "stable",
+        "label": "Stable Capital Structure",
+        "color": "neutral",
+        "narrative": "Capital structure does not require special handling.",
+        "premium_pct": 0.0,
+        "flags": [],
+        "debt_to_ebitda": round(debt_to_ebitda, 2) if debt_to_ebitda is not None else None,
+        "interest_coverage": round(interest_cov, 2) if interest_cov is not None else None,
+        "debt_trend_pct": round(debt_trend * 100, 1) if debt_trend is not None else None,
+    }
+
+
+# ── Scenario Coherence Enforcer ─────────────────────────────────────────────
+
+def _enforce_scenario_coherence(scenarios, base_iv, price):
+    """
+    Hard-enforce: Bear < Base < Bull with sensible spreads.
+
+    After Reality Reconciliation, scenarios scaled proportionally can produce
+    non-monotonic ordering (Bull < Base) or extreme spreads (Bear at $30 when
+    Base is $228).  This enforces:
+
+      - Bear ≤ Base × 0.85       (max 15% downside from base)
+      - Bear ≥ Base × 0.65       (min 35% downside from base)  ← prevents absurd lows
+      - Bull ≥ Base × 1.10       (min 10% upside from base)
+      - Bull ≤ Base × 1.50       (max 50% upside from base)
+      - Strict: Bear < Base < Bull, always.
+
+    If the model's natural numbers fall in the band, keep them.  If they don't,
+    clamp into the band.  Bear is allowed to sit above current price now —
+    bear means "downside vs fair value", not "downside vs market price".
+
+    Mutates scenarios in place.
+    """
+    if not scenarios or base_iv is None or base_iv <= 0:
+        return scenarios
+
+    base = float(base_iv)
+    bear_floor   = round(base * 0.65, 2)
+    bear_ceiling = round(base * 0.85, 2)
+    bull_floor   = round(base * 1.10, 2)
+    bull_ceiling = round(base * 1.50, 2)
+
+    # Set base
+    scenarios.setdefault("base", {})
+    scenarios["base"]["value"]  = round(base, 2)
+    scenarios["base"]["upside"] = round((base - price) / price * 100, 1) if price else None
+
+    # Bear: clamp into [bear_floor, bear_ceiling]
+    bear_slot = scenarios.get("bear") or {}
+    bear_v    = bear_slot.get("value")
+    if bear_v is None or bear_v >= base:
+        bear_v = bear_ceiling
+    else:
+        bear_v = max(min(bear_v, bear_ceiling), bear_floor)
+    bear_slot["value"]  = round(bear_v, 2)
+    bear_slot["upside"] = round((bear_v - price) / price * 100, 1) if price else None
+    scenarios["bear"] = bear_slot
+
+    # Bull: clamp into [bull_floor, bull_ceiling]
+    bull_slot = scenarios.get("bull") or {}
+    bull_v    = bull_slot.get("value")
+    if bull_v is None or bull_v <= base:
+        bull_v = bull_floor
+    else:
+        bull_v = max(min(bull_v, bull_ceiling), bull_floor)
+    bull_slot["value"]  = round(bull_v, 2)
+    bull_slot["upside"] = round((bull_v - price) / price * 100, 1) if price else None
+    scenarios["bull"] = bull_slot
+
+    # Recompute weighted using the same weights already in scenarios
+    wb = (scenarios.get("base") or {}).get("weight", 60) / 100
+    wu = (scenarios.get("bull") or {}).get("weight", 20) / 100
+    wd = (scenarios.get("bear") or {}).get("weight", 20) / 100
+    weighted = round(wb * base + wu * bull_v + wd * bear_v, 2)
+    scenarios["weighted"]        = weighted
+    scenarios["weighted_upside"] = round((weighted - price) / price * 100, 1) if price else None
+    scenarios["coherence_enforced"] = True
+    return scenarios
+
+
 def _reality_reconciliation(iv, price, analyst_target, implied_g, sector, industry,
                              is_structural_transformer=False, moat_detected=False):
     """
@@ -1241,7 +1566,7 @@ def _reality_reconciliation(iv, price, analyst_target, implied_g, sector, indust
     # ── Reconcile: blend model 55%, analyst 25%, market 20% ──────────────────
     new_iv = round(0.55 * iv + 0.25 * at + 0.20 * price, 2)
     direction = "upward" if new_iv > iv else "downward"
-    pct_change = abs(new_iv - iv) / iv * 100
+    pct_change = abs(new_iv - iv) / max(iv, 0.01) * 100
     reason = (
         f"Reality Reconciliation ({direction}, {pct_change:.1f}%): model gap "
         f"{abs(gap_pct)*100:.0f}% with credible implied growth "
@@ -3053,6 +3378,50 @@ def analyze():
                         )
                     scenarios["reality_reconciled"] = True
 
+        # ── Debt + Momentum Classifier ─────────────────────────────────────────
+        # Distinguish "deleveraging stories" (apply premium) from "speculative
+        # distress" (flag, no upward push).  Runs before scenario coherence so
+        # any debt-driven IV uplift cascades into Bear/Base/Bull.
+        debt_momentum = _debt_momentum_classifier(info, balance_sheet, fcf_series, price_history)
+        if debt_momentum.get("premium_pct", 0) > 0 and intrinsic_value is not None:
+            _pre_dm_iv = intrinsic_value
+            intrinsic_value = round(intrinsic_value * (1 + debt_momentum["premium_pct"]), 2)
+            margin_of_safety = round((intrinsic_value - price) / price * 100, 1) if price else None
+            # Scale scenarios by the same factor
+            if scenarios:
+                _factor = (1 + debt_momentum["premium_pct"])
+                for _k in ("base", "bull", "bear"):
+                    _slot = scenarios.get(_k)
+                    if _slot and _slot.get("value") is not None:
+                        _slot["value"]  = round(_slot["value"] * _factor, 2)
+                        _slot["upside"] = round((_slot["value"] - price) / price * 100, 1) if price else None
+                if scenarios.get("weighted") is not None:
+                    scenarios["weighted"] = round(scenarios["weighted"] * _factor, 2)
+                    scenarios["weighted_upside"] = round((scenarios["weighted"] - price) / price * 100, 1) if price else None
+
+        # ── Scenario Coherence Enforcer ────────────────────────────────────────
+        # Hard-guarantee Bear < Base < Bull with sensible spreads.  Prevents
+        # absurd outputs like Bear $30 / Base $228 / Bull $187 (TSLA).
+        if scenarios and intrinsic_value is not None:
+            scenarios = _enforce_scenario_coherence(scenarios, intrinsic_value, price)
+
+        # ── "Priced For" Verdict ──────────────────────────────────────────────
+        # Replace the binary overvalued/undervalued tag with a 6-tier verdict
+        # driven by the growth rate the market is pricing in vs sector ceiling.
+        _ceiling, _ceiling_label = _sector_growth_ceiling(
+            sector, industry,
+            is_structural_transformer=is_structural_transformer,
+            moat_detected=moat_detected,
+        )
+        priced_for = _priced_for_verdict(
+            implied_g       = (implied_growth_pct / 100) if implied_growth_pct is not None else None,
+            sector_ceiling  = _ceiling,
+            price           = price,
+            iv              = intrinsic_value,
+        )
+        # Mag 7 concentration tag
+        is_mag7 = _is_mag7(ticker)
+
         # ── DCF Confidence Score ──────────────────────────────────────────────
         # Assess model reliability BEFORE deciding whether to blend with multiples.
         dcf_conf_level, dcf_conf_label, dcf_conf_strengths, dcf_conf_warnings = \
@@ -3390,6 +3759,12 @@ def analyze():
             "reality_reconciled":      reality_reconciled,
             "reality_pre_iv":          reality_pre_iv,
             "reality_reason":          reality_reason,
+            # ── "Priced For" Verdict + Mag 7 + Debt Classifier ───────────
+            "priced_for":              priced_for,
+            "sector_growth_ceiling_pct": round(_ceiling * 100, 1) if _ceiling else None,
+            "sector_growth_ceiling_label": _ceiling_label,
+            "is_mag7":                 is_mag7,
+            "debt_momentum":           debt_momentum,
             # Moat detection
             "moat_detected":    moat_detected,
             "moat_path":        moat_path,
