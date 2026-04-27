@@ -1134,6 +1134,123 @@ def solve_implied_growth(price, base_fcf, s2_ratio, tg, wacc, yrs,
         return None, False
 
 
+def _reality_reconciliation(iv, price, analyst_target, implied_g, sector, industry,
+                             is_structural_transformer=False, moat_detected=False):
+    """
+    Reality Reconciliation Layer — when the model is materially off from market
+    price AND the sell-side consensus aligns with market (not the model), the
+    model is likely missing something the simple DCF cannot capture: growth
+    optionality, contract pipelines, network effects, AI / robotics platform
+    value, brand premiums, etc.
+
+    Decision tree:
+      1. Significant gap?  |IV − price| / price > 0.25  (else: skip, model is fine)
+      2. Analyst alignment? analyst target on the price side, not the model side
+      3. Credibility check: implied growth from reverse-DCF must be ≤ sector
+         ceiling × 1.2.  If yes, blend.  If no, the gap is speculative — leave
+         model alone but flag it.
+
+    Blend formula (conservative — model still dominates):
+        new_IV = 0.55 × model_IV + 0.25 × analyst_target + 0.20 × current_price
+
+    Sector ceilings (max sustainable Stage-1 growth):
+        Structural transformer:        50%
+        High-growth tech / fintech:    40%
+        Communications / SaaS:         35%
+        Healthcare / Biotech:          35%
+        Default:                       25%
+        Banking / Insurance:           20%
+        Energy / Materials:            15%
+
+    Returns (reconciled_iv, was_reconciled, pre_iv, reason_string).
+    """
+    if iv is None or not price or price <= 0:
+        return iv, False, iv, None
+
+    pre_iv = round(float(iv), 2)
+    gap_pct = (iv - price) / price
+
+    # Skip when model and market are reasonably close
+    if abs(gap_pct) <= 0.25:
+        return iv, False, pre_iv, None
+
+    # Skip when no analyst target available — can't validate the gap
+    if not analyst_target or float(analyst_target) <= 0:
+        return iv, False, pre_iv, None
+    at = float(analyst_target)
+
+    # Direction: is the model below price (undervaluing) or above (overvaluing)?
+    model_below = iv < price
+    # Analyst alignment: analyst must side with PRICE, not with model.
+    # (Model below price → analyst should be near or above price.)
+    # (Model above price → analyst should be near or below price.)
+    if model_below:
+        analyst_aligned_with_market = at >= price * 0.92
+    else:
+        analyst_aligned_with_market = at <= price * 1.08
+
+    if not analyst_aligned_with_market:
+        # Analysts agree with our model — the divergence is genuine, don't blend
+        return iv, False, pre_iv, "Analyst consensus agrees with VALUS model — divergence trusted"
+
+    # Sector growth ceiling
+    s_lower   = (sector   or "").lower()
+    ind_lower = (industry or "").lower()
+
+    if is_structural_transformer:
+        ceiling = 0.50
+        ceiling_label = "Structural Transformer (50%)"
+    elif moat_detected and ("technology" in s_lower or "communication" in s_lower):
+        ceiling = 0.45
+        ceiling_label = "Moat-Tech (45%)"
+    elif "technology" in s_lower or "communication" in s_lower:
+        ceiling = 0.40
+        ceiling_label = "Tech / Comms (40%)"
+    elif any(x in ind_lower for x in [
+            "capital markets", "securities brokerage", "consumer lending",
+            "online lending", "fintech", "financial exchanges"]):
+        ceiling = 0.40
+        ceiling_label = "Growth Fintech (40%)"
+    elif "healthcare" in s_lower or "biotech" in ind_lower:
+        ceiling = 0.35
+        ceiling_label = "Healthcare (35%)"
+    elif "financial" in s_lower or "bank" in ind_lower or "insurance" in ind_lower:
+        ceiling = 0.20
+        ceiling_label = "Banking / Insurance (20%)"
+    elif "energy" in s_lower or "materials" in s_lower or "mining" in ind_lower:
+        ceiling = 0.15
+        ceiling_label = "Energy / Materials (15%)"
+    else:
+        ceiling = 0.25
+        ceiling_label = "Default (25%)"
+
+    # Credibility check: only reconcile if implied growth is within ceiling × 1.2
+    if implied_g is not None:
+        if implied_g > ceiling * 1.2:
+            # Market is pricing in growth that exceeds the credible sector ceiling.
+            # Don't blend — flag the speculation but trust the model.
+            return (iv, False, pre_iv,
+                    f"Market implies {implied_g*100:.1f}% growth — exceeds {ceiling_label} "
+                    f"ceiling × 1.2; speculative gap left unblended")
+        if implied_g < -0.05:
+            # Market pricing in contraction below -5% — distress signal, trust model
+            return (iv, False, pre_iv,
+                    f"Market implies {implied_g*100:.1f}% (contraction) — distress signal, "
+                    f"model trusted")
+
+    # ── Reconcile: blend model 55%, analyst 25%, market 20% ──────────────────
+    new_iv = round(0.55 * iv + 0.25 * at + 0.20 * price, 2)
+    direction = "upward" if new_iv > iv else "downward"
+    pct_change = abs(new_iv - iv) / iv * 100
+    reason = (
+        f"Reality Reconciliation ({direction}, {pct_change:.1f}%): model gap "
+        f"{abs(gap_pct)*100:.0f}% with credible implied growth "
+        f"{(implied_g or 0)*100:.1f}% ≤ {ceiling_label} ceiling. "
+        f"Blend: 55% model · 25% analyst · 20% market."
+    )
+    return new_iv, True, pre_iv, reason
+
+
 def build_expectation_gap(implied_g, model_g, price, model_iv_pre_sultan,
                            analyst_growth, sector, yrs=10):
     """
@@ -2887,6 +3004,55 @@ def analyze():
             except Exception:
                 pass   # silent — never break the main response
 
+        # ── Reality Reconciliation Layer ──────────────────────────────────────
+        # When the model is materially off from market price AND the sell-side
+        # consensus aligns with market (not the model), the model is missing
+        # something the simple DCF cannot capture (growth optionality, contracts,
+        # network effects, AI/robotics platform value, brand premiums).
+        # Only fires when implied growth from reverse-DCF is sector-credible.
+        reality_reconciled       = False
+        reality_pre_iv           = None
+        reality_reason           = None
+        if intrinsic_value is not None and price and price > 0:
+            _new_iv, reality_reconciled, reality_pre_iv, reality_reason = \
+                _reality_reconciliation(
+                    iv                       = intrinsic_value,
+                    price                    = price,
+                    analyst_target           = analyst_target_price,
+                    implied_g                = implied_growth_pct / 100 if implied_growth_pct is not None else None,
+                    sector                   = sector,
+                    industry                 = industry,
+                    is_structural_transformer = is_structural_transformer,
+                    moat_detected            = moat_detected,
+                )
+            if reality_reconciled:
+                _scale = (_new_iv / intrinsic_value) if intrinsic_value > 0 else 1.0
+                intrinsic_value = _new_iv
+                margin_of_safety = round((intrinsic_value - price) / price * 100, 1) if price else None
+                # Scale scenarios proportionally so Bear/Base/Bull stay coherent
+                if scenarios and isinstance(scenarios, dict):
+                    for _key in ("base", "bull", "bear"):
+                        _slot = scenarios.get(_key)
+                        if _slot and _slot.get("value") is not None:
+                            _new_v = round(_slot["value"] * _scale, 2)
+                            _slot["value"]  = _new_v
+                            _slot["upside"] = (
+                                round((_new_v - price) / price * 100, 1) if price else None
+                            )
+                    # Ensure Bear stays below price after scaling
+                    _bear_slot = scenarios.get("bear")
+                    if _bear_slot and _bear_slot.get("value") is not None:
+                        if _bear_slot["value"] >= price:
+                            _bear_slot["value"]  = round(price * 0.85, 2)
+                            _bear_slot["upside"] = round(-15.0, 1)
+                            _bear_slot["stressed"] = True
+                    if scenarios.get("weighted") is not None:
+                        scenarios["weighted"] = round(scenarios["weighted"] * _scale, 2)
+                        scenarios["weighted_upside"] = (
+                            round((scenarios["weighted"] - price) / price * 100, 1) if price else None
+                        )
+                    scenarios["reality_reconciled"] = True
+
         # ── DCF Confidence Score ──────────────────────────────────────────────
         # Assess model reliability BEFORE deciding whether to blend with multiples.
         dcf_conf_level, dcf_conf_label, dcf_conf_strengths, dcf_conf_warnings = \
@@ -3220,6 +3386,10 @@ def analyze():
             # ── Expectation Gap Engine ─────────────────────────────────────
             "expectation_gap":         expectation_gap,
             "implied_growth_pct":      implied_growth_pct,
+            # ── Reality Reconciliation ────────────────────────────────────
+            "reality_reconciled":      reality_reconciled,
+            "reality_pre_iv":          reality_pre_iv,
+            "reality_reason":          reality_reason,
             # Moat detection
             "moat_detected":    moat_detected,
             "moat_path":        moat_path,

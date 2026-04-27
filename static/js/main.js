@@ -862,6 +862,16 @@ function renderQuickInsights(d) {
     qi('⚖', `<strong>Sultan Split</strong> — 90% model · 10% analyst${atStr}${preIv}`, 'qi-warn');
   }
 
+  // ── Reality Reconciliation (Smart Market Mismatch Layer) ─────────────────
+  if (d.reality_reconciled) {
+    const pre = d.reality_pre_iv != null ? ` · Pre-blend: $${d.reality_pre_iv.toFixed(2)}` : '';
+    const reason = d.reality_reason ? `<div style="font-size:11px;opacity:.7;margin-top:4px;">${escHtml(d.reality_reason)}</div>` : '';
+    qi('🧭', `<strong>Reality Reconciliation</strong> — Model gap detected; blended 55% model · 25% analyst · 20% market${pre}${reason}`, 'qi-cyan');
+  } else if (d.reality_reason) {
+    // Speculative-gap or analyst-aligned-with-model case — flag but don't blend
+    qi('▴', `<strong>Market Divergence</strong> — ${escHtml(d.reality_reason)}`, 'qi-warn');
+  }
+
   // ── Multiples fallback ────────────────────────────────────────────────────
   if (d.multiples_val && (!d.dcf_available || iv == null)) {
     qi('◈', `<strong>Industry Multiples</strong> — DCF unavailable; secondary valuation applied (${escHtml(d.multiples_method || '')})`, 'qi-warn');
