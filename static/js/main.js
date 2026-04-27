@@ -123,7 +123,8 @@ async function searchSuggestions(q) {
     const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
     if (!res.ok) return [];
     const data = await res.json();
-    return data.results || [];
+    // Endpoint returns an array directly (not wrapped in {results: ...})
+    return Array.isArray(data) ? data : (data.results || []);
   } catch {
     return [];
   }
