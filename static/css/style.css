@@ -336,14 +336,14 @@ button { font-family: inherit; cursor: pointer; }
 
 .search-dropdown {
   position: absolute; left: 0; right: 0; top: calc(100% + 8px);
-  background: var(--bg-frosted);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255,255,255,0.06);
+  background: var(--bg-elevated);  /* fully opaque so text below doesn't bleed through */
+  border: 1px solid rgba(255,255,255,0.08);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-card-hover);
   overflow: hidden;
-  z-index: 20;
+  z-index: 100;
+  max-height: 360px;
+  overflow-y: auto;
 }
 .search-result {
   padding: 12px 18px;
@@ -491,7 +491,7 @@ button { font-family: inherit; cursor: pointer; }
 .results { padding: var(--space-3) 0 var(--space-9); }
 .results.hidden { display: none; }
 
-.results > * + * { margin-top: var(--space-5); }
+.results > * + * { margin-top: var(--space-6); }
 
 /* ════════════════════════════════════════════════════════════════════════
    Hero verdict card  — the centerpiece
@@ -499,33 +499,44 @@ button { font-family: inherit; cursor: pointer; }
 
 .hero-verdict {
   position: relative;
-  padding: var(--space-7) var(--space-7) var(--space-6);
+  padding: var(--space-8) var(--space-7) var(--space-7);
   border-radius: var(--radius-xl);
-  background: var(--bg-elevated);
-  box-shadow: var(--shadow-card);
+  background: linear-gradient(180deg, var(--bg-elevated) 0%, var(--bg-elevated-2) 100%);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.05) inset,
+    0 0 0 1px rgba(255,255,255,0.05),
+    0 32px 80px -24px rgba(0,0,0,0.7),
+    0 0 120px -20px var(--tier-glow, var(--accent-glow));
   overflow: hidden;
+  transition: box-shadow 600ms var(--ease-out);
 }
 
-/* Tier-colored accent stripe at the top */
+/* Tier-colored accent stripe at the top — slightly thicker, softer glow */
 .hero-verdict::before {
   content: ""; position: absolute; top: 0; left: 0; right: 0;
-  height: 3px;
-  background: var(--tier-accent, var(--accent));
-  box-shadow: 0 0 30px var(--tier-glow, var(--accent-glow));
-  transition: background 400ms var(--ease-out), box-shadow 400ms var(--ease-out);
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--tier-accent, var(--accent)) 20%,
+    var(--tier-accent, var(--accent)) 80%,
+    transparent 100%
+  );
+  box-shadow: 0 0 40px var(--tier-glow, var(--accent-glow));
+  transition: background 500ms var(--ease-out), box-shadow 500ms var(--ease-out);
 }
 
-/* Ambient tier glow that follows tier color */
+/* Ambient tier glow that washes the top half of the card */
 .hero-verdict::after {
   content: ""; position: absolute; inset: 0;
   background: radial-gradient(
-    800px circle at 50% 0%,
+    1100px circle at 50% -10%,
     var(--tier-glow, var(--accent-glow)) 0%,
-    transparent 55%
+    transparent 50%
   );
-  opacity: 0.35;
+  opacity: 0.4;
   pointer-events: none;
-  transition: background 400ms var(--ease-out);
+  transition: background 500ms var(--ease-out);
 }
 
 .hero-verdict__head {
@@ -604,19 +615,21 @@ button { font-family: inherit; cursor: pointer; }
   color: var(--ink-muted);
 }
 .pi-value {
-  font-size: 40px;
+  font-size: 52px;
   font-weight: 600;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
   color: var(--ink-primary);
   font-feature-settings: "tnum" 1;
-  line-height: 1.05;
+  line-height: 1.0;
 }
 .pi-value.iv {
-  background: linear-gradient(180deg, var(--ink-primary), var(--tier-accent, var(--accent)));
+  background: linear-gradient(180deg, var(--ink-primary) 0%, var(--tier-accent, var(--accent)) 110%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
   transition: background 400ms var(--ease-out);
+  text-shadow: 0 0 60px var(--tier-glow, var(--accent-glow));
+  filter: drop-shadow(0 0 24px var(--tier-glow, var(--accent-glow)));
 }
 
 /* MOS bar in the middle */
@@ -791,15 +804,19 @@ button { font-family: inherit; cursor: pointer; }
    ════════════════════════════════════════════════════════════════════════ */
 
 .methodology {
-  padding: var(--space-6);
+  padding: var(--space-5) var(--space-6);
+  transition: padding 350ms var(--ease-out);
 }
+.methodology.expanded { padding: var(--space-6); }
 
 .methodology__head {
   display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: var(--space-5);
+  margin-bottom: 0;
   cursor: pointer;
   user-select: none;
+  transition: margin-bottom 350ms var(--ease-out);
 }
+.methodology.expanded .methodology__head { margin-bottom: var(--space-5); }
 .methodology__title {
   display: flex; align-items: center; gap: var(--space-3);
   font-size: 16px;
@@ -1084,24 +1101,27 @@ button { font-family: inherit; cursor: pointer; }
    ════════════════════════════════════════════════════════════════════════ */
 
 .mini-stats {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-3);
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  background: var(--bg-elevated);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset, 0 0 0 1px rgba(255,255,255,0.05);
 }
 .mini-stat {
   padding: var(--space-4) var(--space-5);
-  background: var(--bg-elevated);
-  border: 1px solid rgba(255,255,255,0.04);
-  border-radius: var(--radius);
-  display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: column; gap: 3px;
+  border-right: 1px solid rgba(255,255,255,0.04);
 }
+.mini-stat:last-child { border-right: none; }
 .mini-stat__label {
   font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.06em;
+  font-size: 10px;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-muted);
 }
 .mini-stat__value {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--ink-primary);
   font-feature-settings: "tnum" 1;
@@ -1111,7 +1131,9 @@ button { font-family: inherit; cursor: pointer; }
 
 @media (max-width: 768px) {
   .mini-stats { grid-template-columns: repeat(2, 1fr); }
-  .mini-stat__value { font-size: 16px; }
+  .mini-stat:nth-child(2n) { border-right: none; }
+  .mini-stat:nth-child(-n+2) { border-bottom: 1px solid rgba(255,255,255,0.04); }
+  .mini-stat__value { font-size: 14px; }
 }
 
 /* ════════════════════════════════════════════════════════════════════════

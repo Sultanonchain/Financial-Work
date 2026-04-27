@@ -442,49 +442,48 @@ function renderMiniStats(d) {
    ════════════════════════════════════════════════════════════════════════ */
 
 function renderDrawerContent(d) {
-  // Assumptions
-  const ag = $("assumptionsGrid");
-  const rows = [
-    ["WACC",            d.wacc != null ? `${fmt(d.wacc, 1)}%` : "—"],
-    ["Cost of Equity",  d.cost_of_equity != null ? `${fmt(d.cost_of_equity, 1)}%` : "—"],
-    ["Cost of Debt",    d.cost_of_debt != null ? `${fmt(d.cost_of_debt, 1)}%` : "—"],
-    ["Beta",            d.beta != null ? fmt(d.beta, 2) : "—"],
-    ["Stage 1 growth",  d.stage1_growth != null ? `${fmt(d.stage1_growth, 1)}%` : "—"],
-    ["Stage 2 growth",  d.stage2_growth != null ? `${fmt(d.stage2_growth, 1)}%` : "—"],
-    ["Terminal growth", d.terminal_growth != null ? `${fmt(d.terminal_growth, 1)}%` : "—"],
-    ["Tax rate",        d.tax_rate != null ? `${fmt(d.tax_rate, 1)}%` : "—"],
-    ["Base FCF",        d.base_fcf != null ? fmtBig(d.base_fcf) : "—"],
-    ["Net debt",        d.net_debt != null ? fmtBig(d.net_debt) : "—"],
-    ["Shares out",      d.shares_outstanding != null ? fmtBig(d.shares_outstanding).replace("$","") : "—"],
-    ["Years projected", d.projection_years || 10],
-  ];
-  ag.innerHTML = rows.map(([l, v]) =>
-    `<div class="assumption"><span class="assumption__label">${l}</span><span class="assumption__value numeric">${v}</span></div>`
-  ).join("");
-
-  // Notes
-  renderNotes(d);
-
-  // Charts
-  if (d.price_history) renderPriceChart(d.price_history);
-  if (d.fcf_chart) renderDcfChart(d.fcf_chart);
-
-  // Projection table
-  renderProjectionTable(d);
-
-  // Financials tabs
-  renderFinancialsTabs(d);
-
-  // Drawer toggle binding
+  // ── Drawer toggle binding (FIRST, so it works even if other parts fail)
   const trigger = $("drawerTrigger");
   const drawer  = $("drawer");
   const triggerTxt = $("drawerTriggerTxt");
-  trigger.onclick = () => {
-    const isOpen = drawer.classList.toggle("open");
-    trigger.classList.toggle("open", isOpen);
-    trigger.setAttribute("aria-expanded", isOpen ? "true" : "false");
-    triggerTxt.textContent = isOpen ? "Hide detailed analysis" : "View detailed analysis";
-  };
+  if (trigger && drawer) {
+    trigger.onclick = () => {
+      const isOpen = drawer.classList.toggle("open");
+      trigger.classList.toggle("open", isOpen);
+      trigger.setAttribute("aria-expanded", isOpen ? "true" : "false");
+      if (triggerTxt) triggerTxt.textContent = isOpen ? "Hide detailed analysis" : "View detailed analysis";
+    };
+  }
+
+  // ── Each renderer is wrapped so a single failure doesn't take down others
+  try {
+    const ag = $("assumptionsGrid");
+    if (ag) {
+      const rows = [
+        ["WACC",            d.wacc != null ? `${fmt(d.wacc, 1)}%` : "—"],
+        ["Cost of Equity",  d.cost_of_equity != null ? `${fmt(d.cost_of_equity, 1)}%` : "—"],
+        ["Cost of Debt",    d.cost_of_debt != null ? `${fmt(d.cost_of_debt, 1)}%` : "—"],
+        ["Beta",            d.beta != null ? fmt(d.beta, 2) : "—"],
+        ["Stage 1 growth",  d.stage1_growth != null ? `${fmt(d.stage1_growth, 1)}%` : "—"],
+        ["Stage 2 growth", d.stage2_growth != null ? `${fmt(d.stage2_growth, 1)}%` : "—"],
+        ["Terminal growth", d.terminal_growth != null ? `${fmt(d.terminal_growth, 1)}%` : "—"],
+        ["Tax rate",        d.tax_rate != null ? `${fmt(d.tax_rate, 1)}%` : "—"],
+        ["Base FCF",        d.base_fcf != null ? fmtBig(d.base_fcf) : "—"],
+        ["Net debt",        d.net_debt != null ? fmtBig(d.net_debt) : "—"],
+        ["Shares out",      d.shares_outstanding != null ? fmtBig(d.shares_outstanding).replace("$","") : "—"],
+        ["Years projected", d.projection_years || 10],
+      ];
+      ag.innerHTML = rows.map(([l, v]) =>
+        `<div class="assumption"><span class="assumption__label">${l}</span><span class="assumption__value numeric">${v}</span></div>`
+      ).join("");
+    }
+  } catch (e) { console.error("[assumptions]", e); }
+
+  try { renderNotes(d); } catch (e) { console.error("[notes]", e); }
+  try { if (d.price_history) renderPriceChart(d.price_history); } catch (e) { console.error("[priceChart]", e); }
+  try { if (d.fcf_chart)     renderDcfChart(d.fcf_chart); }       catch (e) { console.error("[dcfChart]", e); }
+  try { renderProjectionTable(d); } catch (e) { console.error("[projTable]", e); }
+  try { renderFinancialsTabs(d); }  catch (e) { console.error("[financials]", e); }
 }
 
 function renderNotes(d) {
@@ -591,9 +590,20 @@ function renderDcfChart(fcfData) {
   const ctx = canvas.getContext("2d");
   if (dcfChartInstance) dcfChartInstance.destroy();
 
-  const labels = fcfData.years || [];
-  const projected = (fcfData.projected || []).map(v => v / 1e9);
-  const discounted = (fcfData.discounted || []).map(v => v / 1e9);
+  // Backend returns either:
+  //   { projected: { labels, values, pvs } }   (current shape)
+  // or { years, projected, discounted }        (legacy)
+  let labels, projected, discounted;
+  if (fcfData.projected && typeof fcfData.projected === "object" && !Array.isArray(fcfData.projected)) {
+    labels     = fcfData.projected.labels || [];
+    projected  = (fcfData.projected.values || []).map(v => v / 1e9);
+    discounted = (fcfData.projected.pvs    || []).map(v => v / 1e9);
+  } else {
+    labels     = fcfData.years || [];
+    projected  = (fcfData.projected || []).map(v => v / 1e9);
+    discounted = (fcfData.discounted || []).map(v => v / 1e9);
+  }
+  if (labels.length === 0 || projected.length === 0) return;
 
   dcfChartInstance = new Chart(ctx, {
     type: "bar",
@@ -640,7 +650,7 @@ function renderProjectionTable(d) {
     `<tr>
       <td>Year ${r.year}</td>
       <td>${fmtBig(r.fcf)}</td>
-      <td>${r.discount_factor != null ? fmt(r.discount_factor, 4) : '—'}</td>
+      <td>${r.growth != null ? `${fmt(r.growth * 100, 1)}%` : '—'}</td>
       <td>${fmtBig(r.pv)}</td>
     </tr>`
   ).join("");
