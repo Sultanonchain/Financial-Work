@@ -22,9 +22,51 @@
       <span class="brand-divider"></span>
       <span class="brand-tag">Institutional Research Tool</span>
     </div>
-    <span class="disclaimer-pill">⚠ Not Financial Advice</span>
+    <div class="header-actions">
+      <button class="header-btn" id="portfolioBtn" type="button" aria-label="Open portfolio">
+        <span class="header-btn__icon">★</span>
+        <span class="header-btn__label">Portfolio</span>
+        <span class="header-btn__count" id="portfolioCount" hidden>0</span>
+      </button>
+      <span class="disclaimer-pill">⚠ Not Financial Advice</span>
+    </div>
   </div>
 </header>
+
+<!-- ── PORTFOLIO MODAL ──────────────────────────────────────────────── -->
+<div class="modal hidden" id="portfolioModal" role="dialog" aria-modal="true" aria-labelledby="portfolioTitle">
+  <div class="modal__backdrop" data-modal-close></div>
+  <div class="modal__panel">
+    <div class="modal__head">
+      <h2 class="modal__title" id="portfolioTitle">My Portfolio</h2>
+      <button class="modal__close" data-modal-close aria-label="Close">✕</button>
+    </div>
+    <div class="modal__body">
+      <div class="portfolio-empty" id="portfolioEmpty">
+        <div class="portfolio-empty__icon">★</div>
+        <div class="portfolio-empty__title">No stocks in your portfolio yet</div>
+        <div class="portfolio-empty__sub">Search any ticker and tap "Add to Portfolio" to start tracking it.</div>
+      </div>
+      <div class="portfolio-list" id="portfolioList"></div>
+    </div>
+    <div class="modal__foot" id="portfolioFoot" hidden>
+      <div class="portfolio-summary">
+        <div class="portfolio-summary__row">
+          <span class="portfolio-summary__label">Holdings</span>
+          <span class="portfolio-summary__value" id="pfCount">0</span>
+        </div>
+        <div class="portfolio-summary__row">
+          <span class="portfolio-summary__label">Avg margin of safety</span>
+          <span class="portfolio-summary__value" id="pfAvgMos">—</span>
+        </div>
+        <div class="portfolio-summary__row">
+          <span class="portfolio-summary__label">Undervalued</span>
+          <span class="portfolio-summary__value" id="pfUnderCount">0</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- ── HERO SEARCH ────────────────────────────────────────────────────── -->
 <section class="hero">
@@ -107,9 +149,14 @@
             <span id="vRange">—</span>
           </div>
         </div>
-        <button class="copy-btn" id="copyBtn" type="button">
-          <span id="copyBtnTxt">Copy summary</span>
-        </button>
+        <div class="hero-verdict__actions">
+          <button class="copy-btn" id="addPortfolioBtn" type="button" aria-label="Add to portfolio">
+            <span id="addPortfolioTxt">★ Add to Portfolio</span>
+          </button>
+          <button class="copy-btn" id="copyBtn" type="button">
+            <span id="copyBtnTxt">Copy summary</span>
+          </button>
+        </div>
       </div>
 
       <div class="price-iv">

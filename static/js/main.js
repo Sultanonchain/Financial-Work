@@ -153,9 +153,9 @@ function renderResults(d) {
   renderScenarios(d);
   renderMiniStats(d);
   renderDrawerContent(d);
+  syncAddPortfolioButtonForCurrent();
 
   attachCardGlow();
-  // Smooth-scroll into view
   $("results").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -371,36 +371,62 @@ function renderMethodology(d) {
 function renderScenarios(d) {
   const sc = d.scenarios || {};
   const grid = $("scGrid");
-  const price = d.current_price;
 
   $("scWeightNote").textContent = sc.weight_basis ? `Weights: ${sc.weight_basis}` : "";
 
-  const cards = [
-    { key: "bear", cls: "bear", label: "Bear case" },
-    { key: "base", cls: "base", label: "Base case" },
-    { key: "bull", cls: "bull", label: "Bull case" },
-  ].map(({ key, cls, label }) => {
+  // Sector-aware case-narratives so users understand what each scenario assumes
+  const ind = (d.industry || "").toLowerCase();
+  const sect = (d.sector || "").toLowerCase();
+  const isTech    = sect.includes("technology") || sect.includes("communication");
+  const isFin     = sect.includes("financial");
+  const isEnergy  = sect.includes("energy");
+  const isStruct  = !!d.structural_transformer;
+
+  function bullCase() {
+    if (isStruct) return "Best case: platform optionality (AI, robotics, or autonomy) materialises faster than expected and drives a re-rating. Margins expand, growth stays at sector ceiling.";
+    if (isTech)   return "Best case: AI tailwind compounds, operating leverage kicks in, growth holds at the upper band of the sector ceiling.";
+    if (isFin)    return "Best case: rate environment supports NIM, loan growth accelerates, credit losses stay contained, ROE expands.";
+    if (isEnergy) return "Best case: commodity prices hold elevated, capital discipline drives free-cash-flow yield higher, dividends and buybacks compound.";
+    return "Best case: revenue grows at the top of the sector band, margins expand, capital allocation creates additional shareholder value.";
+  }
+  function bearCase() {
+    if (isStruct) return "Worst case: platform thesis stalls, capex stays elevated without payoff, growth reverts to the base business and the premium evaporates.";
+    if (isTech)   return "Worst case: AI demand normalises, competition compresses margins, growth halves and the multiple compresses with it.";
+    if (isFin)    return "Worst case: rates roll over, credit losses spike, regulatory capital requirements rise, ROE compresses.";
+    if (isEnergy) return "Worst case: commodity prices fall sharply, capex commitments stay fixed, FCF is squeezed and dividends face risk.";
+    return "Worst case: macro headwinds, market-share losses, or margin compression cut growth meaningfully and the multiple re-rates lower.";
+  }
+  function baseCase() {
+    return "VALUS's central forecast — Stage 1 growth tapers to Stage 2, then to terminal at sector ceiling. Discounted at the model WACC.";
+  }
+
+  const meta = {
+    bear: { label: "Bear case",  case: bearCase(), valClass: "negative", priorityIdx: 0 },
+    base: { label: "Base case",  case: baseCase(), valClass: "neutral",  priorityIdx: 1 },
+    bull: { label: "Bull case",  case: bullCase(), valClass: "positive", priorityIdx: 2 },
+  };
+
+  const cards = ["bear", "base", "bull"].map(key => {
     const slot = sc[key] || {};
     const v = slot.value;
     const w = slot.weight ?? 33;
     const upside = slot.upside;
+    const m = meta[key];
 
-    // Probability bar width
     const barW = Math.min(Math.max(w, 5), 100);
-
-    // Assumptions row (s1, wacc)
-    const s1 = slot.s1 != null ? `<span><strong>g₁</strong> ${fmt(slot.s1, 1)}%</span>` : "";
+    const s1   = slot.s1   != null ? `<span><strong>g₁</strong> ${fmt(slot.s1, 1)}%</span>` : "";
     const wacc = slot.wacc != null ? `<span><strong>WACC</strong> ${fmt(slot.wacc, 1)}%</span>` : "";
 
     return `
-      <div class="sc-card ${cls}">
+      <div class="sc-card ${key}">
         <div class="sc-card__head">
-          <span class="sc-card__label">${label}</span>
+          <span class="sc-card__label">${m.label}</span>
           <span class="sc-card__weight">${w}% weight</span>
         </div>
-        <div class="sc-card__value">${v != null ? fmtPrice(v) : "—"}</div>
+        <div class="sc-card__value ${m.valClass}">${v != null ? fmtPrice(v) : "—"}</div>
         <div class="sc-card__delta">${upside != null ? fmtPct(upside) + " vs current" : "—"}</div>
         <div class="sc-card__bar"><div class="sc-card__bar-fill" style="--bar-width: ${barW}%; width: ${barW}%;"></div></div>
+        <div class="sc-card__case">${escHtml(m.case)}</div>
         <div class="sc-card__assumptions">${s1}${wacc}</div>
       </div>
     `;
@@ -408,7 +434,6 @@ function renderScenarios(d) {
 
   grid.innerHTML = cards.join("");
 
-  // Weighted bar
   const w = sc.weighted;
   const wd = sc.weighted_upside;
   $("scWeighted").textContent = w != null ? fmtPrice(w) : "—";
@@ -452,6 +477,11 @@ function renderDrawerContent(d) {
       trigger.classList.toggle("open", isOpen);
       trigger.setAttribute("aria-expanded", isOpen ? "true" : "false");
       if (triggerTxt) triggerTxt.textContent = isOpen ? "Hide detailed analysis" : "View detailed analysis";
+      // Lazy-load financial statements on first open (Yahoo-sourced)
+      if (isOpen && !drawer.dataset.statementsLoaded) {
+        renderFinancialsTabs(d).catch(() => {});
+        drawer.dataset.statementsLoaded = "1";
+      }
     };
   }
 
@@ -483,7 +513,9 @@ function renderDrawerContent(d) {
   try { if (d.price_history) renderPriceChart(d.price_history); } catch (e) { console.error("[priceChart]", e); }
   try { if (d.fcf_chart)     renderDcfChart(d.fcf_chart); }       catch (e) { console.error("[dcfChart]", e); }
   try { renderProjectionTable(d); } catch (e) { console.error("[projTable]", e); }
-  try { renderFinancialsTabs(d); }  catch (e) { console.error("[financials]", e); }
+  // Financial statements are now lazy-loaded on first drawer open (see above).
+  // Reset the flag for each new analysis so a fresh ticker re-fetches.
+  if (drawer) delete drawer.dataset.statementsLoaded;
 }
 
 function renderNotes(d) {
@@ -670,20 +702,57 @@ function renderProjectionTable(d) {
    Financial statements (income / balance / cashflow)
    ════════════════════════════════════════════════════════════════════════ */
 
-function renderFinancialsTabs(d) {
+// Financial statements are loaded lazily from /api/statements on first
+// drawer open.  Cached on the data dict to avoid re-fetching.
+let _STATEMENTS_CACHE = {};
+
+async function renderFinancialsTabs(d) {
   const body = $("finBody");
-  function pickTab(key) {
-    const data = d[`${key}_statement`] || null;
-    if (!data || !data.rows) {
-      body.innerHTML = `<tr><td class="text-muted">No ${key} statement data available.</td></tr>`;
+  if (!body) return;
+  body.innerHTML = `<tr><td class="text-muted">Loading financial statements…</td></tr>`;
+
+  let statements = _STATEMENTS_CACHE[d.ticker];
+  if (!statements) {
+    try {
+      const res = await fetch(`/api/statements?ticker=${encodeURIComponent(d.ticker)}`);
+      statements = await res.json();
+      if (statements && !statements.error) _STATEMENTS_CACHE[d.ticker] = statements;
+    } catch (e) {
+      body.innerHTML = `<tr><td class="text-muted">Could not load statements.</td></tr>`;
       return;
     }
-    const headers = data.periods || [];
-    const rows = data.rows || [];
-    const headerRow = `<tr><th>Item</th>${headers.map(h => `<th>${escHtml(h)}</th>`).join("")}</tr>`;
-    const bodyRows = rows.map(r =>
-      `<tr><td>${escHtml(r.label)}</td>${r.values.map(v => `<td>${v == null ? "—" : fmtBig(v)}</td>`).join("")}</tr>`
-    ).join("");
+  }
+  if (!statements || statements.error) {
+    body.innerHTML = `<tr><td class="text-muted">No statement data available.</td></tr>`;
+    return;
+  }
+
+  const ccy = statements.financialCurrency || "USD";
+
+  function pickTab(key) {
+    const stmt = statements[key] || {};
+    const rows = stmt.rows || [];
+    const cols = stmt.columns || [];
+    if (rows.length === 0) {
+      body.innerHTML = `<tr><td class="text-muted">No ${key} statement available.</td></tr>`;
+      return;
+    }
+    // Format column headers — keep just YYYY-MM-DD or year for compactness
+    const headers = cols.map(c => {
+      const s = String(c);
+      // If it looks like a date, show "FY 2025" style
+      const m = s.match(/^(\d{4})/);
+      return m ? `FY ${m[1]}` : s;
+    });
+
+    const headerRow = `<tr><th style="text-align:left">Item (${escHtml(ccy)})</th>${headers.map(h => `<th>${escHtml(h)}</th>`).join("")}</tr>`;
+    const bodyRows = rows.map(r => {
+      if (r.section) {
+        // Section header row — visually distinct
+        return `<tr class="fin-section-row"><td colspan="${1 + headers.length}" style="text-align:left; padding-top: 14px; color: var(--accent); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; font-size: 11px;">${escHtml(r.label)}</td></tr>`;
+      }
+      return `<tr><td style="text-align:left">${escHtml(r.label)}</td>${(r.values || []).map(v => `<td>${v == null ? "—" : fmtBig(v)}</td>`).join("")}</tr>`;
+    }).join("");
     body.innerHTML = headerRow + bodyRows;
   }
 
@@ -781,6 +850,154 @@ function setupCopyButton() {
 }
 
 /* ════════════════════════════════════════════════════════════════════════
+   Portfolio (localStorage-backed watchlist)
+   ════════════════════════════════════════════════════════════════════════ */
+
+const PF_KEY = "valus.portfolio.v1";
+
+function pfRead() {
+  try { return JSON.parse(localStorage.getItem(PF_KEY) || "[]"); }
+  catch { return []; }
+}
+function pfWrite(items) {
+  localStorage.setItem(PF_KEY, JSON.stringify(items));
+  pfUpdateBadge();
+}
+function pfHas(ticker) {
+  return pfRead().some(it => it.ticker === ticker);
+}
+function pfAdd(snap) {
+  const items = pfRead();
+  if (items.some(it => it.ticker === snap.ticker)) return;
+  items.push({ ...snap, addedAt: Date.now() });
+  pfWrite(items);
+}
+function pfRemove(ticker) {
+  pfWrite(pfRead().filter(it => it.ticker !== ticker));
+}
+function pfUpdateBadge() {
+  const n = pfRead().length;
+  const el = $("portfolioCount");
+  if (!el) return;
+  if (n > 0) { el.textContent = n; el.hidden = false; }
+  else       { el.hidden = true; }
+}
+
+function setupAddPortfolioButton() {
+  const btn = $("addPortfolioBtn");
+  const txt = $("addPortfolioTxt");
+  if (!btn) return;
+  btn.onclick = () => {
+    if (!_LAST_DATA) return;
+    const t = _LAST_DATA.ticker;
+    if (pfHas(t)) {
+      pfRemove(t);
+      btn.classList.remove("starred");
+      txt.textContent = "★ Add to Portfolio";
+      return;
+    }
+    pfAdd({
+      ticker: t,
+      name: _LAST_DATA.company_name || t,
+      sector: _LAST_DATA.sector || "",
+      price: _LAST_DATA.current_price,
+      iv: _LAST_DATA.intrinsic_value,
+      mos: _LAST_DATA.margin_of_safety,
+      tier: _LAST_DATA.priced_for?.label || "",
+    });
+    btn.classList.add("starred");
+    txt.textContent = "★ In Portfolio";
+  };
+}
+
+function syncAddPortfolioButtonForCurrent() {
+  const btn = $("addPortfolioBtn");
+  const txt = $("addPortfolioTxt");
+  if (!btn || !_LAST_DATA) return;
+  if (pfHas(_LAST_DATA.ticker)) {
+    btn.classList.add("starred");
+    txt.textContent = "★ In Portfolio";
+  } else {
+    btn.classList.remove("starred");
+    txt.textContent = "★ Add to Portfolio";
+  }
+}
+
+function openPortfolioModal() {
+  renderPortfolio();
+  $("portfolioModal").classList.remove("hidden");
+}
+function closePortfolioModal() {
+  $("portfolioModal").classList.add("hidden");
+}
+
+function renderPortfolio() {
+  const items = pfRead();
+  const list  = $("portfolioList");
+  const empty = $("portfolioEmpty");
+  const foot  = $("portfolioFoot");
+
+  if (items.length === 0) {
+    empty.classList.remove("hidden");
+    list.innerHTML = "";
+    foot.hidden = true;
+    return;
+  }
+  empty.classList.add("hidden");
+  foot.hidden = false;
+
+  list.innerHTML = items.map(it => {
+    const mosClass = it.mos == null ? "neutral" : (it.mos > 5 ? "positive" : (it.mos < -5 ? "negative" : "neutral"));
+    return `
+      <div class="pf-item" data-pf-ticker="${escHtml(it.ticker)}">
+        <span class="pf-item__ticker">${escHtml(it.ticker)}</span>
+        <span class="pf-item__name">${escHtml(it.name)}</span>
+        <span class="pf-item__price">${it.price != null ? fmtPrice(it.price) : "—"}</span>
+        <span class="pf-item__mos ${mosClass}">${it.mos != null ? fmtPct(it.mos) : "—"}</span>
+        <button class="pf-item__remove" data-pf-remove="${escHtml(it.ticker)}" aria-label="Remove">✕</button>
+      </div>
+    `;
+  }).join("");
+
+  // Click a row → analyze; remove button stops propagation
+  list.querySelectorAll(".pf-item").forEach(row => {
+    row.onclick = (e) => {
+      if (e.target.closest("[data-pf-remove]")) return;
+      const t = row.dataset.pfTicker;
+      closePortfolioModal();
+      $("tickerInput").value = t;
+      analyze(t);
+    };
+  });
+  list.querySelectorAll("[data-pf-remove]").forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      pfRemove(btn.dataset.pfRemove);
+      renderPortfolio();
+      syncAddPortfolioButtonForCurrent();
+    };
+  });
+
+  // Summary
+  $("pfCount").textContent = items.length;
+  const mosVals = items.filter(it => it.mos != null).map(it => it.mos);
+  const avgMos = mosVals.length ? mosVals.reduce((a, b) => a + b, 0) / mosVals.length : null;
+  $("pfAvgMos").textContent = avgMos != null ? fmtPct(avgMos) : "—";
+  $("pfUnderCount").textContent = `${items.filter(it => it.mos != null && it.mos > 5).length} / ${items.length}`;
+}
+
+function setupPortfolioModal() {
+  const btn = $("portfolioBtn");
+  if (btn) btn.onclick = openPortfolioModal;
+  document.querySelectorAll("[data-modal-close]").forEach(el => {
+    el.onclick = closePortfolioModal;
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closePortfolioModal();
+  });
+}
+
+/* ════════════════════════════════════════════════════════════════════════
    Boot
    ════════════════════════════════════════════════════════════════════════ */
 
@@ -788,4 +1005,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupSearch();
   setupAdvancedToggle();
   setupCopyButton();
+  setupAddPortfolioButton();
+  setupPortfolioModal();
+  pfUpdateBadge();
 });
