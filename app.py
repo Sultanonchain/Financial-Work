@@ -1085,6 +1085,130 @@ def calc_wacc(info, income_stmt, tax_rate=0.21, fx_rate=1.0):
     }
 
 
+# ── Expectation Gap Engine ─────────────────────────────────────────────────────
+# Answers "where is the market wrong?" by reverse-engineering the growth rate
+# the current stock price is implicitly pricing in, then comparing it to the
+# model's forecast.  The gap between those two numbers is the signal.
+
+def solve_implied_growth(price, base_fcf, s2_ratio, tg, wacc, yrs,
+                          info, fx_rate, net_debt_override=None,
+                          low=0.0, high=3.0, tol=5e-5):
+    """
+    Reverse DCF: binary-search for the Stage-1 growth rate `g` such that
+    run_dcf_single(g, ...) produces an intrinsic value ≈ current price.
+    Returns (implied_g, converged: bool).
+    """
+    if not price or not base_fcf or base_fcf <= 0:
+        return None, False
+    try:
+        for _ in range(80):
+            mid = (low + high) / 2
+            s2  = max(mid * s2_ratio, tg + 0.005, 0.02)
+            iv, *_ = run_dcf_single(
+                base_fcf, mid, s2, tg, wacc, yrs, info, fx_rate,
+                net_debt_override=net_debt_override)
+            if iv is None:
+                return None, False
+            diff = iv - price
+            if abs(diff) < tol * price:
+                return mid, True
+            if diff < 0:
+                low = mid
+            else:
+                high = mid
+        return (low + high) / 2, False
+    except Exception:
+        return None, False
+
+
+def build_expectation_gap(implied_g, model_g, price, model_iv_pre_sultan,
+                           analyst_growth, sector, yrs=10):
+    """
+    Given implied and model growth rates, produce the full Expectation Gap
+    payload: narrative sentences, disagreement score (0–10), and flags.
+
+    implied_g           — rate market is pricing in (from reverse DCF)
+    model_g             — VALUS Stage-1 forecast (s1)
+    price               — current market price
+    model_iv_pre_sultan — VALUS IV before Sultan Split (consensus_anchor_pre_iv)
+    analyst_growth      — sell-side consensus growth (or None)
+    sector              — for industry benchmark comparisons
+    """
+    if implied_g is None or model_g is None or model_g <= 0:
+        return None
+
+    gap_pp   = round((implied_g - model_g) * 100, 1)      # percentage points
+    gap_pct  = round((implied_g - model_g) / model_g * 100, 1)  # % of model
+
+    ig_pct   = round(implied_g * 100, 1)
+    mg_pct   = round(model_g   * 100, 1)
+
+    # Market disagreement vs model IV
+    model_disagrees_pct = None
+    if model_iv_pre_sultan and price and price > 0:
+        model_disagrees_pct = round((model_iv_pre_sultan - price) / price * 100, 1)
+
+    # ── Expectation Gap Score (0–10) ────────────────────────────────────────
+    # 0 = market and model fully agree | 10 = massive disagreement
+    raw_score = min(abs(gap_pp) / 3.0, 10.0)   # every 3pp of gap = 1 point
+    score = round(raw_score, 1)
+
+    # ── Narrative sentences ─────────────────────────────────────────────────
+    direction = "above" if implied_g > model_g else "below"
+    market_view = "overvalued" if model_iv_pre_sultan and model_iv_pre_sultan < price else "undervalued"
+
+    primary = (
+        f"To justify today's price, revenue must grow ~{ig_pct}% for {yrs} years. "
+        f"Our model forecasts {mg_pct}% — a {abs(gap_pp)}pp expectation gap."
+    )
+
+    if gap_pp > 0:
+        verdict = (
+            f"The market is pricing in {abs(gap_pp)}pp more growth than VALUS forecasts. "
+            f"Our model sees this stock as {market_view} by {abs(model_disagrees_pct or 0):.0f}%."
+        )
+    else:
+        verdict = (
+            f"The market demands {abs(gap_pp)}pp less growth than VALUS forecasts — "
+            f"our model sees significant upside the market has not priced in."
+        )
+
+    # ── Unrealistic assumption flags ────────────────────────────────────────
+    flags = []
+
+    if implied_g > 0.50:
+        flags.append(f"Market implies {ig_pct}% sustained growth — fewer than 1% of public companies have achieved this over 10 years.")
+
+    elif implied_g > 0.35:
+        flags.append(f"Market implies {ig_pct}% growth — historically achieved only by hyper-scalers in early expansion phases.")
+
+    elif implied_g > 0.25:
+        flags.append(f"Market implies {ig_pct}% growth — above the top-decile long-run growth rate for S&P 500 companies.")
+
+    if analyst_growth and implied_g > analyst_growth * 2.0:
+        cons_pct = round(analyst_growth * 100, 1)
+        flags.append(f"Market prices in {ig_pct}% growth vs sell-side consensus of {cons_pct}% — a 2× premium above analyst expectations.")
+
+    if implied_g < 0:
+        flags.append("Market is pricing in negative growth — the stock is discounting a contraction scenario.")
+
+    if abs(gap_pp) < 5 and score < 2:
+        flags.append("Market and model are broadly aligned — no major expectation mismatch detected.")
+
+    return {
+        "implied_growth_pct":    ig_pct,
+        "model_growth_pct":      mg_pct,
+        "gap_pp":                gap_pp,
+        "gap_pct":               gap_pct,
+        "score":                 score,               # 0–10
+        "primary_narrative":     primary,
+        "verdict_narrative":     verdict,
+        "flags":                 flags,
+        "market_disagrees_pct":  model_disagrees_pct,
+        "market_view":           market_view,
+    }
+
+
 # ── FIN 415 FCFE Model ─────────────────────────────────────────────────────────
 # Implements the exact bottom-up FCFE formula from the FIN 415 DCF Equity Analyst
 # Template (Spring 2026). Discount rate = Cost of Equity (Ke), not WACC.
@@ -2529,6 +2653,45 @@ def analyze():
         if intrinsic_value is not None:
             intrinsic_value = max(round(intrinsic_value, 2), 0.0)
 
+        # ── Expectation Gap Engine ─────────────────────────────────────────────
+        # Reverse-DCF: solve for the growth rate the current market price implies,
+        # then surface the gap between what the market "believes" vs what our model
+        # forecasts.  Answers "where is the market wrong?" not just "what is this worth?"
+        expectation_gap = None
+        implied_growth_pct = None
+        if (dcf_available and price and price > 0
+                and base_fcf and base_fcf > 0
+                and s1 is not None and wacc):
+            try:
+                _s2_ratio = (s2 / s1) if (s1 and s1 > 0) else 0.55
+                _iv_pre   = consensus_anchor_pre_iv or intrinsic_value
+                _ag       = safe(info.get("earningsGrowth") or info.get("revenueGrowth"))
+
+                implied_g, _conv = solve_implied_growth(
+                    price          = price,
+                    base_fcf       = fwd_base_fcf,
+                    s2_ratio       = _s2_ratio,
+                    tg             = tg,
+                    wacc           = wacc,
+                    yrs            = yrs,
+                    info           = info,
+                    fx_rate        = fx_rate,
+                    net_debt_override = net_debt,
+                )
+                if implied_g is not None:
+                    implied_growth_pct = round(implied_g * 100, 1)
+                    expectation_gap = build_expectation_gap(
+                        implied_g            = implied_g,
+                        model_g              = s1,
+                        price                = price,
+                        model_iv_pre_sultan  = _iv_pre,
+                        analyst_growth       = _ag,
+                        sector               = sector,
+                        yrs                  = yrs,
+                    )
+            except Exception:
+                pass   # silent — never break the main response
+
         # ── DCF Confidence Score ──────────────────────────────────────────────
         # Assess model reliability BEFORE deciding whether to blend with multiples.
         dcf_conf_level, dcf_conf_label, dcf_conf_strengths, dcf_conf_warnings = \
@@ -2807,6 +2970,9 @@ def analyze():
             "analyst_adjusted":        analyst_adjusted,
             "consensus_anchor_pre_iv": consensus_anchor_pre_iv,
             "analyst_target":          analyst_target_price,
+            # ── Expectation Gap Engine ─────────────────────────────────────
+            "expectation_gap":         expectation_gap,
+            "implied_growth_pct":      implied_growth_pct,
             # Moat detection
             "moat_detected":    moat_detected,
             "moat_path":        moat_path,

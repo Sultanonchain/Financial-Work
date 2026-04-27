@@ -746,6 +746,42 @@ function renderQuickInsights(d) {
     items.push(`<div class="qi-item ${cls}"><span class="qi-icon">${icon}</span><span class="qi-text">${html}</span></div>`);
   }
 
+  // ── Expectation Gap Engine ────────────────────────────────────────────────
+  // This is the top insight: "where is the market wrong?"
+  const eg = d.expectation_gap;
+  if (eg) {
+    const gapAbs  = Math.abs(eg.gap_pp);
+    const gapSign = eg.gap_pp > 0 ? '+' : '';
+    const score   = eg.score ?? 0;
+
+    // Score-based intensity: dim (≤2), moderate (2-5), high (5+)
+    const egCls   = score >= 5 ? 'qi-risk' : score >= 2 ? 'qi-warn' : 'qi-good';
+    const egIcon  = score >= 5 ? '🎯' : score >= 2 ? '⚡' : '✓';
+
+    // Heat bar: filled proportionally to score/10
+    const barPct  = Math.min(score / 10 * 100, 100).toFixed(0);
+    const barCol  = score >= 5 ? 'var(--red)' : score >= 2 ? 'var(--gold)' : 'var(--green)';
+
+    const heatBar = `<span style="display:inline-block;width:60px;height:4px;background:rgba(255,255,255,0.1);border-radius:2px;vertical-align:middle;margin:0 5px 1px">` +
+      `<span style="display:block;width:${barPct}%;height:100%;background:${barCol};border-radius:2px"></span></span>`;
+
+    let egBody = `<strong>Expectation Gap</strong> ${heatBar} <span style="font-size:10px;opacity:.7">score ${score}/10</span><br>` +
+      `<span style="font-size:12px">${escHtml(eg.primary_narrative)}</span>`;
+
+    if (eg.verdict_narrative) {
+      egBody += `<br><span style="font-size:11px;opacity:.75;margin-top:2px;display:block">${escHtml(eg.verdict_narrative)}</span>`;
+    }
+
+    qi(egIcon, egBody, egCls);
+
+    // Sub-items: unrealistic flags
+    (eg.flags || []).forEach(flag => {
+      const fCls = flag.includes('fewer than') || flag.includes('hyper') ? 'qi-risk'
+                 : flag.includes('2×') ? 'qi-warn' : 'qi-info';
+      qi('▸', `<span style="font-size:11px">${escHtml(flag)}</span>`, fCls);
+    });
+  }
+
   // ── Moat premium ──────────────────────────────────────────────────────────
   if (d.moat_detected && d.moat_path) {
     const waccLine = d.moat_wacc_delta  ? `WACC −${d.moat_wacc_delta.toFixed(1)}pp`        : '';
