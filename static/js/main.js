@@ -841,7 +841,7 @@ function renderQuickInsights(d) {
     // Verification console log — FIN 415 Sultan Split accuracy check
     const preIV   = d.consensus_anchor_pre_iv ?? iv;
     const atNum   = parseFloat(d.target_price  ?? 0);
-    const expected = preIV != null && atNum ? (0.70 * preIV + 0.30 * atNum) : null;
+    const expected = preIV != null && atNum ? (0.90 * preIV + 0.10 * atNum) : null;
     const diff     = expected != null && iv != null ? Math.abs(iv - expected) : null;
     console.log(
       `[FIN 415] Source: FIN 415 Template | ${keStr}${ctStr}${bwStr}${bgStr}`,
@@ -849,7 +849,7 @@ function renderQuickInsights(d) {
         ? `| Sultan Split diff: $${diff.toFixed(4)} (${diff < 0.01 ? '✅ within $0.01' : '⚠ exceeds $0.01'})`
         : ''
     );
-    qi('📐', `<strong>FIN 415 FCFE Model</strong> — ${keStr}${ctStr} · Sultan Split: 70% model + 30% analyst`
+    qi('📐', `<strong>FIN 415 FCFE Model</strong> — ${keStr}${ctStr} · Sultan Split: 90% model + 10% analyst`
       + `<span style="font-size:10px;opacity:.55;margin-left:6px;">Source: FIN 415 Template</span>`, 'qi-cyan');
   }
 
@@ -859,7 +859,7 @@ function renderQuickInsights(d) {
       ? ` · Model: $${d.consensus_anchor_pre_iv.toFixed(2)} → Blended: $${iv != null ? iv.toFixed(2) : '—'}` : '';
     const atStr = d.target_price != null
       ? ` · Analyst target: $${parseFloat(d.target_price).toFixed(2)}` : '';
-    qi('⚖', `<strong>Sultan Split</strong> — 70% model · 30% analyst${atStr}${preIv}`, 'qi-warn');
+    qi('⚖', `<strong>Sultan Split</strong> — 90% model · 10% analyst${atStr}${preIv}`, 'qi-warn');
   }
 
   // ── Multiples fallback ────────────────────────────────────────────────────
@@ -935,7 +935,7 @@ function renderScenarios(sc, price) {
   const anchorNote = sc.consensus_anchored
     ? `<div class="sc-anchor-note">
         <span class="sc-anchor-icon">⚖</span>
-        Values adjusted by Consensus Anchor for market alignment. (70% model · 30% analyst consensus)
+        Values adjusted by Consensus Anchor for market alignment. (90% model · 10% analyst consensus)
        </div>`
     : '';
 

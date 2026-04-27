@@ -788,6 +788,20 @@ def _get_valuation_method(sector: str, industry: str) -> str:
     if any(x in ind for x in _PAYMENT_INDUSTRIES):
         return "dcf"
 
+    # High-growth fintech / brokerage / capital markets — these companies earn from
+    # transaction fees, AUM growth, and product expansion, NOT net interest margin.
+    # P/B banking model systematically undervalues them; route to DCF instead.
+    # Examples: Robinhood (HOOD), SoFi (SOFI), Coinbase (COIN), Affirm (AFRM),
+    #           Upstart (UPST), Nu Holdings (NU), Block (SQ).
+    _FINTECH_GROWTH_INDUSTRIES = [
+        "capital markets", "securities brokerage", "investment brokerage",
+        "consumer lending", "online lending", "fintech",
+        "financial exchanges", "crypto exchange",
+        "asset management",  # growth-stage asset managers
+    ]
+    if any(x in ind for x in _FINTECH_GROWTH_INDUSTRIES):
+        return "dcf"
+
     # Banking / Financial services — interest is operating cost; DCF structurally wrong
     if any(x in s for x in ["financial", "bank"]):
         return "banking"
@@ -887,13 +901,12 @@ def calc_biotech_val(info, fx_rate, rev_ttm=None, analyst_target=None):
 
 def _analyst_alignment_check(iv, analyst_target, price):
     """
-    Sultan Split: unconditionally blend 70% VALUS model IV + 30% analyst
+    Sultan Split: unconditionally blend 90% VALUS model IV + 10% analyst
     consensus target whenever an analyst target is available.
 
-    Rationale (FIN 415 template): The model captures long-run intrinsic value;
-    the analyst consensus anchors the near-term Street view.  A fixed 70/30
-    split gives users a single price that is both fundamentally grounded and
-    cross-referenceable with professional estimates.
+    Rationale: The model captures long-run intrinsic value; the analyst
+    consensus only acts as a gentle anchor.  The 90/10 split gives the
+    fundamental model primacy while still cross-referencing the Street view.
 
     Returns (adjusted_iv, was_adjusted: bool, pre_blend_iv).
     """
@@ -902,8 +915,8 @@ def _analyst_alignment_check(iv, analyst_target, price):
     at = float(analyst_target)
     if at <= 0:
         return iv, False, iv
-    # Unconditional Sultan Split: 70% model + 30% analyst (always fires)
-    blended = round(max(0.70 * iv + 0.30 * at, 0.0), 2)
+    # Unconditional Sultan Split: 90% model + 10% analyst (always fires)
+    blended = round(max(0.90 * iv + 0.10 * at, 0.0), 2)
     return blended, True, round(iv, 2)
 
 
@@ -1381,6 +1394,59 @@ def _extract_fin415_inputs(info, income_stmt, cashflow, balance_sheet, fx_rate):
         "tax_rate":     tax_rate,
         "shares":       shares,
     }
+
+
+# ── Bank-appropriate DCF (Net Income → FCFE) ──────────────────────────────────
+
+def run_banking_fcfe(info, fx_rate, ke, tg, yrs=10, growth=None):
+    """
+    Bank-appropriate Dividend-Adjusted FCFE.
+
+    Banks have no meaningful CapEx or working-capital cycle — their economics
+    are: Net Income → retained earnings (regulatory capital) → dividends to
+    equity.  For an equity-DCF, FCFE collapses to Net Income (the cash
+    available to equity holders, since regulatory reinvestment is a
+    book-equity entry, not an actual cash drain).
+
+    Compounds NI over a linear taper from g₁ to TG over `yrs` years, then
+    Gordon-Growth terminal value, all discounted at Cost of Equity Ke.
+
+    Returns (fair_price, npv) or (None, None) on missing data.
+    """
+    if ke is None or tg is None or ke <= tg:
+        if ke is not None and tg is not None:
+            tg = ke - 0.005
+        else:
+            return None, None
+
+    ni = safe(info.get("netIncomeToCommon")) or safe(info.get("netIncome"))
+    shares = safe(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"))
+    if not (ni and ni > 0 and shares and shares > 0):
+        return None, None
+
+    g1 = growth if growth is not None else (
+        safe(info.get("earningsGrowth")) or
+        safe(info.get("revenueGrowth")) or 0.06
+    )
+    g1 = min(max(float(g1), 0.02), 0.20)   # banking earnings growth: 2–20%
+
+    ni_curr  = float(ni) * fx_rate
+    pv_total = 0.0
+    last_fcfe = ni_curr
+
+    for y in range(1, yrs + 1):
+        # Linear taper from g₁ → tg
+        gy = g1 + (tg - g1) * (y - 1) / max(yrs - 1, 1)
+        ni_curr  = ni_curr * (1 + gy)
+        last_fcfe = ni_curr
+        pv_total += ni_curr / ((1 + ke) ** y)
+
+    # Gordon Growth terminal value on year-N FCFE
+    tv     = last_fcfe * (1 + tg) / (ke - tg)
+    pv_tv  = tv / ((1 + ke) ** yrs)
+    npv    = pv_total + pv_tv
+    fair_price = npv / float(shares)
+    return round(max(fair_price, 0.0), 2), npv
 
 
 # ── Single DCF run ─────────────────────────────────────────────────────────────
@@ -2029,6 +2095,15 @@ def analyze():
         fcf_series = [v * fx_rate for v in fcf_series]
         dcf_available = base_fcf is not None and base_fcf > 0
 
+        # ── Fintech industry flag (used later for FCF normalization) ─────────
+        _vm_check = _get_valuation_method(sector, industry)
+        _is_fintech_growth = (_vm_check == "dcf" and
+                              any(x in (industry or "").lower() for x in [
+                                  "capital markets", "securities brokerage",
+                                  "consumer lending", "online lending",
+                                  "financial exchanges", "investment brokerage",
+                              ]))
+
         # ── Structural Transformer detection ──────────────────────────────────
         # Must run after rev_ttm is known; rev_ttm is computed below in the
         # income-statement block so we defer the call — state vars initialised here.
@@ -2079,6 +2154,50 @@ def analyze():
             _pre_st_fcf = base_fcf or 0.0
             base_fcf    = (_pre_st_fcf + st_capex_addback)
             dcf_available = base_fcf > 0  # re-evaluate now that FCF may have changed
+
+        # ── High-growth fintech FCF normalization ─────────────────────────────
+        # Companies like SOFI, HOOD, COIN, AFRM often have negative TTM FCF
+        # because they are reinvesting aggressively in growth.  Their true
+        # earnings power is best approximated from forward EPS × shares — the
+        # market values them on forward earnings, not trailing cash flow.
+        # Runs AFTER structural transformer detection so we can exclude TST-type
+        # companies that already have their own capex normalisation.
+        if not dcf_available and not is_structural_transformer:
+            _fwd_eps    = safe(info.get("forwardEps"))
+            _shares_nrm = (safe(info.get("sharesOutstanding") or
+                                info.get("impliedSharesOutstanding"), 0) or 0)
+            _rev_nrm    = (safe(info.get("totalRevenue"), 0) or 0) * fx_rate
+            # Strategy A: forward earnings proxy (preferred — analyst-grounded)
+            if _fwd_eps and _fwd_eps > 0 and _shares_nrm > 0:
+                _norm_fcf = _fwd_eps * _shares_nrm * fx_rate * 0.80  # 80% earnings→FCF
+                if _norm_fcf > 0:
+                    base_fcf      = _norm_fcf
+                    fcf_source    = "Fwd earnings proxy (TTM FCF negative — normalized)"
+                    dcf_available = True
+            # Strategy B: revenue × sector-typical FCF margin (any non-bank sector)
+            elif _rev_nrm > 0:
+                _s_lower = (sector or "").lower()
+                # Software/tech & growth fintech ≈ 8%; everything else ≈ 6%
+                _fcf_margin_proxy = (
+                    0.08 if (_is_fintech_growth or "technology" in _s_lower
+                             or "communication" in _s_lower)
+                    else 0.06
+                )
+                _norm_fcf = _rev_nrm * _fcf_margin_proxy
+                if _norm_fcf > 0:
+                    base_fcf      = _norm_fcf
+                    fcf_source    = (f"Revenue×{int(_fcf_margin_proxy*100)}% proxy "
+                                     "(TTM FCF negative — sector margin normalization)")
+                    dcf_available = True
+            # Strategy C: EBITDA × 0.60 fallback (last-resort for EBITDA-positive cos)
+            if not dcf_available:
+                _ebitda_nrm = safe(info.get("ebitda"))
+                if _ebitda_nrm and _ebitda_nrm > 0:
+                    _norm_fcf = float(_ebitda_nrm) * fx_rate * 0.60
+                    if _norm_fcf > 0:
+                        base_fcf      = _norm_fcf
+                        fcf_source    = "EBITDA×60% proxy (TTM FCF negative — EBITDA fallback)"
+                        dcf_available = True
 
         # ── FCF Volatility Normalization ──────────────────────────────────────
         # When TTM FCF is 2× or more above the recent 3-year positive average,
@@ -2453,6 +2572,19 @@ def analyze():
                 s1_bear   = s1
                 bear_floored = bear_recalculated = bull_recalculated = False
                 bull_distressed = bear_distressed = False
+                # Distressed-equity floor: when FIN 415 produces zero/negative
+                # scenario values (a stressed scenario the model cannot price),
+                # replace with macro-stress floors so users see meaningful numbers:
+                #   bull → price × 1.10 (a modest +10% upside under reset assumptions)
+                #   bear → price × 0.85 (a 15% macro downside)
+                if iv_bull is not None and iv_bull <= 0:
+                    iv_bull = round(price * 1.10, 2) if price else 0.0
+                    bull_distressed = True
+                if iv_bear is not None and iv_bear <= 0:
+                    iv_bear = round(price * 0.85, 2) if price else 0.0
+                    bear_distressed = True
+                # Make scenario_net_debt available so any downstream stress code can use it
+                scenario_net_debt = bal_data["total_debt"] - bal_data["total_cash"]
             else:
                 # ── Legacy dynamic FCF quality weights (fallback) ─────────────
                 scenario_net_debt = bal_data["total_debt"] - bal_data["total_cash"]
@@ -2511,6 +2643,50 @@ def analyze():
                     iv_bear = 0.0
                     bear_distressed = True
 
+            # ── Bear<Price Clamp (Universal Downside Floor) ───────────────────
+            # If the model's natural bear case still sits above current price
+            # (deeply undervalued stocks), run a stress-bear with severe assumptions.
+            # If even the stress scenario stays above price, hard-clamp to
+            # price × 0.85 so users always see a downside-risk number.
+            bear_stressed = False
+            if (price and price > 0 and iv_bear is not None
+                    and iv_bear >= price and not fin415_used):
+                try:
+                    _stress_s1   = max(s1 * 0.30, 0.005)
+                    _stress_s2   = max(_stress_s1 * 0.55, 0.005)
+                    _stress_tg   = max(tg - 0.005, 0.005)
+                    _stress_wacc = wacc + 0.05
+                    _stress_iv, _, _, _, _ = run_dcf_single(
+                        fwd_base_fcf, _stress_s1, _stress_s2, _stress_tg,
+                        _stress_wacc, yrs, info, fx_rate,
+                        net_debt_override=scenario_net_debt,
+                        stage1_years=backbone_stage1_years,
+                    )
+                    if _stress_iv is not None and _stress_iv < price:
+                        iv_bear = round(max(_stress_iv, 0.0), 2)
+                    else:
+                        iv_bear = round(price * 0.85, 2)
+                    bear_stressed = True
+                except Exception:
+                    iv_bear = round(price * 0.85, 2)
+                    bear_stressed = True
+            elif fin415_used and price and price > 0 and (iv_bear is None or iv_bear >= price):
+                # FIN 415 path: combined stress (Ke+5% AND rev_growths × 0.5).
+                # Reuses _f415_kwargs dict bundled in the FIN 415 wire-in block.
+                try:
+                    _stress_kwargs = dict(_f415_kwargs)
+                    _stress_kwargs["ke"]          = ke + 0.05
+                    _stress_kwargs["rev_growths"] = [max(g * 0.50, 0.0) for g in _rev_growths]
+                    _stress_iv, *_ = run_fin415_fcfe(**_stress_kwargs)
+                    if _stress_iv is not None and _stress_iv < price:
+                        iv_bear = round(max(_stress_iv, 0.0), 2)
+                    else:
+                        iv_bear = round(price * 0.85, 2)
+                    bear_stressed = True
+                except Exception:
+                    iv_bear = round(price * 0.85, 2)
+                    bear_stressed = True
+
             # ── Probability-weighted fair value ───────────────────────────────
             if all(v is not None for v in [intrinsic_value, iv_bull, iv_bear]):
                 iv_weighted = _w_base * intrinsic_value + _w_bull * iv_bull + _w_bear * iv_bear
@@ -2522,33 +2698,34 @@ def analyze():
 
             scenarios = {
                 "base": {
-                    "value":  round(intrinsic_value, 2) if intrinsic_value else None,
+                    "value":  round(intrinsic_value, 2) if intrinsic_value is not None else None,
                     "weight": round(_w_base * 100),
                     "s1":     round(s1 * 100, 2),
                     "wacc":   round(wacc * 100, 2),
-                    "upside": round((intrinsic_value - price) / price * 100, 1) if intrinsic_value and price else None,
+                    "upside": round((intrinsic_value - price) / price * 100, 1) if intrinsic_value is not None and price else None,
                 },
                 "bull": {
-                    "value":  round(iv_bull, 2) if iv_bull else None,
+                    "value":  round(iv_bull, 2) if iv_bull is not None else None,
                     "weight": round(_w_bull * 100),
                     "s1":     round(s1_bull * 100, 2),
                     "wacc":   round(wacc_bull * 100, 2),
-                    "upside": round((iv_bull - price) / price * 100, 1) if iv_bull and price else None,
+                    "upside": round((iv_bull - price) / price * 100, 1) if iv_bull is not None and price else None,
                     "recalculated": bull_recalculated,
                     "distressed":   bull_distressed,
                 },
                 "bear": {
-                    "value":  round(iv_bear, 2) if iv_bear else None,
+                    "value":  round(iv_bear, 2) if iv_bear is not None else None,
                     "weight": round(_w_bear * 100),
                     "s1":     round(s1_bear * 100, 2),
                     "wacc":   round(wacc_bear * 100, 2),
-                    "upside": round((iv_bear - price) / price * 100, 1) if iv_bear and price else None,
+                    "upside": round((iv_bear - price) / price * 100, 1) if iv_bear is not None and price else None,
                     "floored":      bear_floored,
                     "recalculated": bear_recalculated,
                     "distressed":   bear_distressed,
+                    "stressed":     bear_stressed,
                 },
-                "weighted": round(iv_weighted, 2) if iv_weighted else None,
-                "weighted_upside": round((iv_weighted - price) / price * 100, 1) if iv_weighted and price else None,
+                "weighted": round(iv_weighted, 2) if iv_weighted is not None else None,
+                "weighted_upside": round((iv_weighted - price) / price * 100, 1) if iv_weighted is not None and price else None,
                 "weight_basis": _scenario_weight_note,
             }
             intrinsic_value = round(iv_weighted, 2) if iv_weighted else intrinsic_value
@@ -2583,13 +2760,31 @@ def analyze():
                     margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
 
         elif valuation_method == "banking" and intrinsic_value is None:
-            # DCF was forced off; use P/B + P/E banking model
+            # NEW (Universal DCF): run banking FCFE first (Net Income → equity CF),
+            # then blend 70% banking-DCF + 30% P/B book-value cross-check.
+            # Falls back to pure P/B if either side is unavailable.
+            _bk_wacc = wacc_data or calc_wacc(info, income_stmt, tax_rate, fx_rate)
+            _bk_ke   = _bk_wacc.get("coe") if _bk_wacc else None
+            _bk_dcf, _ = (run_banking_fcfe(info, fx_rate, _bk_ke, tg, yrs)
+                          if _bk_ke else (None, None))
             _bkv, _bkm = calc_banking_val(info, fx_rate)
-            if _bkv is not None:
+
+            if _bk_dcf is not None and _bkv is not None:
+                intrinsic_value  = round(0.70 * _bk_dcf + 0.30 * _bkv, 2)
+                sector_val_label = f"Banking-DCF ({_bk_dcf:.2f}) 70% + {_bkm} 30%"
+                # Persist wacc_data so the result-dict picks up Ke for display
+                if wacc_data == {} or wacc_data.get("coe") is None:
+                    wacc_data = _bk_wacc
+            elif _bk_dcf is not None:
+                intrinsic_value  = _bk_dcf
+                sector_val_label = "Banking-DCF (Net Income → FCFE)"
+                if wacc_data == {} or wacc_data.get("coe") is None:
+                    wacc_data = _bk_wacc
+            elif _bkv is not None:
                 intrinsic_value  = _bkv
                 sector_val_label = _bkm
-                if intrinsic_value and price:
-                    margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
+            if intrinsic_value and price:
+                margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
 
         # ── Consensus Anchor ──────────────────────────────────────────────────
         # If VALUS IV is >30% above analyst mean target, blend 70% model + 30%
@@ -2750,6 +2945,58 @@ def analyze():
             else:
                 multiples_mos = None
 
+        # ── Sultan Split for multiples-only path ─────────────────────────────
+        # When DCF is unavailable and no IV was produced by the sector specialist,
+        # blend multiples_val 90% + analyst target 10% so the displayed value is
+        # anchored to the model first, with sell-side consensus as a gentle nudge.
+        if intrinsic_value is None and multiples_val and analyst_target_price:
+            _at_m = float(analyst_target_price)
+            if _at_m > 0:
+                _pre_mv           = multiples_val
+                intrinsic_value   = round(0.90 * multiples_val + 0.10 * _at_m, 2)
+                analyst_adjusted  = True
+                consensus_anchor_pre_iv = _pre_mv
+                if price:
+                    margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
+                # Label the blend so the UI can show it
+                multiples_reason = (
+                    (multiples_reason + " · " if multiples_reason else "")
+                    + f"Sultan Split: 90% multiples (${_pre_mv:.2f}) + 10% analyst (${_at_m:.2f})"
+                )
+
+        # ── Universal Scenario Synthesis ──────────────────────────────────────
+        # When DCF Bear/Base/Bull were not built (banking, biotech, multiples-only),
+        # synthesise scenarios from the final IV so every stock has all three cards.
+        # Guarantee: Bear < current price; Base ≈ IV; Bull = booming case.
+        if scenarios is None and intrinsic_value is not None and price and price > 0:
+            _syn_base = round(intrinsic_value, 2)
+            _syn_bull = round(intrinsic_value * 1.25, 2)
+            # Bear must be below the current market price
+            _syn_bear_cand = round(intrinsic_value * 0.76, 2)
+            _syn_bear = min(_syn_bear_cand, round(price * 0.87, 2))
+            _syn_bear = max(round(_syn_bear, 2), 0.01)
+            _syn_w    = round(0.60 * _syn_base + 0.20 * _syn_bull + 0.20 * _syn_bear, 2)
+            scenarios = {
+                "base": {
+                    "value":  _syn_base,
+                    "weight": 60,
+                    "upside": round((_syn_base - price) / price * 100, 1),
+                },
+                "bull": {
+                    "value":  _syn_bull,
+                    "weight": 20,
+                    "upside": round((_syn_bull - price) / price * 100, 1),
+                },
+                "bear": {
+                    "value":  _syn_bear,
+                    "weight": 20,
+                    "upside": round((_syn_bear - price) / price * 100, 1),
+                },
+                "weighted":        _syn_w,
+                "weighted_upside": round((_syn_w - price) / price * 100, 1),
+                "synthetic":       True,   # flag so UI can add a note if needed
+            }
+
         # ── Sector / P/E context notes ────────────────────────────────────────
         pe_ttm    = safe(info.get("trailingPE"))
         dcf_notes = get_dcf_notes(sector, industry, pe_ttm, dcf_available)
@@ -2904,7 +3151,7 @@ def analyze():
             "terminal_value_pct": round(pv_terminal / enterprise_value * 100, 1)
                                   if enterprise_value and pv_terminal else None,
             "net_debt":          net_debt if dcf_available else ((safe(info.get("totalDebt"), 0) or 0) - (safe(info.get("totalCash"), 0) or 0)) * fx_rate,
-            "scenarios":         scenarios if dcf_available else None,
+            "scenarios":         scenarios,
             "sensitivity_grid":  sensitivity_grid,
             # ── FIN 415 FCFE model outputs ────────────────────────────────────
             "fin415_used":          fin415_used,
