@@ -1,1265 +1,780 @@
-/* ── Helpers ──────────────────────────────────────────────── */
-const $ = id => document.getElementById(id);
+/* ════════════════════════════════════════════════════════════════════════
+   VALUS — Frontend (immersive institutional redesign)
+   ════════════════════════════════════════════════════════════════════════ */
 
-function fmt(n, d = 2) {
-  if (n == null || isNaN(n)) return '—';
-  return Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
-}
-function fmtBig(n) {
-  if (n == null || isNaN(n)) return '—';
-  const a = Math.abs(n), s = n < 0 ? '-' : '';
-  if (a >= 1e12) return s + '$' + fmt(a / 1e12) + 'T';
-  if (a >= 1e9)  return s + '$' + fmt(a / 1e9)  + 'B';
-  if (a >= 1e6)  return s + '$' + fmt(a / 1e6)  + 'M';
-  return s + '$' + fmt(a);
-}
-function fmtPct(n)   { return n == null || isNaN(n) ? '—' : fmt(n, 1) + '%'; }
-function fmtX(n)     { return n == null || isNaN(n) ? '—' : fmt(n, 1) + 'x'; }
-function fmtPrice(n) { return n == null || isNaN(n) ? '—' : '$' + fmt(n, 2); }
-function fmtVol(n)   {
-  if (!n) return '—';
-  if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
-  if (n >= 1e3) return (n / 1e3).toFixed(0) + 'K';
-  return n;
-}
+const $ = (id) => document.getElementById(id);
 
-function cc(n, good = true) {
-  if (n == null || isNaN(n)) return 'muted';
-  return (n > 0) === good ? 'green' : 'red';
-}
+const escHtml = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+}[c]));
 
-function row(label, value, cls = '') {
-  return `<div class="metric-row">
-    <span class="label">${label}</span>
-    <span class="value ${cls}">${value}</span>
-  </div>`;
-}
+const fmt = (n, d = 2) => {
+  if (n == null || isNaN(n)) return "—";
+  return Number(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+};
 
-/* ── State ────────────────────────────────────────────────── */
-let priceChart    = null;
-let dcfChart      = null;
-let currentTicker = '';
-let currentData   = null;
-let searchTimer   = null;
-let _activeData   = null;   // full result stored for toggle interactions
-let _ivAnimRaf    = null;   // rAF handle for IV counter animation
+const fmtPrice = (n) => n == null || isNaN(n) ? "—" : `$${fmt(n, 2)}`;
 
-/* ── IV counter animation ─────────────────────────────────── */
-function animateIV(targetVal) {
-  const el = $('intrinsicValue');
-  if (!el) return;
-  if (_ivAnimRaf) { cancelAnimationFrame(_ivAnimRaf); _ivAnimRaf = null; }
-  const raw = el.textContent.replace(/[^0-9.]/g, '');
-  const fromVal = parseFloat(raw) || 0;
-  const diff    = targetVal - fromVal;
-  if (Math.abs(diff) < 0.005) { el.textContent = fmtPrice(targetVal); return; }
-  const duration = 480;
-  const t0 = performance.now();
-  function tick(now) {
-    const t = Math.min((now - t0) / duration, 1);
-    const ease = t >= 1 ? 1 : 1 - Math.pow(2, -10 * t); // easeOutExpo
-    el.textContent = fmtPrice(fromVal + diff * ease);
-    if (t < 1) { _ivAnimRaf = requestAnimationFrame(tick); }
-    else        { el.textContent = fmtPrice(targetVal); _ivAnimRaf = null; }
-  }
-  _ivAnimRaf = requestAnimationFrame(tick);
+const fmtPct = (n, d = 1) => {
+  if (n == null || isNaN(n)) return "—";
+  const sign = n > 0 ? "+" : "";
+  return `${sign}${fmt(n, d)}%`;
+};
+
+const fmtBig = (n) => {
+  if (n == null || isNaN(n)) return "—";
+  const abs = Math.abs(n);
+  if (abs >= 1e12) return `$${fmt(n / 1e12, 2)}T`;
+  if (abs >= 1e9)  return `$${fmt(n / 1e9, 2)}B`;
+  if (abs >= 1e6)  return `$${fmt(n / 1e6, 1)}M`;
+  if (abs >= 1e3)  return `$${fmt(n / 1e3, 0)}K`;
+  return `$${fmt(n, 2)}`;
+};
+
+const fmtX = (n) => n == null ? "—" : `${fmt(n, 1)}×`;
+
+/* ════════════════════════════════════════════════════════════════════════
+   Tier color mapping
+   ════════════════════════════════════════════════════════════════════════ */
+
+const TIER_CLASSES = {
+  deep_discount: "tier-positive",
+  discount:      "tier-positive",
+  fair_value:    "tier-info",
+  growth:        "tier-warning",
+  excellence:    "tier-warning",
+  miracle:       "tier-negative",
+  decline:       "tier-negative",
+  distress:      "tier-positive",  // distressed = market overly pessimistic = opportunity
+};
+
+function tierClassFor(tier) {
+  return TIER_CLASSES[tier] || "tier-info";
 }
 
-/* ── Scenario toggle ──────────────────────────────────────── */
-function activateScenario(key) {
-  if (!_activeData) return;
-  const d  = _activeData;
-  const sc = d.scenarios;
-  if (!sc) return;
+/* ════════════════════════════════════════════════════════════════════════
+   Cursor-tracking card glow (desktop only)
+   ════════════════════════════════════════════════════════════════════════ */
 
-  // FIN 415: relabel scenarios to match template (Base / Bull WACC−3% / Bear WACC+3%)
-  const fin415 = !!d.fin415_used;
-  const map = {
-    base: { iv: sc.base?.value, mos: sc.base?.upside, label: 'Base (60%)' },
-    bull: { iv: sc.bull?.value, mos: sc.bull?.upside, label: fin415 ? 'Bull WACC−3%' : 'Bull Case' },
-    bear: { iv: sc.bear?.value, mos: sc.bear?.upside, label: fin415 ? 'Bear (20%)'   : 'Bear Case' },
-  };
-  const data = map[key];
-  if (!data || data.iv == null) return;
-
-  // Toggle button states
-  document.querySelectorAll('.sc-tog-btn').forEach(b =>
-    b.classList.toggle('sc-tog-active', b.dataset.scenario === key));
-
-  // Animate IV counter
-  animateIV(data.iv);
-
-  // MoS + signal badge + card colour
-  const mosVal = data.mos;
-  const card   = $('verdictCard');
-  const sigEl  = $('signalBadge');
-  const mosEl  = $('mosValue');
-  const color  = mosVal > 15 ? 'var(--green)' : mosVal < -15 ? 'var(--red)' : 'var(--gold)';
-  card.className = 'verdict-card';
-  if      (mosVal > 15)  card.classList.add('undervalued');
-  else if (mosVal < -15) card.classList.add('overvalued');
-  else                   card.classList.add('fair');
-  if (sigEl) {
-    if (mosVal == null)   { sigEl.classList.add('hidden'); }
-    else if (mosVal > 20) { sigEl.className = 'signal-badge signal-strong'; sigEl.textContent = '▲ Strong Value'; sigEl.classList.remove('hidden'); }
-    else if (mosVal >= 0) { sigEl.className = 'signal-badge signal-fair';   sigEl.textContent = '◆ Fair Value';   sigEl.classList.remove('hidden'); }
-    else                  { sigEl.className = 'signal-badge signal-over';   sigEl.textContent = '▼ Overvalued';   sigEl.classList.remove('hidden'); }
-  }
-  if (mosVal != null) {
-    mosEl.textContent             = (mosVal > 0 ? '+' : '') + fmtPct(mosVal);
-    mosEl.style.color             = color;
-    $('mosFill').style.width      = Math.min(Math.abs(mosVal), 100) + '%';
-    $('mosFill').style.background = color;
-  } else {
-    mosEl.textContent        = '—';
-    $('mosFill').style.width = '0';
-  }
-
-  // Scenario card glow
-  document.querySelectorAll('.sc-case').forEach(el => {
-    el.classList.toggle('sc-case--active', el.classList.contains('sc-' + key));
+function attachCardGlow() {
+  if (window.matchMedia("(max-width: 768px)").matches) return;
+  document.querySelectorAll(".card, .hero-verdict").forEach(card => {
+    card.addEventListener("mousemove", (e) => {
+      const rect = card.getBoundingClientRect();
+      card.style.setProperty("--mx", `${e.clientX - rect.left}px`);
+      card.style.setProperty("--my", `${e.clientY - rect.top}px`);
+    });
   });
 }
 
-/* ── Copy Analysis Summary ────────────────────────────────── */
-const VALUS_URL = 'https://valus.vercel.app'; // ← update if domain changes
+/* ════════════════════════════════════════════════════════════════════════
+   Number count-up animation
+   ════════════════════════════════════════════════════════════════════════ */
 
-function _buildMethodString(d) {
-  const parts = [];
-  // Base method
-  if      (d.valuation_method === 'banking')    parts.push('Banking Specialist (P/B + ROE)');
-  else if (d.valuation_method === 'biotech')    parts.push('Biotech Specialist (EV/Rev)');
-  else if (d.valuation_method === 'dcf_energy') parts.push('Energy DCF');
-  else if (!d.dcf_available && d.multiples_val) parts.push('Industry Multiples');
-  else if (d.structural_transformer)            parts.push('Structural Transformer DCF');
-  else if (d.moat_detected)                     parts.push('Adaptive Moat DCF');
-  else                                           parts.push('DCF Model');
-  // Modifiers
-  if (d.backbone_stage1_extended) parts.push('Backbone 10-yr');
-  if (d.analyst_adjusted)         parts.push('Consensus Anchor');
-  if (d.momentum_premium_pct)     parts.push(`+${d.momentum_premium_pct}% Catalyst`);
-  return parts.join(' + ');
+function animateNumber(el, from, to, durationMs, formatter) {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    el.textContent = formatter(to);
+    return;
+  }
+  const start = performance.now();
+  function step(now) {
+    const t = Math.min(1, (now - start) / durationMs);
+    const eased = 1 - Math.pow(1 - t, 4);  // easeOutQuart
+    const v = from + (to - from) * eased;
+    el.textContent = formatter(v);
+    if (t < 1) requestAnimationFrame(step);
+    else el.textContent = formatter(to);
+  }
+  requestAnimationFrame(step);
 }
 
-function _buildSignalString(mos) {
-  if (mos == null) return '';
-  if (mos > 20)  return '▲ Strong Value';
-  if (mos >= 0)  return '◆ Fair Value';
-  return '▼ Overvalued';
-}
+/* ════════════════════════════════════════════════════════════════════════
+   API layer
+   ════════════════════════════════════════════════════════════════════════ */
 
-/* ── 'Why' Hook — one-sentence contextual insight ─────────── */
-function _buildWhyHook(d) {
-  const mos    = d.margin_of_safety;
-  const sector = (d.sector   || '').toLowerCase();
-  const ind    = (d.industry || '').toLowerCase();
-  const moat   = d.moat_path || '';
-  const isST   = d.structural_transformer;
-  const isAnch = d.analyst_adjusted;
-  const method = d.valuation_method || '';
+async function analyze(ticker, params = {}) {
+  showLoading();
+  hideError();
+  $("results").classList.add("hidden");
 
-  if (mos == null) return '';
-
-  // Specialist methods
-  if (method === 'banking')
-    return mos < -10
-      ? 'Trading above P/B-implied fair value; net interest margin compression is priced in.'
-      : mos > 15
-        ? 'P/B discount relative to ROE suggests potential margin of safety.'
-        : 'Valuation aligned with book value and normalised earnings power.';
-  if (method === 'biotech')
-    return 'EV/Revenue blended with analyst consensus; pipeline risk drives a wide range of outcomes.';
-
-  const isOver  = mos < -10;
-  const isUnder = mos > 15;
-
-  // ── Overvalued hooks ────────────────────────────────────────
-  if (isOver) {
-    if (isST)
-      return 'Market pricing in platform optionality; DCF reflects near-term execution risk.';
-    if (sector.includes('energy') || ind.includes('oil') || ind.includes('gas') || ind.includes('petroleum'))
-      return 'Market pricing in short-term commodity premium; DCF reflects long-term production averages.';
-    if (ind.includes('semiconductor') || ind.includes('chips'))
-      return 'Market pricing in AI-cycle demand peak; DCF reflects normalised fab utilisation.';
-    if (sector.includes('tech') || ind.includes('software') || ind.includes('internet'))
-      return 'Market pricing in elevated AI/growth premium; DCF reflects normalised FCF margins.';
-    if (ind.includes('internet retail') || ind.includes('broadline'))
-      return 'Market pricing in ecosystem and logistics network premium; DCF reflects reported FCF margins.';
-    if (sector.includes('consumer') && !ind.includes('tech'))
-      return 'Market pricing in brand momentum; DCF reflects long-run structural margin mean-reversion.';
-    if (sector.includes('health') || ind.includes('pharma') || ind.includes('biotech'))
-      return 'Market pricing in pipeline optionality; DCF reflects only commercialised revenue streams.';
-    if (ind.includes('auto') || ind.includes('vehicle'))
-      return 'Market pricing in EV transition optionality; DCF reflects current unit economics.';
-    if (isAnch)
-      return 'Consensus Anchor applied; final IV blends DCF model with near-term analyst targets.';
-    return 'Current price embeds a growth premium not yet supported by DCF fundamentals.';
+  const url = new URL("/api/analyze", window.location.origin);
+  url.searchParams.set("ticker", ticker);
+  for (const [k, v] of Object.entries(params)) {
+    if (v != null && v !== "") url.searchParams.set(k, v);
   }
 
-  // ── Undervalued hooks ───────────────────────────────────────
-  if (isUnder) {
-    if (moat === 'Platform Scale Economy')
-      return 'Platform and high-margin segment economics suggest market underprices hidden earning power.';
-    if (moat === 'High-Growth Backbone')
-      return 'Durable revenue growth and margins indicate potential unrecognised intrinsic value.';
-    if (moat === 'Mature Cash Machine')
-      return 'Strong cash generation and earnings quality suggest a structural discount to fair value.';
-    if (moat === 'Capital-Light Compounder')
-      return 'Capital-efficient compounding model trades at a discount to FCF-implied intrinsic value.';
-    if (isST)
-      return 'Near-term CapEx depresses reported FCF; long-run platform value is materially higher.';
-    if (sector.includes('energy'))
-      return 'Market applying cycle-trough discount; DCF reflects long-term normalised production cash flows.';
-    if (sector.includes('financial') || ind.includes('bank'))
-      return 'Defensive balance sheet with a P/B discount versus ROE-implied intrinsic value.';
-    return 'Trading below modelled intrinsic value — potential margin of safety for long-term investors.';
-  }
-
-  // ── Fair-value hooks ────────────────────────────────────────
-  if (moat)
-    return `Quality characteristics (${moat.toLowerCase()}) at a fair price — limited near-term asymmetry.`;
-  return 'Price closely aligned with DCF intrinsic value — limited near-term asymmetry.';
-}
-
-function copyAnalysis() {
-  if (!_activeData) return;
-  const d   = _activeData;
-  const iv  = d.intrinsic_value ?? d.multiples_val;
-  const mos = d.margin_of_safety ?? d.multiples_mos;
-  if (!iv) return;
-
-  const signal  = _buildSignalString(mos);
-  const method  = _buildMethodString(d);
-  const mosLine = mos != null
-    ? `Margin of Safety: ${mos > 0 ? '+' : ''}${mos.toFixed(1)}%`
-    : '';
-
-  const text = [
-    `VALUS Analysis: $${d.ticker}`,
-    `Intrinsic Value: $${iv.toFixed(2)}${signal ? ` (${signal.replace(/[▲◆▼] /, '')})` : ''}`,
-    `Method: ${method}`,
-    mosLine,
-    `Analyze yours at: ${VALUS_URL}`,
-  ].filter(Boolean).join('\n');
-
-  navigator.clipboard.writeText(text).then(() => {
-    const btn = $('copyBtn');
-    if (!btn) return;
-    const lbl = btn.querySelector('.copy-btn-label');
-    btn.classList.add('copied');
-    if (lbl) lbl.textContent = 'Copied!';
-    setTimeout(() => {
-      btn.classList.remove('copied');
-      if (lbl) lbl.textContent = 'Copy Summary';
-    }, 2000);
-  }).catch(() => {
-    // Fallback for browsers that block clipboard without user gesture
-    const ta = document.createElement('textarea');
-    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
-    document.body.appendChild(ta); ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-    const btn = $('copyBtn');
-    if (btn) { btn.classList.add('copied'); setTimeout(() => btn.classList.remove('copied'), 2000); }
-  });
-}
-
-/* ── Detail drawer ────────────────────────────────────────── */
-function toggleDetailDrawer() {
-  const drawer = $('detailDrawer');
-  const arrow  = $('viewAnalysisArrow');
-  const label  = $('viewAnalysisBtnText');
-  const btn    = $('viewAnalysisBtn');
-  if (!drawer) return;
-  const isOpen = drawer.classList.toggle('open');
-  if (arrow) arrow.classList.toggle('rotated', isOpen);
-  if (btn)   btn.classList.toggle('open', isOpen);
-  if (label) label.textContent = isOpen
-    ? 'Hide Detailed Analysis'
-    : 'View Detailed Analysis \u0026 Assumptions';
-  if (isOpen) {
-    // Scroll trigger into view
-    setTimeout(() => {
-      const trigger = $('viewAnalysisTrigger');
-      if (trigger) trigger.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 80);
-    // Chart.js renders at zero size when the container is collapsed.
-    // Resize after the CSS grid animation completes (~700ms).
-    setTimeout(() => {
-      if (priceChart) priceChart.resize();
-      if (dcfChart)   dcfChart.resize();
-    }, 750);
-  }
-}
-
-function _resetDrawer() {
-  const drawer = $('detailDrawer');
-  const arrow  = $('viewAnalysisArrow');
-  const btn    = $('viewAnalysisBtn');
-  const label  = $('viewAnalysisBtnText');
-  if (drawer) drawer.classList.remove('open');
-  if (arrow)  arrow.classList.remove('rotated');
-  if (btn)    btn.classList.remove('open');
-  if (label)  label.textContent = 'View Detailed Analysis \u0026 Assumptions';
-  hide('viewAnalysisTrigger');
-}
-
-/* ── Modal ────────────────────────────────────────────────── */
-function openDcfGuide()  { $('dcfModal').classList.remove('hidden'); document.body.style.overflow = 'hidden'; }
-function closeDcfGuide() { $('dcfModal').classList.add('hidden');    document.body.style.overflow = ''; }
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDcfGuide(); });
-
-/* ── Advanced panel ───────────────────────────────────────── */
-function toggleAdvanced() {
-  const p = $('advancedPanel'), open = !p.classList.contains('hidden');
-  p.classList.toggle('hidden', open);
-  $('advToggleLabel').textContent = open ? '⚙ Customize DCF Assumptions' : '▲ Hide Assumptions';
-}
-
-/* ── Search autocomplete ──────────────────────────────────── */
-const input    = $('tickerInput');
-const dropdown = $('searchDropdown');
-
-input.addEventListener('input', () => {
-  clearTimeout(searchTimer);
-  const q = input.value.trim();
-  if (!q || q.length < 2) { dropdown.classList.add('hidden'); return; }
-  searchTimer = setTimeout(() => fetchSuggestions(q), 260);
-});
-
-input.addEventListener('keydown', e => {
-  if (e.key === 'Enter') { dropdown.classList.add('hidden'); runAnalysis(); }
-  if (e.key === 'Escape') dropdown.classList.add('hidden');
-});
-
-document.addEventListener('click', e => {
-  if (!e.target.closest('.search-wrap')) dropdown.classList.add('hidden');
-});
-
-async function fetchSuggestions(q) {
   try {
-    const res  = await fetch('/api/search?q=' + encodeURIComponent(q));
+    const res = await fetch(url);
     const data = await res.json();
-    if (!data.length) { dropdown.classList.add('hidden'); return; }
-    dropdown.innerHTML = data.map(d => `
-      <div class="dropdown-item" onclick="selectTicker('${d.symbol}','${escHtml(d.name)}')">
-        <span class="di-symbol">${d.symbol}</span>
-        <span class="di-name">${escHtml(d.name)}</span>
-        <span class="di-exch">${d.exchange}</span>
-      </div>`).join('');
-    dropdown.classList.remove('hidden');
-  } catch { dropdown.classList.add('hidden'); }
-}
-
-function escHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-
-function selectTicker(symbol, name) {
-  input.value = symbol;
-  dropdown.classList.add('hidden');
-  runAnalysis();
-}
-
-/* ── Period buttons ───────────────────────────────────────── */
-document.querySelectorAll('.period-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    if (!currentTicker) return;
-    document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    loadPeriodChart(currentTicker, btn.dataset.period);
-  });
-});
-
-async function loadPeriodChart(ticker, period) {
-  const loading = $('chartLoading');
-  loading.classList.remove('hidden');
-  try {
-    const res  = await fetch(`/api/history?ticker=${ticker}&period=${period}`);
-    const data = await res.json();
-    if (data.prices) renderPriceChart(data.prices, currentData);
-  } catch {}
-  loading.classList.add('hidden');
-}
-
-/* ── Main analysis ────────────────────────────────────────── */
-async function runAnalysis() {
-  const ticker = input.value.trim().toUpperCase();
-  if (!ticker) { input.focus(); return; }
-
-  const params = new URLSearchParams({ ticker });
-  const g1 = $('growth1').value, g2 = $('growth2').value;
-  const tg = $('terminalGrowth').value, yrs = $('projYears').value;
-  if (g1)  params.set('growth1',  parseFloat(g1)  / 100);
-  if (g2)  params.set('growth2',  parseFloat(g2)  / 100);
-  if (tg)  params.set('terminal', parseFloat(tg)  / 100);
-  if (yrs) params.set('years',    parseInt(yrs));
-
-  $('loadingTicker').textContent = ticker;
-  show('loadingState'); hide('results'); hide('errorState');
-  $('analyzeBtn').disabled = true;
-  // Cancel any in-flight IV animation and reset toggle + drawer state
-  if (_ivAnimRaf) { cancelAnimationFrame(_ivAnimRaf); _ivAnimRaf = null; }
-  _activeData = null;
-  _resetDrawer();
-  const _prevTog = $('scenarioToggle');
-  if (_prevTog) _prevTog.classList.add('hidden');
-
-  try {
-    const res  = await fetch('/api/analyze?' + params);
-    const data = await res.json();
-    if (!res.ok || data.error) { showError(data.error || 'Something went wrong.'); return; }
-    currentTicker = ticker;
-    currentData   = data;
-
-    // Reset period btn to 1Y
-    document.querySelectorAll('.period-btn').forEach(b => b.classList.toggle('active', b.dataset.period === '1y'));
-
+    if (!res.ok || data.error) {
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+    hideLoading();
     renderResults(data);
-    show('results');
-    $('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-    // Load statements async
-    loadStatements(ticker);
-  } catch { showError('Network error — make sure the server is running.'); }
-  finally { hide('loadingState'); $('analyzeBtn').disabled = false; }
+  } catch (err) {
+    hideLoading();
+    showError(err.message || "Failed to load analysis");
+  }
 }
 
-function show(id) { $(id).classList.remove('hidden'); }
-function hide(id) { $(id).classList.add('hidden');    }
-function showError(msg) { $('errorMsg').textContent = msg; show('errorState'); hide('loadingState'); }
+async function searchSuggestions(q) {
+  if (!q || q.length < 1) return [];
+  try {
+    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.results || [];
+  } catch {
+    return [];
+  }
+}
 
-/* ── Render all ───────────────────────────────────────────── */
+function showLoading() { $("loading").classList.remove("hidden"); }
+function hideLoading() { $("loading").classList.add("hidden"); }
+function showError(msg) {
+  $("errorMsg").textContent = msg;
+  $("error").classList.remove("hidden");
+}
+function hideError() { $("error").classList.add("hidden"); }
+
+/* ════════════════════════════════════════════════════════════════════════
+   Main render
+   ════════════════════════════════════════════════════════════════════════ */
+
+let _LAST_DATA = null;
+
 function renderResults(d) {
-  // ── Company header (hero — Name, Price, Ticker only) ──────
-  $('companyName').textContent  = d.company_name;
-  $('tickerBadge').textContent  = d.ticker;
-  $('currentPrice').textContent = fmtPrice(d.current_price);
-  const parts = [];
-  if (d['52w_low'] && d['52w_high']) parts.push(`52W  ${fmtPrice(d['52w_low'])} – ${fmtPrice(d['52w_high'])}`);
-  if (d.currency && d.currency !== 'USD') parts.push(d.currency);
-  $('priceMeta').textContent = parts.join('   ·   ');
+  _LAST_DATA = d;
+  $("results").classList.remove("hidden");
 
-  // ── Mini Financial Highlights (hero card) ────────────────
-  const mhMarketCap = $('mhMarketCap');
-  const mhPE        = $('mhPE');
-  const mhDivYield  = $('mhDivYield');
-  const mhTarget    = $('mhTarget');
-  if (mhMarketCap) mhMarketCap.textContent = fmtBig(d.market_cap);
-  if (mhPE)        mhPE.textContent        = fmtX(d.pe_ratio);
-  if (mhDivYield) {
-    if (d.dividend_yield != null && d.dividend_yield > 0) {
-      mhDivYield.textContent = fmtPct(d.dividend_yield);
-      mhDivYield.className   = 'mh-value mh-green';
-    } else {
-      mhDivYield.textContent = '—';
-      mhDivYield.className   = 'mh-value mh-muted';
-    }
-  }
-  if (mhTarget) mhTarget.textContent = fmtPrice(d.target_price);
+  renderHeroVerdict(d);
+  renderMethodology(d);
+  renderScenarios(d);
+  renderMiniStats(d);
+  renderDrawerContent(d);
 
-  // ── Verdict — unified rendering for DCF / Specialist / Multiples ──────────
-  const iv  = d.intrinsic_value;
-  const mos = d.margin_of_safety;
-  const sc  = d.scenarios;
-  const card = $('verdictCard');
-  card.className = 'verdict-card';
-
-  // Classify what kind of value we're showing
-  const isDCF        = d.dcf_available && iv != null;
-  const isSpecialist = !d.dcf_available && iv != null;
-  const isMultiples  = !isDCF && !isSpecialist && d.multiples_val != null;
-  const hasValue     = isDCF || isSpecialist || isMultiples;
-
-  const displayVal = isMultiples ? d.multiples_val : iv;
-  const displayMos = isMultiples ? d.multiples_mos : mos;
-
-  // ── Verdict label ──────────────────────────────────────────────────────────
-  const labelEl = $('verdictLabel');
-  if (labelEl) {
-    if      (isDCF)        labelEl.textContent = 'DCF Intrinsic Value';
-    else if (isSpecialist) labelEl.textContent = 'Specialist Valuation';
-    else if (isMultiples)  labelEl.textContent = 'Multiples-Based Value';
-    else                   labelEl.textContent = 'Intrinsic Value';
-  }
-
-  // ── Why hook ──────────────────────────────────────────────────────────────
-  const hookEl = $('whyHook');
-
-  if (!hasValue) {
-    $('intrinsicValue').textContent = 'N/A';
-    $('mosValue').textContent       = '—';
-    $('mosFill').style.width        = '0';
-    card.classList.add('fair');
-    hide('signalBadge');
-    if (hookEl) {
-      hookEl.textContent = d.dcf_warning || 'Valuation not available for this security.';
-      hookEl.classList.remove('hidden');
-    }
-  } else {
-    $('intrinsicValue').textContent = fmtPrice(displayVal);
-
-    // ── Signal badge ──────────────────────────────────────────────────────
-    const sigEl = $('signalBadge');
-    if (sigEl) {
-      if (displayMos == null) {
-        sigEl.classList.add('hidden');
-      } else if (displayMos > 20) {
-        sigEl.className   = 'signal-badge signal-strong';
-        sigEl.textContent = '▲ Strong Value';
-        sigEl.classList.remove('hidden');
-      } else if (displayMos >= 0) {
-        sigEl.className   = 'signal-badge signal-fair';
-        sigEl.textContent = '◆ Fair Value';
-        sigEl.classList.remove('hidden');
-      } else {
-        sigEl.className   = 'signal-badge signal-over';
-        sigEl.textContent = '▼ Overvalued';
-        sigEl.classList.remove('hidden');
-      }
-    }
-
-    // ── Verdict card colouring ────────────────────────────────────────────
-    if (displayMos > 15)       card.classList.add('undervalued');
-    else if (displayMos < -15) card.classList.add('overvalued');
-    else                       card.classList.add('fair');
-
-    // ── Why hook — contextual insight ─────────────────────────────────────
-    if (hookEl) {
-      const hook = _buildWhyHook(d);
-      if (hook) {
-        hookEl.textContent = hook;
-        hookEl.classList.remove('hidden');
-      } else {
-        hookEl.classList.add('hidden');
-      }
-    }
-
-    // ── MoS track ─────────────────────────────────────────────────────────
-    const color = displayMos > 15 ? 'var(--green)' : displayMos < -15 ? 'var(--red)' : 'var(--gold)';
-    const mosEl = $('mosValue');
-    if (displayMos != null) {
-      mosEl.textContent             = (displayMos > 0 ? '+' : '') + fmtPct(displayMos);
-      mosEl.style.color             = color;
-      $('mosFill').style.width      = Math.min(Math.abs(displayMos), 100) + '%';
-      $('mosFill').style.background = color;
-    } else {
-      mosEl.textContent        = '—';
-      $('mosFill').style.width = '0';
-    }
-  }
-
-  // Store data for toggle interactions
-  _activeData = d;
-
-  // Scenario analysis
-  renderScenarios(sc, d.current_price);
-
-  // Set up scenario toggle — visible only for full DCF with all three scenarios
-  {
-    const togEl = $('scenarioToggle');
-    if (togEl) {
-      const hasAll = isDCF && sc &&
-        sc.base?.value != null && sc.bull?.value != null && sc.bear?.value != null;
-      if (hasAll) {
-        togEl.classList.remove('hidden');
-        // Set 'base' as initial active button (no animation on first load)
-        document.querySelectorAll('.sc-tog-btn').forEach(b =>
-          b.classList.toggle('sc-tog-active', b.dataset.scenario === 'base'));
-        // Light up the base scenario card
-        const baseCard = document.querySelector('.sc-base');
-        if (baseCard) baseCard.classList.add('sc-case--active');
-      } else {
-        togEl.classList.add('hidden');
-      }
-    }
-  }
-
-  // ── Quick Insights — model flags above drawer trigger ────────────────────
-  renderQuickInsights(d);
-
-  // Valuation multiples
-  $('valuationMetrics').innerHTML = [
-    row('Market Cap',     fmtBig(d.market_cap)),
-    row('P/E (TTM)',      fmtX(d.pe_ratio),      peColor(d.pe_ratio)),
-    row('Forward P/E',   fmtX(d.forward_pe),    peColor(d.forward_pe, true)),
-    row('PEG Ratio',     d.peg_ratio != null ? fmt(d.peg_ratio) + 'x' : '—',
-                         d.peg_ratio != null ? (d.peg_ratio < 1 ? 'green' : d.peg_ratio > 2 ? 'red' : '') : ''),
-    row('P/S Ratio',     fmtX(d.ps_ratio)),
-    row('P/B Ratio',     fmtX(d.pb_ratio)),
-    row('EV/EBITDA',     fmtX(d.ev_ebitda)),
-    row('EV/Revenue',    fmtX(d.ev_revenue)),
-    row('FCF Yield',     d.fcf_yield != null ? fmtPct(d.fcf_yield) : '—',
-                         d.fcf_yield != null ? (d.fcf_yield > 4 ? 'green' : '') : ''),
-    row('Analyst Target',fmtPrice(d.target_price), 'cyan'),
-    row('Analyst Rating',ratingBadge(d.analyst_rating, d.analyst_count)),
-  ].join('');
-
-  // DCF assumptions
-  $('dcfAssumptions').innerHTML = d.dcf_available ? [
-    row('WACC',            fmtPct(d.wacc),           'cyan'),
-    row('Cost of Equity',  fmtPct(d.cost_of_equity)),
-    row('Cost of Debt',    fmtPct(d.cost_of_debt)),
-    row('Tax Rate',        fmtPct(d.tax_rate)),
-    row('Beta',            fmt(d.beta)),
-    row('Stage 1 Growth',  fmtPct(d.stage1_growth),  'green'),
-    row('Stage 2 Growth',  fmtPct(d.stage2_growth),  'green'),
-    row('Terminal Growth', fmtPct(d.terminal_growth)),
-    row('Base FCF',        fmtBig(d.base_fcf)),
-    row('FCF Yield',       d.fcf_yield != null ? fmtPct(d.fcf_yield) : '—'),
-    row('PV of FCFs',      fmtBig(d.total_pv_fcf)),
-    row('PV Terminal Val', fmtBig(d.pv_terminal)),
-    row('Terminal % of EV',fmtPct(d.terminal_value_pct)),
-    d.moat_detected ? row('Moat Premium', `<span style="color:var(--gold);font-size:11px">◆ ${d.moat_path} — WACC −${(d.moat_wacc_delta||0).toFixed(1)}pp</span>`) : '',
-    d.backbone_stage1_extended ? row('Stage 1 Duration', `<span style="color:var(--cyan);font-size:11px">◆ Backbone: all ${d.projection_years} yrs at Stage 1 rate</span>`) : '',
-    d.cash_rich_wacc_applied   ? row('Cash-Rich WACC',   `<span style="color:var(--cyan);font-size:11px">◆ $50B+ cash · WACC capped 9%</span>`)                         : '',
-    d.wacc_risk_applied        ? row('Risk WACC',        `<span style="color:var(--red); font-size:11px">⚠ Material risk · WACC +1%</span>`)                            : '',
-    d.momentum_premium_pct != null ? row('Catalyst Premium', `<span style="color:var(--green);font-size:11px">▲ +${d.momentum_premium_pct}% momentum premium</span>`) : '',
-    d.growth_source ? row('Growth Source', `<span style="color:var(--muted2);font-size:11px">${d.growth_source}</span>`) : '',
-    d.fcf_source    ? row('FCF Source',    `<span style="color:var(--muted2);font-size:11px">${d.fcf_source}</span>`)    : '',
-    (d.fx_rate && d.financial_currency && d.trading_currency)
-      ? row('FX Applied', `<span style="color:var(--muted2);font-size:11px">1 ${d.financial_currency} = ${d.fx_rate} ${d.trading_currency}</span>`) : '',
-  ].join('') : '<div style="color:var(--muted);font-size:12px;padding:8px 0">DCF not available for this security.</div>';
-
-  // Financials
-  $('financialMetrics').innerHTML = [
-    row('Revenue',          fmtBig(d.revenue)),
-    row('EBITDA',           fmtBig(d.ebitda)),
-    row('FCF (TTM)',        fmtBig(d.base_fcf)),
-    row('FCF Margin',       d.fcf_margin != null ? fmtPct(d.fcf_margin) : '—', cc(d.fcf_margin)),
-    row('Gross Margin',     fmtPct(d.gross_margin),     d.gross_margin > 40 ? 'green' : ''),
-    row('Operating Margin', fmtPct(d.operating_margin), cc(d.operating_margin)),
-    row('Net Margin',       fmtPct(d.profit_margin),    cc(d.profit_margin)),
-    row('Rev. Growth (YoY)',fmtPct(d.revenue_growth),   cc(d.revenue_growth)),
-    row('EPS Growth (YoY)', fmtPct(d.earnings_growth),  cc(d.earnings_growth)),
-    row('ROE',              fmtPct(d.roe),               cc(d.roe)),
-    row('ROA',              fmtPct(d.roa),               cc(d.roa)),
-    row('Div. Yield',       d.dividend_yield != null ? fmtPct(d.dividend_yield) : '—'),
-  ].join('');
-
-  // Health
-  $('healthMetrics').innerHTML = [
-    row('Total Cash',    fmtBig(d.total_cash),    'green'),
-    row('Total Debt',    fmtBig(d.total_debt),    d.total_debt > d.total_cash ? 'red' : ''),
-    row('Net Debt',      fmtBig(d.net_debt),      cc(d.net_debt, false)),
-    row('Debt/Equity',   d.debt_to_equity != null ? fmt(d.debt_to_equity/100,2)+'x' : '—',
-                         d.debt_to_equity > 200 ? 'red' : d.debt_to_equity != null && d.debt_to_equity < 50 ? 'green' : ''),
-    row('Current Ratio', fmtX(d.current_ratio),  d.current_ratio > 2 ? 'green' : d.current_ratio != null && d.current_ratio < 1 ? 'red' : ''),
-    row('Quick Ratio',   fmtX(d.quick_ratio),    d.quick_ratio  > 1 ? 'green' : d.quick_ratio  != null && d.quick_ratio  < 0.5 ? 'red' : ''),
-    row('Shares Out.',   fmtBig(d.shares_outstanding)),
-    row('Payout Ratio',  fmtPct(d.payout_ratio)),
-  ].join('');
-
-  // Price chart
-  renderPriceChart(d.price_history || [], d);
-
-  // DCF chart + table
-  if (d.dcf_available && d.fcf_chart && d.scenarios) {
-    show('scenarioCard');
-  } else {
-    hide('scenarioCard');
-  }
-
-  if (d.dcf_available && d.fcf_chart) {
-    show('dcfChartCard'); show('dcfTableCard');
-    renderDcfChart(d);
-    renderProjectionTable(d);
-  } else {
-    hide('dcfChartCard'); hide('dcfTableCard');
-  }
-
-  // Show the "View Detailed Analysis" trigger now that everything is rendered
-  show('viewAnalysisTrigger');
+  attachCardGlow();
+  // Smooth-scroll into view
+  $("results").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-/* ── Live Analyst Notes (Discovery Layer) ─────────────────── */
-function renderCatalystBox(d) {
-  const box = $('liveCatalystBox');
-  if (!box) return;
+/* ════════════════════════════════════════════════════════════════════════
+   Hero verdict card
+   ════════════════════════════════════════════════════════════════════════ */
 
-  const insights = d.catalyst_insights || [];
-  const hasCat   = d.has_positive_catalyst;
-  const hasRisk  = d.has_material_risk;
-  const momPct   = d.momentum_premium_pct;   // e.g. 8.0 for 8%
-  const waccRisk = d.wacc_risk_applied;
-  const backbone = d.backbone_stage1_extended;
-  const cashRich = d.cash_rich_wacc_applied;
+function renderHeroVerdict(d) {
+  const hero = $("heroVerdict");
+  const vs   = d.verdict_summary || {};
+  const pf   = d.priced_for || {};
+  const tier = pf.tier || "fair_value";
+  const tierCls = tierClassFor(tier);
 
-  // Hide box if no useful data
-  if (!insights.length && !hasCat && !hasRisk && !backbone && !cashRich) {
-    box.classList.add('hidden');
+  // Reset tier classes, apply new
+  hero.classList.remove("tier-positive", "tier-info", "tier-warning", "tier-negative");
+  hero.classList.add(tierCls);
+
+  // Company info
+  $("vName").textContent = d.company_name || d.ticker;
+  $("vTicker").textContent = d.ticker;
+  $("vSector").textContent = d.sector || "—";
+  $("vRange").textContent = d["52w_low"] && d["52w_high"]
+    ? `52W $${fmt(d["52w_low"])} – $${fmt(d["52w_high"])}`
+    : "";
+
+  // Price + IV with count-up
+  const price = d.current_price || 0;
+  const iv    = d.intrinsic_value || 0;
+  animateNumber($("vPrice"), 0, price, 600, v => fmtPrice(v));
+  animateNumber($("vIV"),    0, iv,    600, v => fmtPrice(v));
+
+  // MOS
+  const mos = d.margin_of_safety;
+  if (mos != null) {
+    const fillEl = $("vMosFill");
+    const pctEl  = $("vMosPct");
+    pctEl.textContent = fmtPct(mos);
+    // MOS bar fills outward from center toward the side that wins
+    const cap = Math.min(Math.abs(mos), 100);
+    const widthPct = cap / 2;  // half of total bar
+    if (mos >= 0) {
+      fillEl.style.left = "50%";
+      fillEl.style.right = "auto";
+      fillEl.style.width = `${widthPct}%`;
+      fillEl.classList.add("positive"); fillEl.classList.remove("negative");
+    } else {
+      fillEl.style.right = "50%";
+      fillEl.style.left = "auto";
+      fillEl.style.width = `${widthPct}%`;
+      fillEl.classList.add("negative"); fillEl.classList.remove("positive");
+    }
+  } else {
+    $("vMosPct").textContent = "—";
+    $("vMosFill").style.width = "0%";
+  }
+
+  // Tier badge
+  const tierBadge = $("vTierBadge");
+  tierBadge.classList.remove("tier-positive","tier-info","tier-warning","tier-negative");
+  tierBadge.classList.add(tierCls);
+  $("vTierLabel").textContent = pf.label || "Verdict pending";
+
+  // Reasons
+  const reasonsHtml = (vs.reasons || []).map((r, i) =>
+    `<div class="reason"><span class="reason__num">${i+1}</span><span class="reason__txt">${escHtml(r)}</span></div>`
+  ).join("");
+  $("vReasons").innerHTML = reasonsHtml;
+
+  // Verdict line
+  $("vVerdict").textContent = vs.verdict || pf.narrative || "";
+
+  // Scenario toggle values
+  const sc = d.scenarios || {};
+  document.querySelector('[data-sc-val="bear"]').textContent = sc.bear?.value != null ? fmtPrice(sc.bear.value) : "—";
+  document.querySelector('[data-sc-val="base"]').textContent = sc.base?.value != null ? fmtPrice(sc.base.value) : "—";
+  document.querySelector('[data-sc-val="bull"]').textContent = sc.bull?.value != null ? fmtPrice(sc.bull.value) : "—";
+
+  // Bind toggle (animate IV cross-fade between scenarios)
+  document.querySelectorAll(".scenario-toggle__btn").forEach(btn => {
+    btn.onclick = () => activateScenario(btn.dataset.sc);
+  });
+  activateScenarioVisual("base");
+}
+
+function activateScenario(which) {
+  if (!_LAST_DATA) return;
+  const sc = _LAST_DATA.scenarios || {};
+  const slot = sc[which];
+  if (!slot || slot.value == null) return;
+
+  const ivEl = $("vIV");
+  const cur  = parseFloat(ivEl.textContent.replace(/[^0-9.-]/g,"")) || 0;
+  animateNumber(ivEl, cur, slot.value, 350, v => fmtPrice(v));
+
+  // Update MOS to match
+  if (_LAST_DATA.current_price && slot.value) {
+    const newMos = (slot.value - _LAST_DATA.current_price) / _LAST_DATA.current_price * 100;
+    $("vMosPct").textContent = fmtPct(newMos);
+    const fillEl = $("vMosFill");
+    const cap = Math.min(Math.abs(newMos), 100);
+    const widthPct = cap / 2;
+    if (newMos >= 0) {
+      fillEl.style.left = "50%"; fillEl.style.right = "auto";
+      fillEl.classList.add("positive"); fillEl.classList.remove("negative");
+    } else {
+      fillEl.style.right = "50%"; fillEl.style.left = "auto";
+      fillEl.classList.add("negative"); fillEl.classList.remove("positive");
+    }
+    fillEl.style.width = `${widthPct}%`;
+  }
+
+  activateScenarioVisual(which);
+}
+
+function activateScenarioVisual(which) {
+  document.querySelectorAll(".scenario-toggle__btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.sc === which);
+  });
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Methodology explainer
+   ════════════════════════════════════════════════════════════════════════ */
+
+function fmtMethodValue(s) {
+  const v = s.value;
+  if (v == null) return "—";
+  switch (s.format) {
+    case "currency_b": return fmtBig(v);
+    case "currency":   return fmtPrice(v);
+    case "percent":    return fmt(v * 100, 1) + "%";
+    case "delta_pct":  return (v > 0 ? "+" : "") + fmt(v, 1) + "%";
+    default:           return String(v);
+  }
+}
+
+function valueClassFor(s) {
+  if (s.format === "delta_pct" && s.value > 0) return "positive";
+  if (s.format === "currency_b" && s.value < 0) return "negative";
+  if (!s.active) return "muted";
+  return "";
+}
+
+function renderMethodology(d) {
+  const steps = d.methodology_steps || [];
+  const container = $("methodSteps");
+  container.innerHTML = "";
+
+  if (steps.length === 0) {
+    container.innerHTML = `<div class="text-muted" style="padding: 16px 0; text-align: center;">Methodology breakdown unavailable for this stock.</div>`;
     return;
   }
 
-  let html = `
-    <div class="catalyst-header">
-      <span class="catalyst-icon">⚡</span>
-      <span class="catalyst-title">Live Analyst Notes</span>
-      <span class="catalyst-sub">Catalyst research · SEC 8-K · Market intelligence</span>
-    </div>`;
+  // Render each step
+  const rows = steps.map(s => {
+    const valClass = valueClassFor(s);
+    const valStr = fmtMethodValue(s);
+    return `
+      <div class="method-step ${s.active ? '' : 'inactive'}">
+        <div class="method-step__num">${s.step}</div>
+        <div class="method-step__body">
+          <div class="method-step__label">${escHtml(s.label)}</div>
+          <div class="method-step__detail">${escHtml(s.detail || '')}</div>
+        </div>
+        <div class="method-step__value ${valClass}">${valStr}</div>
+      </div>
+    `;
+  });
 
-  // Insight bullets
-  if (insights.length) {
-    html += `<ul class="catalyst-bullets">`;
-    insights.forEach(line => {
-      html += `<li class="catalyst-bullet">${escHtml(line)}</li>`;
-    });
-    html += `</ul>`;
-  }
-
-  // Intelligence flags strip
-  let flags = '';
-
-  if (momPct != null && momPct > 0) {
-    flags += `<span class="cat-flag cat-flag--catalyst">
-      ▲ Momentum Premium +${momPct}% applied to IV
-    </span>`;
-  }
-  if (hasCat && (momPct == null || momPct === 0)) {
-    flags += `<span class="cat-flag cat-flag--catalyst">◈ Positive catalyst detected</span>`;
-  }
-  if (waccRisk) {
-    flags += `<span class="cat-flag cat-flag--risk">⚠ Material risk · WACC +1%</span>`;
-  }
-  if (backbone) {
-    flags += `<span class="cat-flag cat-flag--moat">◆ Backbone: 10-yr Stage 1 growth</span>`;
-  }
-  if (cashRich) {
-    flags += `<span class="cat-flag cat-flag--moat">◆ Cash-rich: WACC capped 9%</span>`;
+  // Final fair value row
+  if (d.intrinsic_value != null) {
+    rows.push(`
+      <div class="method-step final">
+        <div class="method-step__num">✓</div>
+        <div class="method-step__body">
+          <div class="method-step__label">Final fair value</div>
+          <div class="method-step__detail">After all layers applied</div>
+        </div>
+        <div class="method-step__value">${fmtPrice(d.intrinsic_value)}</div>
+      </div>
+    `);
   }
 
-  if (flags) html += `<div class="cat-flags">${flags}</div>`;
+  container.innerHTML = rows.join("");
 
-  box.innerHTML = html;
-  box.classList.remove('hidden');
+  // Bind expand/collapse
+  const card = $("methodology");
+  const head = $("methodologyHead");
+  const toggleMethod = () => {
+    const isOpen = card.classList.toggle("expanded");
+    head.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    if (isOpen) {
+      // Re-trigger animation by clearing and re-applying
+      container.querySelectorAll(".method-step").forEach(el => {
+        el.style.animation = "none";
+        // eslint-disable-next-line no-unused-expressions
+        el.offsetHeight;
+        el.style.animation = "";
+      });
+    }
+  };
+  head.onclick = toggleMethod;
+  head.onkeydown = (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleMethod(); }
+  };
 }
 
-/* ── Quick Insights — model flags shown above drawer trigger ── */
-function renderQuickInsights(d) {
-  const el     = $('quickInsights');
-  const listEl = $('qiList');
-  if (!el || !listEl) return;
+/* ════════════════════════════════════════════════════════════════════════
+   Scenarios
+   ════════════════════════════════════════════════════════════════════════ */
 
-  const iv    = d.intrinsic_value;
-  const notes = d.dcf_notes || [];
+function renderScenarios(d) {
+  const sc = d.scenarios || {};
+  const grid = $("scGrid");
+  const price = d.current_price;
+
+  $("scWeightNote").textContent = sc.weight_basis ? `Weights: ${sc.weight_basis}` : "";
+
+  const cards = [
+    { key: "bear", cls: "bear", label: "Bear case" },
+    { key: "base", cls: "base", label: "Base case" },
+    { key: "bull", cls: "bull", label: "Bull case" },
+  ].map(({ key, cls, label }) => {
+    const slot = sc[key] || {};
+    const v = slot.value;
+    const w = slot.weight ?? 33;
+    const upside = slot.upside;
+
+    // Probability bar width
+    const barW = Math.min(Math.max(w, 5), 100);
+
+    // Assumptions row (s1, wacc)
+    const s1 = slot.s1 != null ? `<span><strong>g₁</strong> ${fmt(slot.s1, 1)}%</span>` : "";
+    const wacc = slot.wacc != null ? `<span><strong>WACC</strong> ${fmt(slot.wacc, 1)}%</span>` : "";
+
+    return `
+      <div class="sc-card ${cls}">
+        <div class="sc-card__head">
+          <span class="sc-card__label">${label}</span>
+          <span class="sc-card__weight">${w}% weight</span>
+        </div>
+        <div class="sc-card__value">${v != null ? fmtPrice(v) : "—"}</div>
+        <div class="sc-card__delta">${upside != null ? fmtPct(upside) + " vs current" : "—"}</div>
+        <div class="sc-card__bar"><div class="sc-card__bar-fill" style="--bar-width: ${barW}%; width: ${barW}%;"></div></div>
+        <div class="sc-card__assumptions">${s1}${wacc}</div>
+      </div>
+    `;
+  });
+
+  grid.innerHTML = cards.join("");
+
+  // Weighted bar
+  const w = sc.weighted;
+  const wd = sc.weighted_upside;
+  $("scWeighted").textContent = w != null ? fmtPrice(w) : "—";
+  $("scWeightedDelta").textContent = wd != null ? fmtPct(wd) + " potential" : "";
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Mini stats
+   ════════════════════════════════════════════════════════════════════════ */
+
+function renderMiniStats(d) {
+  $("mMcap").textContent   = d.market_cap != null ? fmtBig(d.market_cap) : "—";
+  $("mPE").textContent     = d.pe_ratio != null ? fmtX(d.pe_ratio) : "—";
+  const dy = d.dividend_yield;
+  $("mDiv").textContent    = dy != null ? `${fmt(dy, 2)}%` : "—";
+  const tgt = d.target_price;
+  $("mTarget").textContent = tgt != null ? fmtPrice(tgt) : "—";
+
+  // Color analyst target if it differs significantly from current price
+  const tgtEl = $("mTarget");
+  tgtEl.classList.remove("positive", "negative");
+  if (tgt && d.current_price) {
+    const diff = (tgt - d.current_price) / d.current_price * 100;
+    if (diff > 10) tgtEl.classList.add("positive");
+    else if (diff < -10) tgtEl.classList.add("negative");
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Drawer content (DCF assumptions + notes + charts + tables)
+   ════════════════════════════════════════════════════════════════════════ */
+
+function renderDrawerContent(d) {
+  // Assumptions
+  const ag = $("assumptionsGrid");
+  const rows = [
+    ["WACC",            d.wacc != null ? `${fmt(d.wacc, 1)}%` : "—"],
+    ["Cost of Equity",  d.cost_of_equity != null ? `${fmt(d.cost_of_equity, 1)}%` : "—"],
+    ["Cost of Debt",    d.cost_of_debt != null ? `${fmt(d.cost_of_debt, 1)}%` : "—"],
+    ["Beta",            d.beta != null ? fmt(d.beta, 2) : "—"],
+    ["Stage 1 growth",  d.stage1_growth != null ? `${fmt(d.stage1_growth, 1)}%` : "—"],
+    ["Stage 2 growth",  d.stage2_growth != null ? `${fmt(d.stage2_growth, 1)}%` : "—"],
+    ["Terminal growth", d.terminal_growth != null ? `${fmt(d.terminal_growth, 1)}%` : "—"],
+    ["Tax rate",        d.tax_rate != null ? `${fmt(d.tax_rate, 1)}%` : "—"],
+    ["Base FCF",        d.base_fcf != null ? fmtBig(d.base_fcf) : "—"],
+    ["Net debt",        d.net_debt != null ? fmtBig(d.net_debt) : "—"],
+    ["Shares out",      d.shares_outstanding != null ? fmtBig(d.shares_outstanding).replace("$","") : "—"],
+    ["Years projected", d.projection_years || 10],
+  ];
+  ag.innerHTML = rows.map(([l, v]) =>
+    `<div class="assumption"><span class="assumption__label">${l}</span><span class="assumption__value numeric">${v}</span></div>`
+  ).join("");
+
+  // Notes
+  renderNotes(d);
+
+  // Charts
+  if (d.price_history) renderPriceChart(d.price_history);
+  if (d.fcf_chart) renderDcfChart(d.fcf_chart);
+
+  // Projection table
+  renderProjectionTable(d);
+
+  // Financials tabs
+  renderFinancialsTabs(d);
+
+  // Drawer toggle binding
+  const trigger = $("drawerTrigger");
+  const drawer  = $("drawer");
+  const triggerTxt = $("drawerTriggerTxt");
+  trigger.onclick = () => {
+    const isOpen = drawer.classList.toggle("open");
+    trigger.classList.toggle("open", isOpen);
+    trigger.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    triggerTxt.textContent = isOpen ? "Hide detailed analysis" : "View detailed analysis";
+  };
+}
+
+function renderNotes(d) {
+  const list = $("notesList");
   const items = [];
 
-  function qi(icon, html, cls = 'qi-info') {
-    items.push(`<div class="qi-item ${cls}"><span class="qi-icon">${icon}</span><span class="qi-text">${html}</span></div>`);
+  // Pull all the auxiliary info into note items
+  if (d.dcf_warning) items.push({ type: "warn", text: d.dcf_warning });
+  if (d.expectation_gap) {
+    const eg = d.expectation_gap;
+    items.push({ type: "info",
+      text: `<strong>Expectation Gap (${eg.score}/10)</strong>: ${eg.primary_narrative}` });
   }
-
-  // ── Verdict Summary (clean numbered "why" — top of stack) ──────────────
-  // Replaces the dense flag list with a 3-bullet explanation users can read.
-  if (d.verdict_summary) {
-    const vs = d.verdict_summary;
-    const colorMap = {
-      green: { bg: 'rgba(35,200,120,0.08)',  border: 'rgba(35,200,120,0.45)',  accent: '#23c878' },
-      blue:  { bg: 'rgba(80,140,240,0.08)',  border: 'rgba(80,140,240,0.45)',  accent: '#508cf0' },
-      amber: { bg: 'rgba(240,180,60,0.08)',  border: 'rgba(240,180,60,0.45)',  accent: '#f0b43c' },
-      red:   { bg: 'rgba(240,80,80,0.08)',   border: 'rgba(240,80,80,0.45)',   accent: '#f05050' },
-    };
-    const c = colorMap[vs.color] || colorMap.blue;
-    const reasonHtml = (vs.reasons || []).map((r, i) =>
-      `<div class="vs-reason"><span class="vs-num">${i+1}</span><span class="vs-txt">${escHtml(r)}</span></div>`
-    ).join('');
-    const verdictHtml = vs.verdict ? `<div class="vs-verdict">→ ${escHtml(vs.verdict)}</div>` : '';
-    items.push(
-      `<div class="qi-item verdict-summary" style="background:${c.bg};border-left:3px solid ${c.border};padding:14px 16px;margin-bottom:8px;border-radius:6px;">` +
-        `<div class="vs-headline" style="color:${c.accent};font-weight:600;font-size:14px;margin-bottom:10px;letter-spacing:.3px;">${escHtml(vs.headline)}</div>` +
-        `<div class="vs-reasons" style="font-size:12.5px;line-height:1.55;color:rgba(255,255,255,0.85);">${reasonHtml}</div>` +
-        verdictHtml +
-      `</div>`
-    );
-  }
-
-  // ── Expectation Gap Engine ────────────────────────────────────────────────
-  // This is the top insight: "where is the market wrong?"
-  const eg = d.expectation_gap;
-  if (eg) {
-    const gapAbs  = Math.abs(eg.gap_pp);
-    const gapSign = eg.gap_pp > 0 ? '+' : '';
-    const score   = eg.score ?? 0;
-
-    // Score-based intensity: dim (≤2), moderate (2-5), high (5+)
-    const egCls   = score >= 5 ? 'qi-risk' : score >= 2 ? 'qi-warn' : 'qi-good';
-    const egIcon  = score >= 5 ? '🎯' : score >= 2 ? '⚡' : '✓';
-
-    // Heat bar: filled proportionally to score/10
-    const barPct  = Math.min(score / 10 * 100, 100).toFixed(0);
-    const barCol  = score >= 5 ? 'var(--red)' : score >= 2 ? 'var(--gold)' : 'var(--green)';
-
-    const heatBar = `<span style="display:inline-block;width:60px;height:4px;background:rgba(255,255,255,0.1);border-radius:2px;vertical-align:middle;margin:0 5px 1px">` +
-      `<span style="display:block;width:${barPct}%;height:100%;background:${barCol};border-radius:2px"></span></span>`;
-
-    let egBody = `<strong>Expectation Gap</strong> ${heatBar} <span style="font-size:10px;opacity:.7">score ${score}/10</span><br>` +
-      `<span style="font-size:12px">${escHtml(eg.primary_narrative)}</span>`;
-
-    if (eg.verdict_narrative) {
-      egBody += `<br><span style="font-size:11px;opacity:.75;margin-top:2px;display:block">${escHtml(eg.verdict_narrative)}</span>`;
-    }
-
-    qi(egIcon, egBody, egCls);
-
-    // Sub-items: unrealistic flags
-    (eg.flags || []).forEach(flag => {
-      const fCls = flag.includes('fewer than') || flag.includes('hyper') ? 'qi-risk'
-                 : flag.includes('2×') ? 'qi-warn' : 'qi-info';
-      qi('▸', `<span style="font-size:11px">${escHtml(flag)}</span>`, fCls);
-    });
-  }
-
-  // ── Moat premium ──────────────────────────────────────────────────────────
-  if (d.moat_detected && d.moat_path) {
-    const waccLine = d.moat_wacc_delta  ? `WACC −${d.moat_wacc_delta.toFixed(1)}pp`        : '';
-    const multLine = d.moat_mult_premium ? `exit multiples +${d.moat_mult_premium}%`        : '';
-    const extras   = [waccLine, multLine].filter(Boolean).join(' · ');
-    qi('◆', `<strong>${escHtml(d.moat_path)}</strong> moat detected${extras ? ' — ' + extras : ''}`, 'qi-cyan');
-  }
-
-  // ── Sector specialist methodology ─────────────────────────────────────────
-  if (d.sector_val_label) {
-    const icon = d.valuation_method === 'banking'    ? '⬢'
-               : d.valuation_method === 'biotech'    ? '⬡'
-               : d.valuation_method === 'dcf_energy' ? '◉' : '◈';
-    qi(icon, `<strong>Specialist method</strong> — ${escHtml(d.sector_val_label)}`, 'qi-cyan');
-  }
-
-  // ── Structural Transformer (full — TSLA-style) ────────────────────────────
-  if (d.structural_transformer) {
-    const rate   = d.st_capex_addback_rate_pct != null ? `${d.st_capex_addback_rate_pct}%` : '50%';
-    const ab     = d.st_capex_addback_bn  != null ? ` · $${d.st_capex_addback_bn.toFixed(1)}B add-back` : '';
-    const robo   = d.st_robotaxi_s2_applied ? ' · +15% Robotaxi/FSD Stage 2 premium' : '';
-    qi('⚡', `<strong>Structural Transformer</strong> — ${rate} CapEx treated as growth investment${ab} · 35× EV/EBITDA · WACC ≤9%${robo}`, 'qi-cyan');
-  }
-  // ── Platform Logistics normalisation (partial — AMZN-style) ──────────────
-  else if (d.st_capex_addback_bn != null) {
-    const rate = d.st_capex_addback_rate_pct != null ? `${d.st_capex_addback_rate_pct}%` : '20%';
-    const ab   = `$${d.st_capex_addback_bn.toFixed(1)}B add-back`;
-    qi('📦', `<strong>Platform Logistics Normalisation</strong> — ${rate} of logistics CapEx as growth investment (${ab})`, 'qi-info');
-  }
-
-  // ── Backbone (full Stage 1 for all projection years) ──────────────────────
-  if (d.backbone_stage1_extended) {
-    qi('◆', `<strong>Backbone Platform</strong> — Stage 1 growth extended for all ${d.projection_years || 10} projection years`, 'qi-cyan');
-  }
-
-  // ── Cash-rich WACC cap ────────────────────────────────────────────────────
-  if (d.cash_rich_wacc_applied) {
-    qi('◆', `<strong>Cash-Rich</strong> — $50B+ net cash position · WACC capped at 9%`, 'qi-cyan');
-  }
-
-  // ── Momentum / catalyst premium ───────────────────────────────────────────
-  if (d.momentum_premium_pct != null && d.momentum_premium_pct > 0) {
-    qi('▲', `<strong>Catalyst Premium</strong> — +${d.momentum_premium_pct}% applied to intrinsic value`, 'qi-good');
-  }
-
-  // ── Risk WACC uplift ──────────────────────────────────────────────────────
-  if (d.wacc_risk_applied) {
-    qi('⚠', `<strong>Risk Adjustment</strong> — Material risk factor detected · WACC +1%`, 'qi-risk');
-  }
-
-  // ── FIN 415 FCFE model badge ───────────────────────────────────────────────
   if (d.fin415_used) {
-    const keStr   = d.fin415_ke   != null ? `Ke = ${d.fin415_ke}%` : '';
-    const ctStr   = d.fin415_conservative != null ? ` · Conservative Target: $${d.fin415_conservative.toFixed(2)}` : '';
-    const bwStr   = d.fin415_bear_wacc   != null ? ` · Bear WACC (Ke+3%): $${d.fin415_bear_wacc.toFixed(2)}` : '';
-    const bgStr   = d.fin415_bear_growth != null ? ` · Bear Growth (Rev−2%): $${d.fin415_bear_growth.toFixed(2)}` : '';
-    // Verification console log — FIN 415 Sultan Split accuracy check
-    const preIV   = d.consensus_anchor_pre_iv ?? iv;
-    const atNum   = parseFloat(d.target_price  ?? 0);
-    const expected = preIV != null && atNum ? (0.90 * preIV + 0.10 * atNum) : null;
-    const diff     = expected != null && iv != null ? Math.abs(iv - expected) : null;
-    console.log(
-      `[FIN 415] Source: FIN 415 Template | ${keStr}${ctStr}${bwStr}${bgStr}`,
-      diff != null
-        ? `| Sultan Split diff: $${diff.toFixed(4)} (${diff < 0.01 ? '✅ within $0.01' : '⚠ exceeds $0.01'})`
-        : ''
-    );
-    qi('📐', `<strong>FIN 415 FCFE Model</strong> — ${keStr}${ctStr} · Sultan Split: 90% model + 10% analyst`
-      + `<span style="font-size:10px;opacity:.55;margin-left:6px;">Source: FIN 415 Template</span>`, 'qi-cyan');
+    items.push({ type: "info",
+      text: `<strong>FIN 415 FCFE Model</strong> active — Ke = ${d.fin415_ke}%, Conservative target $${d.fin415_conservative}` });
   }
-
-  // ── Sultan Split (consensus anchor) ───────────────────────────────────────
-  if (d.analyst_adjusted) {
-    const preIv = d.consensus_anchor_pre_iv != null
-      ? ` · Model: $${d.consensus_anchor_pre_iv.toFixed(2)} → Blended: $${iv != null ? iv.toFixed(2) : '—'}` : '';
-    const atStr = d.target_price != null
-      ? ` · Analyst target: $${parseFloat(d.target_price).toFixed(2)}` : '';
-    qi('⚖', `<strong>Sultan Split</strong> — 90% model · 10% analyst${atStr}${preIv}`, 'qi-warn');
-  }
-
-  // ── Reality Reconciliation (Smart Market Mismatch Layer) ─────────────────
   if (d.reality_reconciled) {
-    const pre = d.reality_pre_iv != null ? ` · Pre-blend: $${d.reality_pre_iv.toFixed(2)}` : '';
-    const reason = d.reality_reason ? `<div style="font-size:11px;opacity:.7;margin-top:4px;">${escHtml(d.reality_reason)}</div>` : '';
-    qi('🧭', `<strong>Reality Reconciliation</strong> — Model gap detected; blended 55% model · 25% analyst · 20% market${pre}${reason}`, 'qi-cyan');
-  } else if (d.reality_reason) {
-    // Speculative-gap or analyst-aligned-with-model case — flag but don't blend
-    qi('▴', `<strong>Market Divergence</strong> — ${escHtml(d.reality_reason)}`, 'qi-warn');
+    items.push({ type: "info",
+      text: `<strong>Reality Reconciliation</strong>: ${escHtml(d.reality_reason)}` });
   }
-
-  // ── "Priced For" Verdict (replaces simple over/undervalued tag) ─────────
-  if (d.priced_for) {
-    const pf = d.priced_for;
-    const colorMap = { green: 'qi-good', blue: 'qi-cyan', amber: 'qi-warn', red: 'qi-risk', neutral: 'qi-cyan' };
-    const cls = colorMap[pf.color] || 'qi-cyan';
-    const ceiling = d.sector_growth_ceiling_label ? ` · Sector: ${escHtml(d.sector_growth_ceiling_label)} (${d.sector_growth_ceiling_pct}% ceiling)` : '';
-    qi('🎯', `<strong>${escHtml(pf.label)}</strong> — ${escHtml(pf.narrative)}${ceiling}`, cls);
+  if (d.is_cash_rich && d.cash_rich_narrative) {
+    items.push({ type: "good", text: `<strong>Cash Rich</strong> — ${escHtml(d.cash_rich_narrative)}` });
   }
-
-  // ── Mag 7 Concentration Tag ─────────────────────────────────────────────
   if (d.is_mag7) {
-    qi('★', `<strong>Mag 7 Member</strong> — Concentration risk: 6 of 7 Mag 7 stocks tend to correlate with the AI productivity thesis. A 10–15% pullback in that thesis could unwind multiple positions simultaneously.`, 'qi-warn');
+    items.push({ type: "warn",
+      text: `<strong>Mag 7 Member</strong> — concentration risk: 6 of 7 Mag 7 stocks correlate with the AI productivity thesis. A 10–15% pullback could unwind multiple positions simultaneously.` });
   }
-
-  // ── Debt + Momentum Classifier ──────────────────────────────────────────
-  if (d.debt_momentum && d.debt_momentum.classification && d.debt_momentum.classification !== 'stable') {
+  if (d.debt_momentum && d.debt_momentum.classification && d.debt_momentum.classification !== "stable") {
     const dm = d.debt_momentum;
-    const colorMap = { green: 'qi-good', blue: 'qi-cyan', amber: 'qi-warn', red: 'qi-risk', neutral: 'qi-cyan' };
-    const cls = colorMap[dm.color] || 'qi-cyan';
-    const icon = { deleveraging: '↓', speculative_distress: '⚠', recovery_watch: '👀', healthy_leverage: '✓' }[dm.classification] || '◆';
-    const stats = [];
-    if (dm.debt_to_ebitda    != null) stats.push(`Debt/EBITDA ${dm.debt_to_ebitda}×`);
-    if (dm.interest_coverage != null) stats.push(`Coverage ${dm.interest_coverage}×`);
-    if (dm.debt_trend_pct    != null) stats.push(`Debt trend ${dm.debt_trend_pct > 0 ? '+' : ''}${dm.debt_trend_pct}%`);
-    const statStr = stats.length ? ` · ${stats.join(' · ')}` : '';
-    const flagStr = (dm.flags && dm.flags.length)
-      ? `<div style="font-size:11px;opacity:.7;margin-top:4px;">${dm.flags.map(f => '▸ ' + escHtml(f)).join('<br>')}</div>`
-      : '';
-    qi(icon, `<strong>${escHtml(dm.label)}</strong> — ${escHtml(dm.narrative)}${statStr}${flagStr}`, cls);
+    const colorMap = { deleveraging: "good", speculative_distress: "risk", recovery_watch: "warn", healthy_leverage: "info" };
+    items.push({ type: colorMap[dm.classification] || "info",
+      text: `<strong>${escHtml(dm.label)}</strong> — ${escHtml(dm.narrative)}` });
+  }
+  if (d.moat_detected) {
+    items.push({ type: "good",
+      text: `<strong>${escHtml(d.moat_path)}</strong> moat detected — WACC adjustment ${d.moat_wacc_delta}pp.` });
+  }
+  if (d.structural_transformer) {
+    items.push({ type: "info",
+      text: `<strong>Structural Transformer</strong> — platform optionality (AI/robotics/autonomy) priced on top of base.` });
+  }
+  if (d.has_positive_catalyst) items.push({ type: "good", text: `<strong>Positive catalyst</strong> in recent filings.` });
+  if (d.has_material_risk)     items.push({ type: "risk", text: `<strong>Material risk</strong> in recent filings.` });
+  (d.dcf_notes || []).forEach(n => items.push(n));
+
+  if (items.length === 0) {
+    list.innerHTML = `<div class="text-muted" style="padding: 8px 0;">No additional notes for this stock.</div>`;
+    return;
   }
 
-  // ── Multiples fallback ────────────────────────────────────────────────────
-  if (d.multiples_val && (!d.dcf_available || iv == null)) {
-    qi('◈', `<strong>Industry Multiples</strong> — DCF unavailable; secondary valuation applied (${escHtml(d.multiples_method || '')})`, 'qi-warn');
-  }
-
-  // ── DCF warning text ──────────────────────────────────────────────────────
-  if (d.dcf_warning) {
-    qi('⚠', escHtml(d.dcf_warning), 'qi-warn');
-  }
-
-  // ── DCF notes ─────────────────────────────────────────────────────────────
-  notes.forEach(n => {
-    const cls  = n.type === 'warn' ? 'qi-warn' : 'qi-info';
-    const icon = n.type === 'warn' ? '⚠' : 'ℹ';
-    qi(icon, escHtml(n.text), cls);
-  });
-
-  // ── Catalyst insights ─────────────────────────────────────────────────────
-  if (d.has_positive_catalyst && !(d.momentum_premium_pct > 0)) {
-    qi('◈', '<strong>Positive catalyst</strong> detected in recent filings', 'qi-good');
-  }
-  if (d.has_material_risk && !d.wacc_risk_applied) {
-    qi('⚠', '<strong>Material risk</strong> noted in recent filings', 'qi-risk');
-  }
-  (d.catalyst_insights || []).forEach(line => {
-    qi('▸', escHtml(line), 'qi-info');
-  });
-
-  // ── User preference: show ONLY the verdict summary at the top.
-  // All other flags (Expectation Gap, FIN 415, Sultan Split, Reality
-  // Reconciliation, Mag 7, debt classifier, SEC filings, etc.) are still
-  // produced above but filtered here so the panel stays clean.  Detailed
-  // analysis remains accessible via the "View Detailed Analysis" drawer.
-  const verdictOnly = items.filter(html => html.includes('verdict-summary'));
-  if (verdictOnly.length > 0) {
-    listEl.innerHTML = verdictOnly.join('');
-    el.classList.remove('hidden');
-  } else {
-    listEl.innerHTML = '';
-    el.classList.add('hidden');
-  }
+  list.innerHTML = items.map(n =>
+    `<div class="note-item ${n.type || 'info'}">${n.text}</div>`
+  ).join("");
 }
 
-/* ── Scenario Analysis ────────────────────────────────────── */
-function renderScenarios(sc, price) {
-  const el = $('scenarioCard');
-  if (!sc || !el) return;
+/* ════════════════════════════════════════════════════════════════════════
+   Charts
+   ════════════════════════════════════════════════════════════════════════ */
 
-  function scCard(label, data, cls) {
-    if (!data || data.value == null) return '';
-    const up = data.upside;
-    const upCls = up > 0 ? 'green' : 'red';
-    const upSign = up > 0 ? '+' : '';
-    // Scenario integrity flags
-    let flags = '';
-    if (data.distressed)   flags += `<span class="sc-flag sc-flag--distressed">Distressed</span>`;
-    if (data.floored)      flags += `<span class="sc-flag sc-flag--floored">Floor Applied</span>`;
-    if (data.recalculated) flags += `<span class="sc-flag sc-flag--recalc">Re-calculated</span>`;
-    return `
-      <div class="sc-case sc-${cls}">
-        <div class="sc-label">${label}</div>
-        <div class="sc-weight">${data.weight}% weight</div>
-        <div class="sc-value">${data.value === 0 ? '<span style="color:var(--red)">$0.00</span>' : fmtPrice(data.value)}</div>
-        <div class="sc-upside ${upCls}">${upSign}${fmtPct(up)} vs current</div>
-        <div class="sc-assumptions">
-          <span>g₁ ${fmtPct(data.s1)}</span>
-          <span>WACC ${fmtPct(data.wacc)}</span>
-        </div>
-        ${flags ? `<div class="sc-flags">${flags}</div>` : ''}
-      </div>`;
-  }
+let priceChartInstance, dcfChartInstance;
 
-  const weightedUpCls = sc.weighted_upside > 0 ? 'green' : 'red';
-  const weightedSign  = sc.weighted_upside > 0 ? '+' : '';
+function renderPriceChart(history) {
+  const canvas = $("priceChart");
+  if (!canvas || !history || history.length === 0) return;
+  const ctx = canvas.getContext("2d");
+  if (priceChartInstance) priceChartInstance.destroy();
 
-  // Transparency note — shown when Consensus Anchor was applied to scenarios
-  const anchorNote = sc.consensus_anchored
-    ? `<div class="sc-anchor-note">
-        <span class="sc-anchor-icon">⚖</span>
-        Values adjusted by Consensus Anchor for market alignment. (90% model · 10% analyst consensus)
-       </div>`
-    : '';
+  const labels = history.map(h => h.date);
+  const prices = history.map(h => h.close);
 
-  el.innerHTML = `
-    <div class="sc-header">
-      <h3 class="card-title">Scenario Analysis</h3>
-      <span class="card-sub">50% Base · 25% Bull · 25% Bear</span>
-    </div>
-    ${anchorNote}
-    <div class="sc-grid">
-      ${scCard('Base Case',    sc.base, 'base')}
-      ${scCard('Bull Case',    sc.bull, 'bull')}
-      ${scCard('Bear Case',    sc.bear, 'bear')}
-    </div>
-    <div class="sc-weighted">
-      <span class="sc-wlabel">Probability-Weighted Fair Value</span>
-      <span class="sc-wvalue">${fmtPrice(sc.weighted)}</span>
-      <span class="sc-wupside ${weightedUpCls}">${weightedSign}${fmtPct(sc.weighted_upside)} potential upside</span>
-    </div>`;
-}
+  // Line color: green if up, red if down over period
+  const up = prices[prices.length - 1] >= prices[0];
+  const color = up ? "#34d399" : "#f87171";
 
-/* ── Stats strip item ─────────────────────────────────────── */
-function statItem(label, value, cls = '') {
-  return `<div class="stat-item">
-    <div class="stat-label">${label}</div>
-    <div class="stat-value ${cls}">${value}</div>
-  </div>`;
-}
-
-/* ── Price Chart ──────────────────────────────────────────── */
-function renderPriceChart(prices, d) {
-  if (priceChart) { priceChart.destroy(); priceChart = null; }
-  if (!prices.length) return;
-
-  const labels     = prices.map(p => p.date);
-  const closes     = prices.map(p => p.close);
-  const iv         = d && d.intrinsic_value;
-  const last       = closes[closes.length - 1];
-  const lineColor  = (iv && last <= iv) ? '#00e676' : '#ff3d5a';
-
-  const datasets = [{
-    label: 'Price',
-    data: closes,
-    borderColor: lineColor,
-    backgroundColor: lineColor + '15',
-    fill: true,
-    borderWidth: 2,
-    pointRadius: 0,
-    tension: 0.1,
-  }];
-
-  if (iv && d.dcf_available) {
-    datasets.push({
-      label: `IV ${fmtPrice(iv)}`,
-      data: closes.map(() => iv),
-      borderColor: '#ffb300',
-      borderWidth: 1.5,
-      borderDash: [5, 5],
-      pointRadius: 0,
-      fill: false,
-      tension: 0,
-    });
-  }
-
-  priceChart = new Chart($('priceChart').getContext('2d'), {
-    type: 'line',
-    data: { labels, datasets },
-    options: baseChartOpts(v => '$' + parseFloat(v).toFixed(0),
-                           ctx => `${ctx.dataset.label}: $${ctx.parsed.y.toFixed(2)}`)
+  priceChartInstance = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [{
+        data: prices, borderColor: color, borderWidth: 2,
+        backgroundColor: up ? "rgba(52,211,153,0.10)" : "rgba(248,113,113,0.10)",
+        fill: true, tension: 0.25, pointRadius: 0, pointHoverRadius: 4
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: {
+        backgroundColor: "#11151d", borderColor: "rgba(255,255,255,0.08)",
+        borderWidth: 1, titleColor: "#f5f7fa", bodyColor: "#b6bdcb",
+        callbacks: { label: (c) => `$${fmt(c.parsed.y, 2)}` }
+      } },
+      scales: {
+        x: { ticks: { color: "#6b7382", maxRotation: 0, autoSkip: true, maxTicksLimit: 6 }, grid: { display: false } },
+        y: { ticks: { color: "#6b7382", callback: v => `$${fmt(v, 0)}` }, grid: { color: "rgba(255,255,255,0.04)" } }
+      }
+    }
   });
 }
 
-/* ── DCF Chart ────────────────────────────────────────────── */
-function renderDcfChart(d) {
-  if (dcfChart) { dcfChart.destroy(); dcfChart = null; }
-  const fc = d.fcf_chart;
-  if (!fc) return;
+function renderDcfChart(fcfData) {
+  const canvas = $("dcfChart");
+  if (!canvas || !fcfData) return;
+  const ctx = canvas.getContext("2d");
+  if (dcfChartInstance) dcfChartInstance.destroy();
 
-  const labels     = [...fc.projected.labels, 'Terminal'];
-  const projected  = [...fc.projected.values, null];
-  const discounted = [...fc.projected.pvs, +(d.pv_terminal / 1e9).toFixed(2)];
+  const labels = fcfData.years || [];
+  const projected = (fcfData.projected || []).map(v => v / 1e9);
+  const discounted = (fcfData.discounted || []).map(v => v / 1e9);
 
-  dcfChart = new Chart($('dcfChart').getContext('2d'), {
-    type: 'bar',
+  dcfChartInstance = new Chart(ctx, {
+    type: "bar",
     data: {
       labels,
       datasets: [
-        { label: 'Projected FCF', data: projected,  backgroundColor: 'rgba(0,212,255,0.22)', borderColor: '#00d4ff', borderWidth: 1, borderRadius: 3 },
-        { label: 'Present Value', data: discounted, backgroundColor: 'rgba(0,230,118,0.22)', borderColor: '#00e676', borderWidth: 1, borderRadius: 3 },
+        { label: "Projected FCF", data: projected, backgroundColor: "rgba(94,234,212,0.20)", borderColor: "#5eead4", borderWidth: 1, borderRadius: 4 },
+        { label: "Discounted FCF (PV)", data: discounted, backgroundColor: "rgba(96,165,250,0.20)", borderColor: "#60a5fa", borderWidth: 1, borderRadius: 4 },
       ]
     },
-    options: baseChartOpts(v => '$' + v + 'B',
-                           ctx => ctx.parsed.y != null ? `${ctx.dataset.label}: $${ctx.parsed.y.toFixed(2)}B` : null)
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: "#b6bdcb", font: { size: 11 } } },
+        tooltip: {
+          backgroundColor: "#11151d", borderColor: "rgba(255,255,255,0.08)", borderWidth: 1,
+          callbacks: { label: c => `${c.dataset.label}: $${fmt(c.parsed.y, 2)}B` }
+        }
+      },
+      scales: {
+        x: { ticks: { color: "#6b7382" }, grid: { display: false } },
+        y: { ticks: { color: "#6b7382", callback: v => `$${fmt(v, 0)}B` }, grid: { color: "rgba(255,255,255,0.04)" } }
+      }
+    }
   });
 }
 
-/* ── Projection table ─────────────────────────────────────── */
+/* ════════════════════════════════════════════════════════════════════════
+   Projection table
+   ════════════════════════════════════════════════════════════════════════ */
+
 function renderProjectionTable(d) {
-  const half = Math.floor(d.projection_years / 2);
-  $('projectionBody').innerHTML = (d.projected_fcf || []).map(r => `
-    <tr class="${r.year > half ? 'stage2' : ''}">
-      <td>Year ${r.year}</td><td>${r.year <= half ? 'Stage 1' : 'Stage 2'}</td>
-      <td>${fmtPct(r.growth * 100)}</td><td>${fmtBig(r.fcf)}</td><td>${fmtBig(r.pv)}</td>
-    </tr>`).join('');
+  const body = $("projBody");
+  const foot = $("projFoot");
+  const proj = d.projected_fcf || [];
 
-  $('projectionFoot').innerHTML = `
-    <tr><td colspan="3">PV Terminal Value</td><td></td><td>${fmtBig(d.pv_terminal)}</td></tr>
-    <tr><td colspan="3"><strong>Enterprise Value</strong></td><td></td><td><strong>${fmtBig(d.enterprise_value)}</strong></td></tr>
-    <tr><td colspan="3">Less: Net Debt</td><td></td><td>${fmtBig(d.net_debt)}</td></tr>
-    <tr><td colspan="3"><strong>Equity Value</strong></td><td></td><td><strong>${fmtBig(d.equity_value)}</strong></td></tr>
-    <tr><td colspan="3"><strong>Intrinsic Value / Share</strong></td><td></td><td><strong style="color:var(--cyan)">${fmtPrice(d.intrinsic_value)}</strong></td></tr>`;
-}
-
-/* ── Financial Statements ─────────────────────────────────── */
-let statementsData = null;
-let activeTab      = 'income';
-
-async function loadStatements(ticker) {
-  $('statementsLoading').classList.remove('hidden');
-  $('statementsContent').classList.add('hidden');
-  try {
-    const res = await fetch('/api/statements?ticker=' + ticker);
-    statementsData = await res.json();
-    renderStatements('income');
-  } catch { $('statementsLoading').textContent = 'Could not load statements.'; }
-}
-
-document.querySelectorAll('.stmt-tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.stmt-tab').forEach(t => t.classList.remove('active'));
-    tab.classList.add('active');
-    activeTab = tab.dataset.tab;
-    if (statementsData) renderStatements(activeTab);
-  });
-});
-
-function renderStatements(tab) {
-  $('statementsLoading').classList.add('hidden');
-  const content = $('statementsContent');
-  const data    = statementsData && statementsData[tab];
-  const finCcy  = statementsData && statementsData.financialCurrency;
-  const trdCcy  = statementsData && statementsData.tradingCurrency;
-  const hasFxNote = finCcy && trdCcy && finCcy !== trdCcy;
-
-  if (!data || !data.rows || !data.rows.length) {
-    content.innerHTML = '<p style="color:var(--muted);font-size:13px;padding:12px 0">No data available.</p>';
-    content.classList.remove('hidden');
+  if (proj.length === 0) {
+    body.innerHTML = `<tr><td colspan="4" class="text-muted">No projection data.</td></tr>`;
+    foot.innerHTML = "";
     return;
   }
 
-  const cols = data.columns || [];
-  const bodyRows = data.rows.map(r => {
-    if (r.section) {
-      return `<tr class="stmt-section-header"><td colspan="${cols.length + 1}">${r.label}</td></tr>`;
+  body.innerHTML = proj.map(r =>
+    `<tr>
+      <td>Year ${r.year}</td>
+      <td>${fmtBig(r.fcf)}</td>
+      <td>${r.discount_factor != null ? fmt(r.discount_factor, 4) : '—'}</td>
+      <td>${fmtBig(r.pv)}</td>
+    </tr>`
+  ).join("");
+
+  if (d.total_pv_fcf || d.pv_terminal) {
+    foot.innerHTML = `
+      <tr><td colspan="3">PV of explicit period</td><td>${fmtBig(d.total_pv_fcf)}</td></tr>
+      <tr><td colspan="3">PV of terminal value</td><td>${fmtBig(d.pv_terminal)}</td></tr>
+      <tr><td colspan="3">Enterprise value</td><td>${fmtBig(d.enterprise_value)}</td></tr>
+      <tr><td colspan="3">Less: net debt</td><td>${fmtBig(-(d.net_debt || 0))}</td></tr>
+      <tr><td colspan="3"><strong>Equity value</strong></td><td><strong>${fmtBig(d.equity_value)}</strong></td></tr>
+    `;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Financial statements (income / balance / cashflow)
+   ════════════════════════════════════════════════════════════════════════ */
+
+function renderFinancialsTabs(d) {
+  const body = $("finBody");
+  function pickTab(key) {
+    const data = d[`${key}_statement`] || null;
+    if (!data || !data.rows) {
+      body.innerHTML = `<tr><td class="text-muted">No ${key} statement data available.</td></tr>`;
+      return;
     }
-    return `<tr>
-      <td class="stmt-label">${r.label}</td>
-      ${r.values.map(v => `<td>${fmtStmt(v)}</td>`).join('')}
-    </tr>`;
-  }).join('');
+    const headers = data.periods || [];
+    const rows = data.rows || [];
+    const headerRow = `<tr><th>Item</th>${headers.map(h => `<th>${escHtml(h)}</th>`).join("")}</tr>`;
+    const bodyRows = rows.map(r =>
+      `<tr><td>${escHtml(r.label)}</td>${r.values.map(v => `<td>${v == null ? "—" : fmtBig(v)}</td>`).join("")}</tr>`
+    ).join("");
+    body.innerHTML = headerRow + bodyRows;
+  }
 
-  const ccyNote = hasFxNote
-    ? `<div class="stmt-ccy-note">Values in <strong>${finCcy}</strong> (company reporting currency) · Stock price quoted in <strong>${trdCcy}</strong></div>`
-    : '';
-
-  content.innerHTML = `
-    ${ccyNote}
-    <table class="stmt-table">
-      <thead>
-        <tr>
-          <th>Item (${finCcy || 'USD'})</th>
-          ${cols.map(c => `<th>${c.slice(0,7)}</th>`).join('')}
-        </tr>
-      </thead>
-      <tbody>${bodyRows}</tbody>
-    </table>`;
-  content.classList.remove('hidden');
+  document.querySelectorAll("[data-fin-tab]").forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll("[data-fin-tab]").forEach(b => b.classList.toggle("active", b === btn));
+      pickTab(btn.dataset.finTab);
+    };
+  });
+  pickTab("income");
 }
 
-function fmtStmtLabel(s) {
-  // Convert camelCase/PascalCase yfinance labels to readable form
-  return s.replace(/([a-z])([A-Z])/g, '$1 $2')
-          .replace(/ And /g, ' & ')
-          .replace(/ Of /g, ' of ')
-          .replace(/ In /g, ' in ')
-          .replace(/ From /g, ' from ');
+/* ════════════════════════════════════════════════════════════════════════
+   Search + suggestions
+   ════════════════════════════════════════════════════════════════════════ */
+
+function setupSearch() {
+  const input = $("tickerInput");
+  const form  = $("searchForm");
+  const dd    = $("searchDropdown");
+  let timer = null;
+
+  input.addEventListener("input", () => {
+    clearTimeout(timer);
+    const q = input.value.trim();
+    if (!q) { dd.classList.add("hidden"); return; }
+    timer = setTimeout(async () => {
+      const results = await searchSuggestions(q);
+      if (results.length === 0) { dd.classList.add("hidden"); return; }
+      dd.innerHTML = results.slice(0, 8).map(r =>
+        `<div class="search-result" data-ticker="${escHtml(r.symbol || r.ticker)}">
+          <span class="search-result__ticker">${escHtml(r.symbol || r.ticker)}</span>
+          <span class="search-result__name">${escHtml(r.name || r.shortname || '')}</span>
+        </div>`
+      ).join("");
+      dd.classList.remove("hidden");
+      dd.querySelectorAll(".search-result").forEach(el => {
+        el.onclick = () => {
+          input.value = el.dataset.ticker;
+          dd.classList.add("hidden");
+          submit();
+        };
+      });
+    }, 180);
+  });
+
+  input.addEventListener("blur", () => setTimeout(() => dd.classList.add("hidden"), 200));
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    submit();
+  });
+
+  function submit() {
+    const t = input.value.trim().toUpperCase();
+    if (!t) return;
+    const params = {};
+    const yrs = $("advYrs").value;
+    const s1  = $("advS1").value;
+    const s2  = $("advS2").value;
+    const tg  = $("advTg").value;
+    if (yrs) params.years = yrs;
+    if (s1)  params.s1 = s1;
+    if (s2)  params.s2 = s2;
+    if (tg)  params.terminal = tg;
+    analyze(t, params);
+  }
 }
 
-function fmtStmt(v) {
-  if (v == null) return '<span style="color:var(--muted)">—</span>';
-  const n = parseFloat(v);
-  if (isNaN(n)) return v;
-  const abs = Math.abs(n);
-  const neg = n < 0;
-  const s   = neg ? '<span style="color:var(--red)">(' : '<span>';
-  const e   = neg ? ')</span>' : '</span>';
-  if (abs >= 1e9)  return s + '$' + (abs/1e9).toFixed(2)  + 'B' + e;
-  if (abs >= 1e6)  return s + '$' + (abs/1e6).toFixed(2)  + 'M' + e;
-  if (abs >= 1)    return s + (neg ? '' : '') + abs.toFixed(2) + e;
-  return s + abs.toFixed(2) + e;
+function setupAdvancedToggle() {
+  const btn = $("advancedToggle");
+  const panel = $("advancedPanel");
+  btn.onclick = () => panel.classList.toggle("hidden");
 }
 
-/* ── Shared chart options ─────────────────────────────────── */
-function baseChartOpts(yFmt, tooltipFmt) {
-  return {
-    responsive: true,
-    maintainAspectRatio: false,
-    interaction: { mode: 'index', intersect: false },
-    plugins: {
-      legend: {
-        position: 'top', align: 'end',
-        labels: { color: '#4e5a7a', font: { size: 11 }, boxWidth: 12, padding: 14 }
-      },
-      tooltip: {
-        backgroundColor: '#0d0f1c', borderColor: '#252b42', borderWidth: 1,
-        titleColor: '#4e5a7a', bodyColor: '#eef0f8', padding: 10,
-        callbacks: { label: ctx => tooltipFmt(ctx) }
-      }
-    },
-    scales: {
-      x: {
-        ticks: {
-          color: '#4e5a7a', font: { size: 10 }, maxTicksLimit: 8,
-          callback: function(value) {
-            const lbl = this.getLabelForValue(value);
-            // For daily data, show MM-DD only
-            if (typeof lbl === 'string' && lbl.match(/^\d{4}-\d{2}-\d{2}$/))
-              return lbl.slice(5);
-            return lbl;
-          }
-        },
-        grid: { color: '#1e2238' }
-      },
-      y: {
-        ticks: { color: '#4e5a7a', font: { size: 11 }, callback: yFmt },
-        grid:  { color: '#1e2238' }
-      }
-    }
+function setupCopyButton() {
+  const btn = $("copyBtn");
+  const txt = $("copyBtnTxt");
+  btn.onclick = () => {
+    if (!_LAST_DATA) return;
+    const d = _LAST_DATA;
+    const summary = [
+      `${d.company_name} (${d.ticker})`,
+      `Price: ${fmtPrice(d.current_price)}  ·  VALUS Fair Value: ${fmtPrice(d.intrinsic_value)}`,
+      `Margin of Safety: ${fmtPct(d.margin_of_safety)}`,
+      `Verdict: ${d.priced_for?.label || ""}`,
+      d.verdict_summary?.verdict || "",
+    ].filter(Boolean).join("\n");
+    navigator.clipboard.writeText(summary).then(() => {
+      btn.classList.add("success");
+      txt.textContent = "✓ Copied";
+      setTimeout(() => { btn.classList.remove("success"); txt.textContent = "Copy summary"; }, 1500);
+    });
   };
 }
 
-/* ── Utility ──────────────────────────────────────────────── */
-function peColor(pe, fwd = false) {
-  if (pe == null || isNaN(pe) || pe < 0) return 'muted';
-  const hi = fwd ? 28 : 35, lo = fwd ? 12 : 15;
-  return pe > hi ? 'red' : pe < lo ? 'green' : '';
-}
+/* ════════════════════════════════════════════════════════════════════════
+   Boot
+   ════════════════════════════════════════════════════════════════════════ */
 
-function ratingBadge(r, count) {
-  if (!r || r === 'N/A' || r === 'none') return '—';
-  const key   = r.toLowerCase().replace(/_/g, '');
-  const map   = { strongbuy:'Strong Buy', buy:'Buy', hold:'Hold', underperform:'Underperform', sell:'Sell' };
-  const label = map[key] || r;
-  const cls   = ['buy','strongbuy'].includes(key) ? 'green' : ['sell','underperform'].includes(key) ? 'red' : 'gold';
-  return `<span class="value ${cls}">${label}${count ? ` (${count})` : ''}</span>`;
-}
+document.addEventListener("DOMContentLoaded", () => {
+  setupSearch();
+  setupAdvancedToggle();
+  setupCopyButton();
+});

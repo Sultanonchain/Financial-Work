@@ -3,299 +3,287 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="description" content="VALUS — Institutional-grade DCF valuation engine"/>
   <title>VALUS — Institutional Research Tool</title>
   <link rel="stylesheet" href="/static/css/style.css"/>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"/>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
-<!-- HEADER -->
+<!-- ── HEADER ─────────────────────────────────────────────────────────── -->
 <header class="site-header">
-  <div class="header-inner">
-    <div class="logo">
-      <div class="logo-icon">V</div>
-      <span class="logo-text">VALUS<span class="logo-sep"> | </span><span class="logo-sub">Institutional Research Tool</span></span>
+  <div class="container site-header__inner">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">V</div>
+      <span class="brand-name">VALUS</span>
+      <span class="brand-divider"></span>
+      <span class="brand-tag">Institutional Research Tool</span>
     </div>
-    <span class="nfa-badge">⚠ Not Financial Advice</span>
+    <span class="disclaimer-pill">⚠ Not Financial Advice</span>
   </div>
 </header>
 
-<!-- HERO -->
+<!-- ── HERO SEARCH ────────────────────────────────────────────────────── -->
 <section class="hero">
-  <div class="hero-inner">
-    <div class="hero-tag"><span class="hero-tag-dot"></span>Live Data · Yahoo Finance</div>
-    <h1>DCF Valuation<br/><em>in seconds.</em></h1>
-    <p class="hero-sub">Type a ticker or company name. Get intrinsic value, live charts, and a full financial breakdown.</p>
+  <div class="container">
+    <h1 class="hero__title">
+      DCF valuation,<br/>
+      institutional-grade.
+    </h1>
+    <p class="hero__subtitle">
+      Type any ticker. Get a 10-year FCFE/FCFF model with reality reconciliation,
+      sector-aware growth ceilings, and a transparent breakdown of every assumption.
+    </p>
 
-    <div class="search-wrap">
-      <div class="search-bar" id="searchBar">
-        <input id="tickerInput" type="text" placeholder="e.g. Apple, AAPL, Microsoft, NVDA…"
-               autocomplete="off" spellcheck="false" maxlength="60"/>
-        <button id="analyzeBtn" onclick="runAnalysis()">Analyze →</button>
-      </div>
-      <div id="searchDropdown" class="search-dropdown hidden"></div>
-    </div>
+    <div class="search-shell">
+      <form class="search-bar" id="searchForm" autocomplete="off" role="search">
+        <input
+          id="tickerInput"
+          class="search-input"
+          type="text"
+          placeholder="Ticker or company (e.g. AAPL, Microsoft, Berkshire)"
+          aria-label="Search ticker or company"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button type="submit" class="search-btn">Analyze</button>
+        <div class="search-dropdown hidden" id="searchDropdown" role="listbox"></div>
+      </form>
 
-    <div class="advanced-toggle" onclick="toggleAdvanced()">
-      <span id="advToggleLabel">⚙ Customize DCF Assumptions</span>
-    </div>
-    <div id="advancedPanel" class="advanced-panel hidden">
-      <div class="adv-grid">
-        <label>Stage 1 Growth (Yrs 1–5)<div class="adv-input-wrap"><input id="growth1" type="number" step="0.1" placeholder="auto"/><span class="adv-unit">%</span></div></label>
-        <label>Stage 2 Growth (Yrs 6–10)<div class="adv-input-wrap"><input id="growth2" type="number" step="0.1" placeholder="auto"/><span class="adv-unit">%</span></div></label>
-        <label>Terminal Growth<div class="adv-input-wrap"><input id="terminalGrowth" type="number" step="0.1" value="3.0"/><span class="adv-unit">%</span></div></label>
-        <label>Projection Years<div class="adv-input-wrap"><input id="projYears" type="number" step="1" value="10" min="5" max="15"/><span class="adv-unit">yrs</span></div></label>
+      <button type="button" class="advanced-toggle" id="advancedToggle">
+        <span>⚙</span> Customize DCF assumptions
+      </button>
+
+      <div class="advanced-panel hidden" id="advancedPanel">
+        <div class="advanced-field">
+          <label for="advYrs">Projection years</label>
+          <input id="advYrs" type="number" placeholder="10" min="3" max="20"/>
+        </div>
+        <div class="advanced-field">
+          <label for="advS1">Stage 1 growth (%)</label>
+          <input id="advS1" type="number" placeholder="auto" step="0.1"/>
+        </div>
+        <div class="advanced-field">
+          <label for="advS2">Stage 2 growth (%)</label>
+          <input id="advS2" type="number" placeholder="auto" step="0.1"/>
+        </div>
+        <div class="advanced-field">
+          <label for="advTg">Terminal growth (%)</label>
+          <input id="advTg" type="number" placeholder="2.5" step="0.1"/>
+        </div>
       </div>
     </div>
   </div>
 </section>
 
-<!-- LOADING -->
-<div id="loadingState" class="loading-state hidden">
-  <div class="spinner"></div>
-  <p>Pulling live data for <strong id="loadingTicker"></strong>…</p>
-</div>
-
-<!-- ERROR -->
-<div id="errorState" class="error-state hidden">
-  <div class="error-box"><span class="error-icon">✕</span><p id="errorMsg"></p></div>
-</div>
-
-<!-- RESULTS -->
-<main id="results" class="results hidden">
-
-  <!-- ── HERO (always visible) ─────────────────────────────── -->
-  <!-- Company header — Name · Price · Ticker only -->
-  <div class="company-header">
-    <div class="company-info">
-      <h2 id="companyName"></h2>
-      <div class="company-meta">
-        <span id="tickerBadge" class="badge badge-cyan"></span>
-        <!-- sector / industry rendered inside drawer context strip -->
-      </div>
-    </div>
-    <div class="price-block">
-      <div class="current-price" id="currentPrice"></div>
-      <div class="price-meta" id="priceMeta"></div>
-      <button class="copy-btn" id="copyBtn" onclick="copyAnalysis()" title="Copy analysis summary to clipboard">
-        <span class="copy-btn-icon">⎘</span>
-        <span class="copy-btn-label">Copy Summary</span>
-      </button>
-    </div>
+<!-- ── LOADING / ERROR ────────────────────────────────────────────────── -->
+<section class="container">
+  <div class="loading-shell hidden" id="loading">
+    <div class="spinner" aria-hidden="true"></div>
+    <span>Pulling live data…</span>
   </div>
+  <div class="error-shell hidden" id="error">
+    <span class="error-shell__icon">⚠</span>
+    <span id="errorMsg">Something went wrong.</span>
+  </div>
+</section>
 
-  <!-- Verdict card — IV · Signal · Toggle · MoS -->
-  <div class="verdict-card" id="verdictCard">
-    <div class="verdict-accent"></div>
-    <div class="verdict-main">
+<!-- ── RESULTS ────────────────────────────────────────────────────────── -->
+<main class="results hidden" id="results">
+  <div class="container">
 
-      <!-- Bear / Base / Bull scenario toggle -->
-      <div class="sc-toggle hidden" id="scenarioToggle">
-        <div class="sc-tog-wrap">
-          <button class="sc-tog-btn" data-scenario="bear" onclick="activateScenario('bear')">▼ Bear</button>
-          <button class="sc-tog-btn" data-scenario="base" onclick="activateScenario('base')">◆ Base</button>
-          <button class="sc-tog-btn" data-scenario="bull" onclick="activateScenario('bull')">▲ Bull</button>
-        </div>
-      </div>
-
-      <div class="verdict-body">
-        <div class="verdict-section-left">
-          <div class="verdict-label-row">
-            <span class="verdict-label" id="verdictLabel">Intrinsic Value</span>
+    <!-- HERO VERDICT CARD -->
+    <section class="hero-verdict tier-info" id="heroVerdict" data-tier-class="tier-info">
+      <div class="hero-verdict__head">
+        <div class="hero-verdict__company">
+          <h2 class="hero-verdict__name" id="vName">—</h2>
+          <div class="hero-verdict__ticker">
+            <span class="pill" id="vTicker">—</span>
+            <span id="vSector">—</span>
+            <span>·</span>
+            <span id="vRange">—</span>
           </div>
-          <div class="verdict-value-row">
-            <div class="verdict-value" id="intrinsicValue"></div>
-            <span class="signal-badge hidden" id="signalBadge"></span>
-          </div>
-          <!-- One-sentence 'Why' hook — contextual insight next to signal -->
-          <div class="why-hook hidden" id="whyHook"></div>
         </div>
-        <div class="verdict-divider"></div>
-        <div class="verdict-section-right">
-          <div class="mos-label">Margin of Safety</div>
-          <div class="mos-value" id="mosValue"></div>
-          <div class="mos-track"><div class="mos-fill" id="mosFill"></div></div>
+        <button class="copy-btn" id="copyBtn" type="button">
+          <span id="copyBtnTxt">Copy summary</span>
+        </button>
+      </div>
+
+      <div class="price-iv">
+        <div class="pi-block">
+          <span class="pi-label">Current price</span>
+          <span class="pi-value numeric" id="vPrice">—</span>
+        </div>
+        <div class="mos-bar">
+          <span class="mos-label">Margin of safety</span>
+          <div class="mos-track">
+            <span class="mos-fill" id="vMosFill" style="width: 0%"></span>
+          </div>
+          <span class="mos-pct" id="vMosPct">—</span>
+        </div>
+        <div class="pi-block right">
+          <span class="pi-label">Fair value</span>
+          <span class="pi-value iv numeric" id="vIV">—</span>
         </div>
       </div>
 
-    </div>
-  </div>
+      <div class="tier-badge" id="vTierBadge">
+        <span class="tier-badge__dot"></span>
+        <span id="vTierLabel">—</span>
+      </div>
 
-  <!-- Mini Financial Highlights — 4 key metrics at a glance -->
-  <div class="mini-highlights" id="miniHighlights">
-    <div class="mh-item">
-      <div class="mh-label">Market Cap</div>
-      <div class="mh-value" id="mhMarketCap">—</div>
-    </div>
-    <div class="mh-item">
-      <div class="mh-label">P/E Ratio</div>
-      <div class="mh-value" id="mhPE">—</div>
-    </div>
-    <div class="mh-item">
-      <div class="mh-label">Div. Yield</div>
-      <div class="mh-value" id="mhDivYield">—</div>
-    </div>
-    <div class="mh-item">
-      <div class="mh-label">Analyst Target</div>
-      <div class="mh-value mh-cyan" id="mhTarget">—</div>
-    </div>
-  </div>
+      <div class="reasons" id="vReasons"></div>
 
-  <!-- Scenario Analysis (always visible — key valuation output) -->
-  <div class="card hidden" id="scenarioCard"></div>
+      <div class="verdict-line" id="vVerdict">—</div>
 
-  <!-- Quick Insights — model assumptions & flags (above trigger) -->
-  <div class="quick-insights hidden" id="quickInsights">
-    <div class="qi-header">
-      <span class="qi-header-icon">ℹ</span>
-      <span class="qi-header-label">Model Assumptions &amp; Flags</span>
-    </div>
-    <div class="qi-list" id="qiList"></div>
-  </div>
+      <div class="scenario-toggle" role="tablist" id="scToggle">
+        <button class="scenario-toggle__btn bear" data-sc="bear" role="tab">
+          <span class="scenario-toggle__label">▾ Bear</span>
+          <span class="scenario-toggle__value numeric" data-sc-val="bear">—</span>
+        </button>
+        <button class="scenario-toggle__btn base active" data-sc="base" role="tab">
+          <span class="scenario-toggle__label">◆ Base</span>
+          <span class="scenario-toggle__value numeric" data-sc-val="base">—</span>
+        </button>
+        <button class="scenario-toggle__btn bull" data-sc="bull" role="tab">
+          <span class="scenario-toggle__label">▴ Bull</span>
+          <span class="scenario-toggle__value numeric" data-sc-val="bull">—</span>
+        </button>
+      </div>
+    </section>
 
-  <!-- ── View Analysis trigger ─────────────────────────────── -->
-  <div class="view-analysis-trigger hidden" id="viewAnalysisTrigger">
-    <button class="view-analysis-btn" id="viewAnalysisBtn" onclick="toggleDetailDrawer()">
-      <span id="viewAnalysisBtnText">View Detailed Analysis &amp; Assumptions</span>
-      <span class="view-analysis-arrow" id="viewAnalysisArrow">▾</span>
+    <!-- METHODOLOGY EXPLAINER -->
+    <section class="card methodology" id="methodology">
+      <div class="methodology__head" id="methodologyHead" role="button" tabindex="0" aria-expanded="false">
+        <div class="methodology__title">
+          <div class="methodology__title-icon">∑</div>
+          <span>How VALUS calculated this</span>
+        </div>
+        <span class="methodology__chev">▾</span>
+      </div>
+      <div class="methodology__body">
+        <div class="methodology__inner">
+          <div id="methodSteps"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SCENARIOS -->
+    <section class="card scenarios">
+      <div class="scenarios__head">
+        <span class="scenarios__title">Scenario analysis</span>
+        <span class="scenarios__weight-note" id="scWeightNote">—</span>
+      </div>
+      <div class="scenarios__grid" id="scGrid"></div>
+      <div class="weighted-bar">
+        <span class="weighted-bar__label">Probability-weighted fair value</span>
+        <span class="weighted-bar__value numeric" id="scWeighted">—</span>
+        <span class="weighted-bar__delta numeric" id="scWeightedDelta">—</span>
+      </div>
+    </section>
+
+    <!-- MINI STATS -->
+    <section class="mini-stats">
+      <div class="mini-stat">
+        <span class="mini-stat__label">Market Cap</span>
+        <span class="mini-stat__value numeric" id="mMcap">—</span>
+      </div>
+      <div class="mini-stat">
+        <span class="mini-stat__label">P/E (TTM)</span>
+        <span class="mini-stat__value numeric" id="mPE">—</span>
+      </div>
+      <div class="mini-stat">
+        <span class="mini-stat__label">Dividend Yield</span>
+        <span class="mini-stat__value numeric" id="mDiv">—</span>
+      </div>
+      <div class="mini-stat">
+        <span class="mini-stat__label">Analyst Target</span>
+        <span class="mini-stat__value numeric" id="mTarget">—</span>
+      </div>
+    </section>
+
+    <!-- DETAILED ANALYSIS DRAWER -->
+    <button class="drawer-trigger" id="drawerTrigger" type="button" aria-expanded="false">
+      <span id="drawerTriggerTxt">View detailed analysis</span>
+      <span class="drawer-trigger__chev">▾</span>
     </button>
+
+    <div class="drawer" id="drawer">
+      <div class="drawer__inner">
+        <div class="drawer__content">
+
+          <!-- DCF assumptions -->
+          <div class="card">
+            <div class="section-title">DCF assumptions</div>
+            <div class="assumptions-grid" id="assumptionsGrid"></div>
+          </div>
+
+          <!-- Notes / flags -->
+          <div class="card" id="notesCard">
+            <div class="section-title">Model notes</div>
+            <div class="notes-list" id="notesList"></div>
+          </div>
+
+          <!-- Price chart -->
+          <div class="card">
+            <div class="section-title">Price · last 12 months</div>
+            <div class="chart-wrap"><canvas id="priceChart"></canvas></div>
+          </div>
+
+          <!-- DCF projection chart -->
+          <div class="card">
+            <div class="section-title">Projected free cash flow</div>
+            <div class="chart-wrap"><canvas id="dcfChart"></canvas></div>
+          </div>
+
+          <!-- Projection table -->
+          <div class="card">
+            <div class="section-title">FCF projection table</div>
+            <div class="table-wrap">
+              <table class="dt">
+                <thead>
+                  <tr>
+                    <th>Year</th>
+                    <th>FCF</th>
+                    <th>Discount factor</th>
+                    <th>PV</th>
+                  </tr>
+                </thead>
+                <tbody id="projBody"></tbody>
+                <tfoot id="projFoot"></tfoot>
+              </table>
+            </div>
+          </div>
+
+          <!-- Financials -->
+          <div class="card">
+            <div class="section-title">Financial statements</div>
+            <div class="tabs" id="finTabs">
+              <button class="tab-btn active" data-fin-tab="income">Income</button>
+              <button class="tab-btn" data-fin-tab="balance">Balance</button>
+              <button class="tab-btn" data-fin-tab="cashflow">Cash Flow</button>
+            </div>
+            <div class="table-wrap" style="margin-top: var(--space-3);">
+              <table class="dt"><tbody id="finBody"></tbody></table>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
   </div>
-
-  <!-- ── Detail Drawer — high-density data only ────────────── -->
-  <div id="detailDrawer" class="detail-drawer">
-    <div class="detail-drawer-inner">
-
-      <!-- Supporting metrics -->
-      <div class="metrics-grid">
-        <div class="card">
-          <h3 class="card-title">Valuation Multiples</h3>
-          <div class="metric-list" id="valuationMetrics"></div>
-        </div>
-        <div class="card">
-          <h3 class="card-title">DCF Assumptions <span class="info-hint" onclick="openDcfGuide()">?</span></h3>
-          <div class="metric-list" id="dcfAssumptions"></div>
-        </div>
-        <div class="card">
-          <h3 class="card-title">Financials</h3>
-          <div class="metric-list" id="financialMetrics"></div>
-        </div>
-        <div class="card">
-          <h3 class="card-title">Financial Health</h3>
-          <div class="metric-list" id="healthMetrics"></div>
-        </div>
-      </div>
-
-      <!-- Price chart -->
-      <div class="card">
-        <div class="card-header">
-          <h3 class="card-title">Price Chart</h3>
-          <div class="period-btns">
-            <button class="period-btn" data-period="1d">1D</button>
-            <button class="period-btn" data-period="5d">5D</button>
-            <button class="period-btn" data-period="1m">1M</button>
-            <button class="period-btn" data-period="3m">3M</button>
-            <button class="period-btn" data-period="6m">6M</button>
-            <button class="period-btn" data-period="ytd">YTD</button>
-            <button class="period-btn active" data-period="1y">1Y</button>
-            <button class="period-btn" data-period="5y">5Y</button>
-          </div>
-        </div>
-        <div class="chart-wrap"><canvas id="priceChart"></canvas></div>
-        <div class="chart-loading hidden" id="chartLoading"><div class="spinner-sm"></div></div>
-      </div>
-
-      <!-- FCF Chart -->
-      <div class="card" id="dcfChartCard">
-        <div class="card-header">
-          <h3 class="card-title">DCF — Projected vs. Discounted Free Cash Flow</h3>
-          <span class="card-sub">Billions USD</span>
-        </div>
-        <div class="chart-wrap chart-wrap--tall"><canvas id="dcfChart"></canvas></div>
-      </div>
-
-      <!-- DCF Table -->
-      <div class="card" id="dcfTableCard">
-        <h3 class="card-title" style="margin-bottom:14px">Full DCF Model</h3>
-        <div class="table-scroll">
-          <table>
-            <thead><tr><th>Year</th><th>Stage</th><th>Growth</th><th>Projected FCF</th><th>Present Value</th></tr></thead>
-            <tbody id="projectionBody"></tbody>
-            <tfoot id="projectionFoot"></tfoot>
-          </table>
-        </div>
-      </div>
-
-      <!-- Financial Statements -->
-      <div class="card">
-        <div class="card-header">
-          <h3 class="card-title">Financial Statements</h3>
-          <div class="stmt-tabs">
-            <button class="stmt-tab active" data-tab="income">Income</button>
-            <button class="stmt-tab" data-tab="balance">Balance Sheet</button>
-            <button class="stmt-tab" data-tab="cashflow">Cash Flow</button>
-          </div>
-        </div>
-        <div id="statementsLoading" class="stmt-loading"><div class="spinner-sm"></div> Loading…</div>
-        <div id="statementsContent" class="table-scroll hidden"></div>
-      </div>
-
-    </div><!-- /detail-drawer-inner -->
-  </div><!-- /detailDrawer -->
-
 </main>
 
-<!-- FOOTER -->
+<!-- ── FOOTER ─────────────────────────────────────────────────────────── -->
 <footer class="site-footer">
-  <p>⚠ <strong>Not Financial Advice.</strong> ValuScope is an educational tool only. Valuations are model-based estimates. Always do your own due diligence. Consult a licensed financial advisor before investing.</p>
-  <p class="footer-sub">Data sourced live from Yahoo Finance via yfinance &nbsp;·&nbsp; ValuScope © 2025</p>
-</footer>
-
-<!-- DCF Guide Modal -->
-<div id="dcfModal" class="modal-overlay hidden" onclick="if(event.target===this)closeDcfGuide()">
-  <div class="modal">
-    <div class="modal-header">
-      <h3>Understanding the DCF Model</h3>
-      <button class="modal-close" onclick="closeDcfGuide()">✕</button>
-    </div>
-    <div class="modal-body">
-      <div class="dcf-term">
-        <div class="dcf-term-name">WACC — Weighted Average Cost of Capital</div>
-        <div class="dcf-term-desc">The discount rate used to convert future cash flows to today's dollars. Higher WACC = lower intrinsic value. Calculated from the company's mix of equity and debt financing costs.</div>
-      </div>
-      <div class="dcf-term">
-        <div class="dcf-term-name">Cost of Equity (CAPM)</div>
-        <div class="dcf-term-desc">The return shareholders require: Risk-Free Rate + Beta × Equity Risk Premium. We use 4.5% risk-free rate and 5.5% ERP.</div>
-      </div>
-      <div class="dcf-term">
-        <div class="dcf-term-name">Stage 1 Growth</div>
-        <div class="dcf-term-desc">FCF growth rate for years 1–5. Defaults to analyst estimates or the 5-year historical FCF CAGR, capped at 25%.</div>
-      </div>
-      <div class="dcf-term">
-        <div class="dcf-term-name">Stage 2 Growth</div>
-        <div class="dcf-term-desc">FCF growth rate for years 6–10. Defaults to half of Stage 1 to reflect slower, more mature growth.</div>
-      </div>
-      <div class="dcf-term">
-        <div class="dcf-term-name">Terminal Growth Rate</div>
-        <div class="dcf-term-desc">The perpetual growth rate beyond year 10. Typically 2–3%, in line with long-run GDP growth.</div>
-      </div>
-      <div class="dcf-term">
-        <div class="dcf-term-name">PV of FCFs</div>
-        <div class="dcf-term-desc">The sum of all 10 projected free cash flows, each discounted back to today at the WACC rate.</div>
-      </div>
-      <div class="dcf-term">
-        <div class="dcf-term-name">PV Terminal Value</div>
-        <div class="dcf-term-desc">The present value of all cash flows beyond year 10, modeled as a growing perpetuity. Often the largest component of DCF value.</div>
-      </div>
-      <div class="dcf-term">
-        <div class="dcf-term-name">Margin of Safety</div>
-        <div class="dcf-term-desc">How far the stock price is from intrinsic value. Positive = trading below IV (potential bargain). Negative = trading above IV. Rule of thumb: buy at 20%+ discount.</div>
-      </div>
-      <div class="dcf-disclaimer">⚠ DCF models are highly sensitive to assumptions. Small changes in growth rate or WACC can dramatically change intrinsic value. Use this as one input among many — not as the sole basis for any investment decision.</div>
-    </div>
+  <div class="container">
+    <span>VALUS · Educational research tool · Data via Yahoo Finance · Not investment advice</span>
   </div>
-</div>
+</footer>
 
 <script src="/static/js/main.js"></script>
 </body>

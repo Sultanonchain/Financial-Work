@@ -1556,60 +1556,107 @@ def _build_verdict_summary(ticker, priced_for, implied_growth_pct, model_growth_
 
 # ── Cash-Rich Premium ──────────────────────────────────────────────────────
 
-def _cash_rich_premium(info, fx_rate, market_cap, sector=None, industry=None):
+def _cash_rich_premium(info, fx_rate, market_cap, base_fcf=None,
+                        sector=None, industry=None):
     """
-    Cash-rich companies (large net cash positions) are systematically
-    undervalued by simple FCF-DCF because:
-      - The cash on the balance sheet earns the risk-free rate, well below
-        the discount rate the rest of the firm is being valued at.
-      - Cash provides strategic optionality (buybacks, M&A, R&D pivots)
-        that DCF cannot model.
-      - Net-cash companies are recession-insulated.
+    Cash-rich detection — three independent signals, take the maximum.
 
-    Premium scales with net cash as a percentage of market cap:
-        net_cash / mcap < 10%:   no premium
-        10–20%:  +3% IV
-        20–35%:  +6% IV
-        35%+:    +10% IV (cap)
+    Signal A — NET CASH (existing): rewards companies with positive
+        net cash position; scaled to market cap.
+    Signal B — ABSOLUTE CASH HOARD (new): rewards mega-caps with $50B+
+        cash piles regardless of debt.  Captures AAPL/MSFT/GOOGL strategic
+        optionality that simple net-cash misses.
+    Signal C — FCF-COVERED DEBT (new): if FCF can clear all debt in
+        less than 2 years, the debt is "strategic" rather than distress.
+        We treat gross cash as effective net cash for premium calc.
 
-    EXCLUSIONS: Banks, insurance companies, and asset managers — their
-    "cash" includes customer deposits, float, and AUM-related balances
-    that are NOT strategic cash optionality.
+    Final premium = max(A, B, C), capped at +10%.
+
+    EXCLUSIONS: Financials (banks/insurance/asset-managers/broker-dealers).
+    Their balance-sheet "cash" includes deposits, float, and AUM-related
+    balances that are NOT strategic optionality.
 
     Returns (premium_pct, is_cash_rich, cash_pct_of_mcap, narrative).
     """
-    # Exclude financials — their balance sheet "cash" is not strategic cash
+    # Exclude depository banks, asset managers, brokerages, and capital
+    # markets — their balance-sheet cash includes deposits / float / AUM,
+    # not strategic optionality.  We DO include conglomerate holding
+    # companies (Berkshire-class) where the cash is genuine optionality.
     s_lower = (sector or "").lower()
     i_lower = (industry or "").lower()
-    if (("financial" in s_lower) or ("bank" in i_lower) or
-            ("insurance" in i_lower) or ("asset management" in i_lower) or
-            ("capital markets" in i_lower) or ("financial services" in s_lower)):
+    _exclude_industries = (
+        "bank",                # any bank (regional, money center, etc.)
+        "thrift",
+        "credit services",
+        "savings",
+        "asset management",
+        "capital markets",
+        "investment brokerage",
+        "securities brokerage",
+        "mortgage finance",
+    )
+    if any(x in i_lower for x in _exclude_industries):
         return 0.0, False, None, None
 
     total_cash = (safe(info.get("totalCash"), 0) or 0) * fx_rate
     total_debt = (safe(info.get("totalDebt"), 0) or 0) * fx_rate
     net_cash   = total_cash - total_debt
+    fcf        = float(base_fcf) if base_fcf else 0.0
 
-    if not market_cap or market_cap <= 0 or net_cash <= 0:
+    if not market_cap or market_cap <= 0:
         return 0.0, False, None, None
 
-    pct = (net_cash / market_cap) * 100
+    cash_b_abs = total_cash / 1e9   # gross cash in $B
 
-    if pct < 10:
-        return 0.0, False, round(pct, 1), None
-    elif pct < 20:
-        prem = 0.03
-    elif pct < 35:
-        prem = 0.06
-    else:
-        prem = 0.10
+    # ── Signal A — Net cash as % of market cap ───────────────────────────
+    pct_net = (net_cash / market_cap * 100) if net_cash > 0 else 0.0
+    if   pct_net >= 35: prem_a = 0.10
+    elif pct_net >= 20: prem_a = 0.06
+    elif pct_net >= 10: prem_a = 0.03
+    else:               prem_a = 0.0
+
+    # ── Signal B — Absolute cash hoard (catches AAPL/MSFT/GOOGL/BRK) ─────
+    if   cash_b_abs >= 200: prem_b = 0.06
+    elif cash_b_abs >= 100: prem_b = 0.04
+    elif cash_b_abs >=  50: prem_b = 0.02
+    else:                   prem_b = 0.0
+
+    # ── Signal C — FCF coverage of debt (strategic vs distressed leverage) ─
+    prem_c = 0.0
+    years_to_payoff = None
+    if fcf > 0 and total_debt > 0:
+        years_to_payoff = total_debt / fcf
+        if years_to_payoff < 2.0:
+            # Treat gross cash as effective net cash since debt is non-threat
+            pct_c = (total_cash / market_cap * 100) if market_cap > 0 else 0
+            if   pct_c >= 35: prem_c = 0.07
+            elif pct_c >= 20: prem_c = 0.05
+            elif pct_c >= 10: prem_c = 0.03
+            else:             prem_c = 0.0
+
+    premium = max(prem_a, prem_b, prem_c)
+    if premium <= 0:
+        return 0.0, False, None, None
+
+    is_rich = True
+    pct = max(pct_net, (cash_b_abs / (market_cap / 1e9) * 100) if market_cap > 0 else 0)
+
+    # Narrative explains which signal fired
+    parts = []
+    if prem_a == premium and prem_a > 0:
+        parts.append(f"net cash {pct_net:.0f}% of market cap")
+    if prem_b == premium and prem_b > 0:
+        parts.append(f"${cash_b_abs:.0f}B absolute cash hoard")
+    if prem_c == premium and prem_c > 0 and years_to_payoff is not None:
+        parts.append(f"FCF clears all debt in {years_to_payoff:.1f} years")
+    why = " · ".join(parts) if parts else f"cash position is {pct:.0f}% of market cap"
 
     narrative = (
-        f"Net cash is {pct:.0f}% of market cap — strategic optionality "
+        f"Cash-loaded balance sheet — {why}.  Strategic optionality "
         f"(buybacks, M&A, R&D) and recession resilience justify a "
-        f"+{int(prem*100)}% premium."
+        f"+{int(premium*100)}% IV premium not captured by raw FCF."
     )
-    return prem, True, round(pct, 1), narrative
+    return premium, is_rich, round(pct, 1), narrative
 
 
 # ── Scenario Coherence Enforcer ─────────────────────────────────────────────
@@ -3734,10 +3781,11 @@ def analyze():
         # Priced-For → Verdict Summary.
         # ══════════════════════════════════════════════════════════════════════
 
-        # ── Cash-Rich Premium ──────────────────────────────────────────────────
+        # ── Cash-Rich Premium (3 signals: net-cash, absolute hoard, FCF coverage)
         _cr_prem, is_cash_rich, cash_pct_of_mcap, cash_rich_narrative = \
             _cash_rich_premium(info, fx_rate,
                                (safe(info.get("marketCap"), 0) or 0) * fx_rate,
+                               base_fcf=base_fcf,
                                sector=sector, industry=industry)
         if _cr_prem > 0 and intrinsic_value is not None:
             intrinsic_value = round(intrinsic_value * (1 + _cr_prem), 2)
@@ -3809,6 +3857,116 @@ def analyze():
             )
         except Exception:
             verdict_summary = None
+
+        # ── Methodology Steps (for the new "How VALUS calculated this" panel)
+        # Each step is a row showing the actual numbers used for THIS stock.
+        # Steps that didn't fire are emitted as `active: False` so the UI can
+        # grey them out instead of hiding them — users see the full menu.
+        try:
+            _shares = safe(bal_data.get("shares"), 0) if bal_data else 0
+            methodology_steps = [
+                {
+                    "step": 1,
+                    "label": "Free Cash Flow base",
+                    "value": base_fcf,
+                    "format": "currency_b",
+                    "active": bool(base_fcf),
+                    "detail": fcf_source or "Source: TTM cash flow statement",
+                },
+                {
+                    "step": 2,
+                    "label": "Forecasted growth",
+                    "value": None,
+                    "format": "compound",
+                    "active": s1 is not None,
+                    "detail": (f"Stage 1 (yrs 1-5): {s1*100:.1f}% · "
+                               f"Stage 2 (yrs 6-10): {s2*100:.1f}% · "
+                               f"Terminal: {tg*100:.1f}%") if (s1 and s2) else "—",
+                    "extra": {
+                        "stage1_pct": round(s1*100, 1) if s1 else None,
+                        "stage2_pct": round(s2*100, 1) if s2 else None,
+                        "terminal_pct": round(tg*100, 1),
+                        "growth_source": growth_source,
+                    },
+                },
+                {
+                    "step": 3,
+                    "label": "Discount rate (WACC)",
+                    "value": wacc_data.get("wacc") if wacc_data else None,
+                    "format": "percent",
+                    "active": bool(wacc_data and wacc_data.get("wacc")),
+                    "detail": (f"Cost of Equity {wacc_data.get('coe', 0)*100:.1f}% · "
+                               f"Cost of Debt {wacc_data.get('cod', 0)*100:.1f}%"
+                               if wacc_data else "—"),
+                },
+                {
+                    "step": 4,
+                    "label": "Enterprise value (PV of FCF + Terminal)",
+                    "value": enterprise_value,
+                    "format": "currency_b",
+                    "active": bool(enterprise_value),
+                    "detail": (f"Stage PV: ${(total_pv_fcf or 0)/1e9:.1f}B · "
+                               f"Terminal PV: ${(pv_terminal or 0)/1e9:.1f}B"
+                               if (total_pv_fcf or pv_terminal) else "—"),
+                },
+                {
+                    "step": 5,
+                    "label": "Less net debt",
+                    "value": -(net_debt or 0),
+                    "format": "currency_b",
+                    "active": bool(net_debt),
+                    "detail": (f"${(safe(info.get('totalDebt'), 0) or 0)/1e9:.0f}B debt − "
+                               f"${(safe(info.get('totalCash'), 0) or 0)/1e9:.0f}B cash"),
+                },
+                {
+                    "step": 6,
+                    "label": "Per-share fair value (pre-layers)",
+                    "value": consensus_anchor_pre_iv,
+                    "format": "currency",
+                    "active": bool(consensus_anchor_pre_iv),
+                    "detail": f"Equity value ÷ {_shares/1e9:.2f}B shares" if _shares else "—",
+                },
+                {
+                    "step": 7,
+                    "label": "Reality Reconciliation",
+                    "value": None,
+                    "format": "delta_pct",
+                    "active": reality_reconciled,
+                    "detail": (reality_reason or
+                               "Gap below 25% threshold or analyst agrees with model — no blend applied."),
+                    "extra": {"pre_iv": reality_pre_iv} if reality_reconciled else None,
+                },
+                {
+                    "step": 8,
+                    "label": "Cash-Rich Premium",
+                    "value": _cr_prem * 100 if _cr_prem else 0,
+                    "format": "delta_pct",
+                    "active": bool(_cr_prem and _cr_prem > 0),
+                    "detail": cash_rich_narrative or "Below 10% net cash threshold — no premium applied.",
+                },
+                {
+                    "step": 9,
+                    "label": "Debt Momentum",
+                    "value": (debt_momentum.get("premium_pct", 0) or 0) * 100,
+                    "format": "delta_pct",
+                    "active": bool(debt_momentum and debt_momentum.get("premium_pct", 0) > 0),
+                    "detail": (debt_momentum.get("narrative") if debt_momentum else
+                               "No deleveraging signal detected."),
+                },
+                {
+                    "step": 10,
+                    "label": "Sultan Split (90% model · 10% analyst)",
+                    "value": intrinsic_value,
+                    "format": "currency",
+                    "active": bool(analyst_adjusted),
+                    "detail": (f"Pre-blend: ${consensus_anchor_pre_iv:.2f} · "
+                               f"Analyst target: ${analyst_target_price:.2f}"
+                               if (consensus_anchor_pre_iv and analyst_target_price)
+                               else "No analyst target available — split skipped."),
+                },
+            ]
+        except Exception:
+            methodology_steps = None
 
         # ── Sector / P/E context notes ────────────────────────────────────────
         pe_ttm    = safe(info.get("trailingPE"))
@@ -4049,6 +4207,8 @@ def analyze():
             "cash_pct_of_mcap":        cash_pct_of_mcap,
             "cash_rich_narrative":     cash_rich_narrative,
             "cash_rich_premium_pct":   round(_cr_prem * 100, 1) if _cr_prem else 0.0,
+            # ── Methodology Explainer payload ───────────────────────────
+            "methodology_steps":       methodology_steps,
             # Moat detection
             "moat_detected":    moat_detected,
             "moat_path":        moat_path,
