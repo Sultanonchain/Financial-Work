@@ -746,6 +746,30 @@ function renderQuickInsights(d) {
     items.push(`<div class="qi-item ${cls}"><span class="qi-icon">${icon}</span><span class="qi-text">${html}</span></div>`);
   }
 
+  // ── Verdict Summary (clean numbered "why" — top of stack) ──────────────
+  // Replaces the dense flag list with a 3-bullet explanation users can read.
+  if (d.verdict_summary) {
+    const vs = d.verdict_summary;
+    const colorMap = {
+      green: { bg: 'rgba(35,200,120,0.08)',  border: 'rgba(35,200,120,0.45)',  accent: '#23c878' },
+      blue:  { bg: 'rgba(80,140,240,0.08)',  border: 'rgba(80,140,240,0.45)',  accent: '#508cf0' },
+      amber: { bg: 'rgba(240,180,60,0.08)',  border: 'rgba(240,180,60,0.45)',  accent: '#f0b43c' },
+      red:   { bg: 'rgba(240,80,80,0.08)',   border: 'rgba(240,80,80,0.45)',   accent: '#f05050' },
+    };
+    const c = colorMap[vs.color] || colorMap.blue;
+    const reasonHtml = (vs.reasons || []).map((r, i) =>
+      `<div class="vs-reason"><span class="vs-num">${i+1}</span><span class="vs-txt">${escHtml(r)}</span></div>`
+    ).join('');
+    const verdictHtml = vs.verdict ? `<div class="vs-verdict">→ ${escHtml(vs.verdict)}</div>` : '';
+    items.push(
+      `<div class="qi-item verdict-summary" style="background:${c.bg};border-left:3px solid ${c.border};padding:14px 16px;margin-bottom:8px;border-radius:6px;">` +
+        `<div class="vs-headline" style="color:${c.accent};font-weight:600;font-size:14px;margin-bottom:10px;letter-spacing:.3px;">${escHtml(vs.headline)}</div>` +
+        `<div class="vs-reasons" style="font-size:12.5px;line-height:1.55;color:rgba(255,255,255,0.85);">${reasonHtml}</div>` +
+        verdictHtml +
+      `</div>`
+    );
+  }
+
   // ── Expectation Gap Engine ────────────────────────────────────────────────
   // This is the top insight: "where is the market wrong?"
   const eg = d.expectation_gap;

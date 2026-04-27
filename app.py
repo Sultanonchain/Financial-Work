@@ -1390,6 +1390,220 @@ def _debt_momentum_classifier(info, balance_sheet, fcf_series, price_history):
     }
 
 
+# ── Verdict Summary (clean numbered "why" explanation) ─────────────────────
+
+def _build_verdict_summary(ticker, priced_for, implied_growth_pct, model_growth_pct,
+                            sector_ceiling_pct, sector_ceiling_label, price, iv,
+                            margin_of_safety, analyst_target,
+                            debt_momentum, is_cash_rich, cash_pct_of_mcap,
+                            is_mag7, is_structural_transformer):
+    """
+    Distil the full analysis into a clean numbered explanation users can
+    actually read.  Replaces the dense flag list with: a one-line headline,
+    three numbered reasons, and a one-line verdict.
+
+    Returns dict: {headline, reasons, verdict, tier, color}
+    """
+    if not priced_for or not price or price <= 0 or iv is None:
+        return None
+
+    tier  = priced_for.get("tier")
+    label = priced_for.get("label")
+    color = priced_for.get("color", "blue")
+    reasons = []
+
+    # Reason 1 — what the market is asking for vs what we forecast
+    if implied_growth_pct is not None and model_growth_pct is not None:
+        gap = implied_growth_pct - model_growth_pct
+        if abs(gap) >= 1.0:
+            direction = "above" if gap > 0 else "below"
+            reasons.append(
+                f"To justify today's price of ${price:.2f}, the market needs "
+                f"~{implied_growth_pct:.1f}% revenue growth every year for 10 years — "
+                f"VALUS forecasts {model_growth_pct:.1f}% ({abs(gap):.1f}pp {direction})."
+            )
+        else:
+            reasons.append(
+                f"Market and VALUS broadly agree — both expect ~{model_growth_pct:.1f}% "
+                f"annual growth to justify today's price of ${price:.2f}."
+            )
+    elif iv and price:
+        reasons.append(
+            f"VALUS fair value of ${iv:.2f} implies "
+            f"{margin_of_safety:+.1f}% vs today's price of ${price:.2f}."
+        )
+
+    # Reason 2 — sector credibility check
+    if sector_ceiling_pct and implied_growth_pct is not None:
+        ratio = implied_growth_pct / sector_ceiling_pct
+        if ratio > 1.20:
+            reasons.append(
+                f"That growth rate exceeds the {sector_ceiling_label} sector ceiling of "
+                f"{sector_ceiling_pct:.0f}% by {(ratio-1)*100:.0f}% — only ~1% of public "
+                f"companies have sustained this for a decade."
+            )
+        elif ratio > 1.00:
+            reasons.append(
+                f"That growth rate sits at the {sector_ceiling_label} sector ceiling "
+                f"({sector_ceiling_pct:.0f}%) — execution must be flawless."
+            )
+        elif ratio > 0.80:
+            reasons.append(
+                f"That growth rate is in the upper band for the {sector_ceiling_label} "
+                f"sector (ceiling {sector_ceiling_pct:.0f}%) — credible but premium."
+            )
+        elif ratio > 0.40:
+            reasons.append(
+                f"That growth rate is well within the {sector_ceiling_label} sector "
+                f"ceiling of {sector_ceiling_pct:.0f}% — comfortable assumption."
+            )
+        else:
+            reasons.append(
+                f"That growth rate is significantly below the {sector_ceiling_label} "
+                f"sector ceiling of {sector_ceiling_pct:.0f}% — the market is being conservative."
+            )
+
+    # Reason 3 — analyst alignment, capital structure, or special context
+    third_reason = None
+    if analyst_target and price:
+        at_gap = (analyst_target - price) / price * 100
+        if abs(at_gap) > 5:
+            direction = "above" if at_gap > 0 else "below"
+            third_reason = (
+                f"Sell-side analysts target ${analyst_target:.2f} ({abs(at_gap):.0f}% "
+                f"{direction} current price) — they {'agree with the bull case' if at_gap > 0 else 'see downside ahead'}."
+            )
+
+    if third_reason is None and is_cash_rich and cash_pct_of_mcap:
+        third_reason = (
+            f"Cash position is {cash_pct_of_mcap:.0f}% of market cap — strategic "
+            f"optionality (buybacks, M&A, R&D) provides a cushion not captured by FCF alone."
+        )
+
+    if third_reason is None and debt_momentum:
+        dm_class = debt_momentum.get("classification")
+        if dm_class == "deleveraging":
+            third_reason = (
+                f"Debt is being paid down ({debt_momentum.get('debt_trend_pct', 0):.0f}% YoY) "
+                f"while FCF stays positive — equity rerating opportunity (already priced into IV)."
+            )
+        elif dm_class == "speculative_distress":
+            third_reason = (
+                f"Capital structure is stressed (Debt/EBITDA "
+                f"{debt_momentum.get('debt_to_ebitda', 0):.1f}×) and price momentum is "
+                f"not supported by improving fundamentals — high reversal risk."
+            )
+        elif dm_class == "healthy_leverage":
+            third_reason = (
+                f"Despite Debt/EBITDA {debt_momentum.get('debt_to_ebitda', 0):.1f}×, "
+                f"interest coverage is strong — leverage is not a downside risk."
+            )
+
+    if third_reason is None and is_structural_transformer:
+        third_reason = (
+            f"Structural Transformer status: market is pricing platform "
+            f"optionality (AI/robotics/autonomy) on top of base business — "
+            f"requires belief in long-tail upside scenarios."
+        )
+
+    if third_reason is None and is_mag7:
+        third_reason = (
+            f"As a Mag 7 member, this name moves with the broader AI productivity "
+            f"thesis — concentrated exposure in your portfolio amplifies that risk."
+        )
+
+    if third_reason:
+        reasons.append(third_reason)
+
+    # Verdict line — direct user-facing recommendation tone
+    if tier in ("decline", "distress"):
+        verdict = (f"Our model sees the market as overly pessimistic — meaningful upside "
+                   f"if fundamentals stabilise.")
+    elif tier == "discount":
+        verdict = (f"Our model sees this stock as undervalued by "
+                   f"{abs(margin_of_safety or 0):.0f}% — trading below fundamental value.")
+    elif tier == "fair_value":
+        verdict = (f"Market and model are aligned — fair value zone, no clear edge.")
+    elif tier == "growth":
+        verdict = (f"Reasonable growth premium baked in — execution at expected rates "
+                   f"justifies today's price.")
+    elif tier == "excellence":
+        verdict = (f"Premium pricing assumes flawless execution — limited margin "
+                   f"of error if growth slows.")
+    elif tier == "miracle":
+        verdict = (f"Market is paying for outcomes very few companies achieve — "
+                   f"weighted toward speculation, not fundamentals.")
+    else:
+        verdict = label or "Verdict pending."
+
+    return {
+        "tier":     tier,
+        "label":    label,
+        "color":    color,
+        "headline": f"{ticker} is {label}",
+        "reasons":  reasons,
+        "verdict":  verdict,
+    }
+
+
+# ── Cash-Rich Premium ──────────────────────────────────────────────────────
+
+def _cash_rich_premium(info, fx_rate, market_cap, sector=None, industry=None):
+    """
+    Cash-rich companies (large net cash positions) are systematically
+    undervalued by simple FCF-DCF because:
+      - The cash on the balance sheet earns the risk-free rate, well below
+        the discount rate the rest of the firm is being valued at.
+      - Cash provides strategic optionality (buybacks, M&A, R&D pivots)
+        that DCF cannot model.
+      - Net-cash companies are recession-insulated.
+
+    Premium scales with net cash as a percentage of market cap:
+        net_cash / mcap < 10%:   no premium
+        10–20%:  +3% IV
+        20–35%:  +6% IV
+        35%+:    +10% IV (cap)
+
+    EXCLUSIONS: Banks, insurance companies, and asset managers — their
+    "cash" includes customer deposits, float, and AUM-related balances
+    that are NOT strategic cash optionality.
+
+    Returns (premium_pct, is_cash_rich, cash_pct_of_mcap, narrative).
+    """
+    # Exclude financials — their balance sheet "cash" is not strategic cash
+    s_lower = (sector or "").lower()
+    i_lower = (industry or "").lower()
+    if (("financial" in s_lower) or ("bank" in i_lower) or
+            ("insurance" in i_lower) or ("asset management" in i_lower) or
+            ("capital markets" in i_lower) or ("financial services" in s_lower)):
+        return 0.0, False, None, None
+
+    total_cash = (safe(info.get("totalCash"), 0) or 0) * fx_rate
+    total_debt = (safe(info.get("totalDebt"), 0) or 0) * fx_rate
+    net_cash   = total_cash - total_debt
+
+    if not market_cap or market_cap <= 0 or net_cash <= 0:
+        return 0.0, False, None, None
+
+    pct = (net_cash / market_cap) * 100
+
+    if pct < 10:
+        return 0.0, False, round(pct, 1), None
+    elif pct < 20:
+        prem = 0.03
+    elif pct < 35:
+        prem = 0.06
+    else:
+        prem = 0.10
+
+    narrative = (
+        f"Net cash is {pct:.0f}% of market cap — strategic optionality "
+        f"(buybacks, M&A, R&D) and recession resilience justify a "
+        f"+{int(prem*100)}% premium."
+    )
+    return prem, True, round(pct, 1), narrative
+
+
 # ── Scenario Coherence Enforcer ─────────────────────────────────────────────
 
 def _enforce_scenario_coherence(scenarios, base_iv, price):
@@ -3378,49 +3592,23 @@ def analyze():
                         )
                     scenarios["reality_reconciled"] = True
 
-        # ── Debt + Momentum Classifier ─────────────────────────────────────────
-        # Distinguish "deleveraging stories" (apply premium) from "speculative
-        # distress" (flag, no upward push).  Runs before scenario coherence so
-        # any debt-driven IV uplift cascades into Bear/Base/Bull.
-        debt_momentum = _debt_momentum_classifier(info, balance_sheet, fcf_series, price_history)
-        if debt_momentum.get("premium_pct", 0) > 0 and intrinsic_value is not None:
-            _pre_dm_iv = intrinsic_value
-            intrinsic_value = round(intrinsic_value * (1 + debt_momentum["premium_pct"]), 2)
-            margin_of_safety = round((intrinsic_value - price) / price * 100, 1) if price else None
-            # Scale scenarios by the same factor
-            if scenarios:
-                _factor = (1 + debt_momentum["premium_pct"])
-                for _k in ("base", "bull", "bear"):
-                    _slot = scenarios.get(_k)
-                    if _slot and _slot.get("value") is not None:
-                        _slot["value"]  = round(_slot["value"] * _factor, 2)
-                        _slot["upside"] = round((_slot["value"] - price) / price * 100, 1) if price else None
-                if scenarios.get("weighted") is not None:
-                    scenarios["weighted"] = round(scenarios["weighted"] * _factor, 2)
-                    scenarios["weighted_upside"] = round((scenarios["weighted"] - price) / price * 100, 1) if price else None
-
-        # ── Scenario Coherence Enforcer ────────────────────────────────────────
-        # Hard-guarantee Bear < Base < Bull with sensible spreads.  Prevents
-        # absurd outputs like Bear $30 / Base $228 / Bull $187 (TSLA).
-        if scenarios and intrinsic_value is not None:
-            scenarios = _enforce_scenario_coherence(scenarios, intrinsic_value, price)
-
-        # ── "Priced For" Verdict ──────────────────────────────────────────────
-        # Replace the binary overvalued/undervalued tag with a 6-tier verdict
-        # driven by the growth rate the market is pricing in vs sector ceiling.
-        _ceiling, _ceiling_label = _sector_growth_ceiling(
-            sector, industry,
-            is_structural_transformer=is_structural_transformer,
-            moat_detected=moat_detected,
-        )
-        priced_for = _priced_for_verdict(
-            implied_g       = (implied_growth_pct / 100) if implied_growth_pct is not None else None,
-            sector_ceiling  = _ceiling,
-            price           = price,
-            iv              = intrinsic_value,
-        )
-        # Mag 7 concentration tag
-        is_mag7 = _is_mag7(ticker)
+        # ── Cash-Rich + Debt + Coherence + Priced-For + Verdict ─────────────
+        # NOTE: these five layers must run AFTER multiples fallback finalises
+        # intrinsic_value (line ~3700+) since dcf_unavailable stocks (banks,
+        # negative-FCF micros) don't get an IV until then.  Kept defaults here.
+        is_cash_rich = False
+        cash_pct_of_mcap = None
+        cash_rich_narrative = None
+        _cr_prem = 0.0
+        debt_momentum = {"classification": "stable", "label": "Stable Capital Structure",
+                         "color": "neutral", "narrative": "", "premium_pct": 0.0,
+                         "flags": [], "debt_to_ebitda": None, "interest_coverage": None,
+                         "debt_trend_pct": None}
+        priced_for = None
+        is_mag7 = False
+        verdict_summary = None
+        _ceiling = None
+        _ceiling_label = None
 
         # ── DCF Confidence Score ──────────────────────────────────────────────
         # Assess model reliability BEFORE deciding whether to blend with multiples.
@@ -3531,6 +3719,87 @@ def analyze():
                 "weighted_upside": round((_syn_w - price) / price * 100, 1),
                 "synthetic":       True,   # flag so UI can add a note if needed
             }
+
+        # ══════════════════════════════════════════════════════════════════════
+        # FINAL POLISH LAYERS — run on whatever the model has now (DCF, multiples,
+        # banking, biotech, anything).  Order: Cash-Rich → Debt → Coherence →
+        # Priced-For → Verdict Summary.
+        # ══════════════════════════════════════════════════════════════════════
+
+        # ── Cash-Rich Premium ──────────────────────────────────────────────────
+        _cr_prem, is_cash_rich, cash_pct_of_mcap, cash_rich_narrative = \
+            _cash_rich_premium(info, fx_rate,
+                               (safe(info.get("marketCap"), 0) or 0) * fx_rate,
+                               sector=sector, industry=industry)
+        if _cr_prem > 0 and intrinsic_value is not None:
+            intrinsic_value = round(intrinsic_value * (1 + _cr_prem), 2)
+            margin_of_safety = round((intrinsic_value - price) / price * 100, 1) if price else None
+            if scenarios:
+                _factor = (1 + _cr_prem)
+                for _k in ("base", "bull", "bear"):
+                    _slot = scenarios.get(_k)
+                    if _slot and _slot.get("value") is not None:
+                        _slot["value"]  = round(_slot["value"] * _factor, 2)
+                        _slot["upside"] = round((_slot["value"] - price) / price * 100, 1) if price else None
+                if scenarios.get("weighted") is not None:
+                    scenarios["weighted"] = round(scenarios["weighted"] * _factor, 2)
+                    scenarios["weighted_upside"] = round((scenarios["weighted"] - price) / price * 100, 1) if price else None
+
+        # ── Debt + Momentum Classifier ─────────────────────────────────────────
+        debt_momentum = _debt_momentum_classifier(info, balance_sheet, fcf_series, price_history)
+        if debt_momentum.get("premium_pct", 0) > 0 and intrinsic_value is not None:
+            _factor = (1 + debt_momentum["premium_pct"])
+            intrinsic_value = round(intrinsic_value * _factor, 2)
+            margin_of_safety = round((intrinsic_value - price) / price * 100, 1) if price else None
+            if scenarios:
+                for _k in ("base", "bull", "bear"):
+                    _slot = scenarios.get(_k)
+                    if _slot and _slot.get("value") is not None:
+                        _slot["value"]  = round(_slot["value"] * _factor, 2)
+                        _slot["upside"] = round((_slot["value"] - price) / price * 100, 1) if price else None
+                if scenarios.get("weighted") is not None:
+                    scenarios["weighted"] = round(scenarios["weighted"] * _factor, 2)
+                    scenarios["weighted_upside"] = round((scenarios["weighted"] - price) / price * 100, 1) if price else None
+
+        # ── Scenario Coherence Enforcer (Bear < Base < Bull, sane spreads) ────
+        if scenarios and intrinsic_value is not None:
+            scenarios = _enforce_scenario_coherence(scenarios, intrinsic_value, price)
+
+        # ── "Priced For" Verdict ──────────────────────────────────────────────
+        _ceiling, _ceiling_label = _sector_growth_ceiling(
+            sector, industry,
+            is_structural_transformer=is_structural_transformer,
+            moat_detected=moat_detected,
+        )
+        priced_for = _priced_for_verdict(
+            implied_g       = (implied_growth_pct / 100) if implied_growth_pct is not None else None,
+            sector_ceiling  = _ceiling,
+            price           = price,
+            iv              = intrinsic_value,
+        )
+        is_mag7 = _is_mag7(ticker)
+
+        # ── Verdict Summary (clean numbered "why" explanation) ────────────────
+        try:
+            verdict_summary = _build_verdict_summary(
+                ticker                 = ticker,
+                priced_for             = priced_for,
+                implied_growth_pct     = implied_growth_pct,
+                model_growth_pct       = round(s1 * 100, 1) if s1 is not None else None,
+                sector_ceiling_pct     = round(_ceiling * 100, 1) if _ceiling else None,
+                sector_ceiling_label   = _ceiling_label,
+                price                  = price,
+                iv                     = intrinsic_value,
+                margin_of_safety       = margin_of_safety,
+                analyst_target         = analyst_target_price,
+                debt_momentum          = debt_momentum,
+                is_cash_rich           = is_cash_rich,
+                cash_pct_of_mcap       = cash_pct_of_mcap,
+                is_mag7                = is_mag7,
+                is_structural_transformer = is_structural_transformer,
+            )
+        except Exception:
+            verdict_summary = None
 
         # ── Sector / P/E context notes ────────────────────────────────────────
         pe_ttm    = safe(info.get("trailingPE"))
@@ -3759,12 +4028,18 @@ def analyze():
             "reality_reconciled":      reality_reconciled,
             "reality_pre_iv":          reality_pre_iv,
             "reality_reason":          reality_reason,
-            # ── "Priced For" Verdict + Mag 7 + Debt Classifier ───────────
+            # ── "Priced For" Verdict + Verdict Summary ────────────────────
             "priced_for":              priced_for,
+            "verdict_summary":         verdict_summary,
             "sector_growth_ceiling_pct": round(_ceiling * 100, 1) if _ceiling else None,
             "sector_growth_ceiling_label": _ceiling_label,
             "is_mag7":                 is_mag7,
             "debt_momentum":           debt_momentum,
+            # ── Cash-Rich Premium ────────────────────────────────────────
+            "is_cash_rich":            is_cash_rich,
+            "cash_pct_of_mcap":        cash_pct_of_mcap,
+            "cash_rich_narrative":     cash_rich_narrative,
+            "cash_rich_premium_pct":   round(_cr_prem * 100, 1) if _cr_prem else 0.0,
             # Moat detection
             "moat_detected":    moat_detected,
             "moat_path":        moat_path,
