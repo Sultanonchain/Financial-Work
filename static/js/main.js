@@ -955,8 +955,14 @@ function renderQuickInsights(d) {
     qi('▸', escHtml(line), 'qi-info');
   });
 
-  if (items.length > 0) {
-    listEl.innerHTML = items.join('');
+  // ── User preference: show ONLY the verdict summary at the top.
+  // All other flags (Expectation Gap, FIN 415, Sultan Split, Reality
+  // Reconciliation, Mag 7, debt classifier, SEC filings, etc.) are still
+  // produced above but filtered here so the panel stays clean.  Detailed
+  // analysis remains accessible via the "View Detailed Analysis" drawer.
+  const verdictOnly = items.filter(html => html.includes('verdict-summary'));
+  if (verdictOnly.length > 0) {
+    listEl.innerHTML = verdictOnly.join('');
     el.classList.remove('hidden');
   } else {
     listEl.innerHTML = '';

@@ -1144,54 +1144,57 @@ def _is_mag7(ticker):
 
 # ── "Priced For" Verdict ────────────────────────────────────────────────────
 
-def _priced_for_verdict(implied_g, sector_ceiling, price, iv):
+def _priced_for_verdict(implied_g, sector_ceiling, price, iv, margin_of_safety=None):
     """
-    Replace the binary overvalued/undervalued tag with a 6-tier verdict driven
-    by the growth rate the market is pricing in versus what's credible for
-    the sector.  Sector ceiling comes from _reality_reconciliation's ladder.
+    Tier the stock by margin of safety (IV vs price) — primary driver — with
+    a sector-ceiling override that bumps anything beyond ceiling × 1.2 into
+    the Miracle tier regardless of MOS.
+
+    This matches what the top card shows: positive MOS → undervalued tiers,
+    negative MOS → overvalued tiers.  Eliminates the inconsistency where
+    an OVERVALUED stock could be tagged "Priced for Discount".
 
     Returns dict: {tier, label, color, narrative}
     """
-    if implied_g is None or sector_ceiling is None or sector_ceiling <= 0:
-        # Fall back to simple discount/premium-to-IV when reverse-DCF unavailable
-        if iv is not None and price and price > 0:
-            mos = (iv - price) / price
-            if   mos >  0.20: return {"tier": "discount",   "label": "Priced for Discount",   "color": "green",  "narrative": "Trading well below fundamental value."}
-            elif mos >  0.05: return {"tier": "fair_value", "label": "Priced for Fair Value", "color": "blue",   "narrative": "Trading near fundamental value."}
-            elif mos > -0.10: return {"tier": "growth",     "label": "Priced for Growth",     "color": "blue",   "narrative": "Modest growth premium baked in."}
-            elif mos > -0.25: return {"tier": "excellence", "label": "Priced for Excellence", "color": "amber",  "narrative": "Premium pricing — execution must continue."}
-            else:             return {"tier": "miracle",    "label": "Priced for Miracle",    "color": "red",    "narrative": "Speculative — requires extraordinary outcomes."}
+    if iv is None or price is None or price <= 0:
         return None
 
-    ratio = implied_g / sector_ceiling   # 0 means flat, 1 = at ceiling, >1.2 = miracle
+    # Compute MOS if not provided
+    if margin_of_safety is None:
+        margin_of_safety = (iv - price) / price * 100
 
-    if implied_g < -0.02:
-        return {"tier": "decline", "label": "Priced for Decline",
-                "color": "red",
-                "narrative": f"Market implies a {abs(implied_g)*100:.1f}% contraction — distress pricing."}
-    if ratio < 0.20:
-        return {"tier": "distress", "label": "Priced for Distress",
-                "color": "red",
-                "narrative": f"Market implies just {implied_g*100:.1f}% growth — well below sector norms."}
-    if ratio < 0.55:
-        return {"tier": "discount", "label": "Priced for Discount",
-                "color": "green",
-                "narrative": f"Market implies {implied_g*100:.1f}% — material discount to sector growth ceiling."}
-    if ratio < 0.85:
-        return {"tier": "fair_value", "label": "Priced for Fair Value",
-                "color": "blue",
-                "narrative": f"Market implies {implied_g*100:.1f}% — broadly aligned with sector growth norms."}
-    if ratio < 1.00:
-        return {"tier": "growth", "label": "Priced for Growth",
-                "color": "blue",
-                "narrative": f"Market implies {implied_g*100:.1f}% — top-of-band growth expectations."}
-    if ratio < 1.20:
-        return {"tier": "excellence", "label": "Priced for Excellence",
-                "color": "amber",
-                "narrative": f"Market implies {implied_g*100:.1f}% — at sector ceiling; execution must be flawless."}
-    return {"tier": "miracle", "label": "Priced for Miracle",
-            "color": "red",
-            "narrative": f"Market implies {implied_g*100:.1f}% — exceeds sector ceiling × 1.2; speculative."}
+    mos = margin_of_safety   # +ve = undervalued; -ve = overvalued
+
+    # Sector ceiling override — only fires when DCF ALSO says overvalued.
+    # When MOS is positive (model says undervalued) but implied growth happens
+    # to exceed the ceiling, we trust MOS — the implied-growth math can be
+    # noisy on highly-leveraged or low-FCF stocks (e.g. Ford).
+    if (mos < -10 and implied_g is not None and sector_ceiling
+            and implied_g > sector_ceiling * 1.20):
+        return {"tier": "miracle", "label": "Priced for Miracle", "color": "red",
+                "narrative": (f"Market implies {implied_g*100:.1f}% growth — exceeds sector "
+                              f"ceiling × 1.2; speculative.")}
+
+    if mos >= 40:
+        return {"tier": "deep_discount", "label": "Priced for Deep Discount", "color": "green",
+                "narrative": f"Trading {mos:.0f}% below VALUS fair value — market overly pessimistic."}
+    if mos >= 15:
+        return {"tier": "discount", "label": "Priced for Discount", "color": "green",
+                "narrative": f"Trading {mos:.0f}% below VALUS fair value — undervalued."}
+    if mos >= -10:
+        return {"tier": "fair_value", "label": "Priced for Fair Value", "color": "blue",
+                "narrative": "VALUS and market are aligned — fair value zone."}
+    if mos >= -25:
+        return {"tier": "growth", "label": "Priced for Growth", "color": "amber",
+                "narrative": (f"Market paying a growth premium — VALUS sees stock as "
+                              f"overvalued by {abs(mos):.0f}%.")}
+    if mos >= -50:
+        return {"tier": "excellence", "label": "Priced for Excellence", "color": "amber",
+                "narrative": (f"Market expecting flawless execution — VALUS sees stock as "
+                              f"overvalued by {abs(mos):.0f}%.")}
+    return {"tier": "miracle", "label": "Priced for Miracle", "color": "red",
+            "narrative": (f"Market pricing in extraordinary outcomes — VALUS sees stock as "
+                          f"overvalued by {abs(mos):.0f}%.")}
 
 
 def _sector_growth_ceiling(sector, industry, is_structural_transformer=False, moat_detected=False):
@@ -1463,22 +1466,25 @@ def _build_verdict_summary(ticker, priced_for, implied_growth_pct, model_growth_
                 f"sector ceiling of {sector_ceiling_pct:.0f}% — the market is being conservative."
             )
 
-    # Reason 3 — analyst alignment, capital structure, or special context
+    # Reason 3 — capital structure / cash position / analyst alignment
+    # Priority order: cash-rich (most differentiated) → debt classification →
+    # structural transformer → analyst alignment → Mag 7
     third_reason = None
-    if analyst_target and price:
+
+    if is_cash_rich and cash_pct_of_mcap and cash_pct_of_mcap >= 15:
+        third_reason = (
+            f"Cash-loaded balance sheet — net cash is {cash_pct_of_mcap:.0f}% of market cap, "
+            f"providing strategic optionality (buybacks, M&A, R&D) and recession resilience "
+            f"not fully captured by DCF."
+        )
+    elif analyst_target and price:
         at_gap = (analyst_target - price) / price * 100
         if abs(at_gap) > 5:
             direction = "above" if at_gap > 0 else "below"
             third_reason = (
                 f"Sell-side analysts target ${analyst_target:.2f} ({abs(at_gap):.0f}% "
-                f"{direction} current price) — they {'agree with the bull case' if at_gap > 0 else 'see downside ahead'}."
+                f"{direction} current price) — they {'see further upside' if at_gap > 0 else 'see downside ahead'}."
             )
-
-    if third_reason is None and is_cash_rich and cash_pct_of_mcap:
-        third_reason = (
-            f"Cash position is {cash_pct_of_mcap:.0f}% of market cap — strategic "
-            f"optionality (buybacks, M&A, R&D) provides a cushion not captured by FCF alone."
-        )
 
     if third_reason is None and debt_momentum:
         dm_class = debt_momentum.get("classification")
@@ -1515,24 +1521,26 @@ def _build_verdict_summary(ticker, priced_for, implied_growth_pct, model_growth_
     if third_reason:
         reasons.append(third_reason)
 
-    # Verdict line — direct user-facing recommendation tone
-    if tier in ("decline", "distress"):
-        verdict = (f"Our model sees the market as overly pessimistic — meaningful upside "
-                   f"if fundamentals stabilise.")
+    # Verdict line — always matches the sign of margin_of_safety so it's
+    # consistent with the OVERVALUED/UNDERVALUED tag at the top of the page.
+    mos = margin_of_safety or 0
+    if tier == "deep_discount":
+        verdict = (f"VALUS sees this stock as undervalued by {abs(mos):.0f}% — market is "
+                   f"overly pessimistic; meaningful upside if fundamentals hold.")
     elif tier == "discount":
-        verdict = (f"Our model sees this stock as undervalued by "
-                   f"{abs(margin_of_safety or 0):.0f}% — trading below fundamental value.")
+        verdict = (f"VALUS sees this stock as undervalued by {abs(mos):.0f}% — trading "
+                   f"below fundamental value.")
     elif tier == "fair_value":
-        verdict = (f"Market and model are aligned — fair value zone, no clear edge.")
+        verdict = "VALUS and market are aligned — fair value zone, no clear edge."
     elif tier == "growth":
-        verdict = (f"Reasonable growth premium baked in — execution at expected rates "
-                   f"justifies today's price.")
+        verdict = (f"VALUS sees this stock as overvalued by {abs(mos):.0f}% — market is "
+                   f"paying a growth premium.")
     elif tier == "excellence":
-        verdict = (f"Premium pricing assumes flawless execution — limited margin "
-                   f"of error if growth slows.")
+        verdict = (f"VALUS sees this stock as overvalued by {abs(mos):.0f}% — market "
+                   f"expects flawless execution; limited margin of error if growth slows.")
     elif tier == "miracle":
-        verdict = (f"Market is paying for outcomes very few companies achieve — "
-                   f"weighted toward speculation, not fundamentals.")
+        verdict = (f"VALUS sees this stock as overvalued by {abs(mos):.0f}% — market is "
+                   f"paying for outcomes very few companies achieve.")
     else:
         verdict = label or "Verdict pending."
 
@@ -3776,6 +3784,7 @@ def analyze():
             sector_ceiling  = _ceiling,
             price           = price,
             iv              = intrinsic_value,
+            margin_of_safety = margin_of_safety,
         )
         is_mag7 = _is_mag7(ticker)
 
