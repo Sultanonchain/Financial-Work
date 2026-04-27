@@ -245,6 +245,8 @@ button { font-family: inherit; cursor: pointer; }
   padding: var(--space-9) 0 var(--space-7);
   text-align: center;
   position: relative;
+  z-index: 60;   /* above .results (z=1), .site-footer (z=1), so the search
+                    dropdown can overlay sibling sections without bleeding */
 }
 
 .hero__title {
