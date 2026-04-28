@@ -2979,25 +2979,29 @@ def _analyze_cache_set(key, payload):
 # /api/discover endpoint is hit, each ticker is run through the cached
 # analyze pipeline and a thin summary is returned.
 DISCOVERY_TICKERS = [
-    # Tech
-    "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA",
-    "ORCL", "CRM", "ADBE", "AMD", "INTC", "AVGO",
-    # Financials
+    # Tech — mega + semis + software
+    "AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "META", "NVDA", "TSLA",
+    "ORCL", "CRM", "ADBE", "AMD", "INTC", "AVGO", "QCOM", "TXN",
+    "MU", "ARM", "NOW", "SNOW", "PLTR", "PANW", "CRWD",
+    # Financials — banks, payments, brokers
     "JPM", "BAC", "WFC", "GS", "MS", "BRK-B", "V", "MA", "AXP",
-    # Healthcare
-    "JNJ", "UNH", "LLY", "PFE", "ABBV", "MRK", "TMO",
+    "SCHW", "BLK", "SPGI", "COIN", "HOOD",
+    # Healthcare — pharma + medtech
+    "JNJ", "UNH", "LLY", "PFE", "ABBV", "MRK", "TMO", "ABT", "DHR",
+    "ISRG", "VRTX", "REGN",
     # Consumer
     "WMT", "HD", "MCD", "NKE", "KO", "PEP", "SBUX", "COST", "TGT",
+    "LULU", "CMG", "ABNB", "BKNG",
+    # Auto / Mobility
+    "F", "GM", "UBER",
     # Energy / Materials
-    "XOM", "CVX", "COP", "FCX", "LIN",
-    # Industrials
-    "CAT", "BA", "GE", "UNP", "RTX", "HON",
-    # Communications
-    "DIS", "NFLX", "CMCSA", "T", "VZ",
-    # Real Estate
-    "AMT", "PLD",
-    # Utilities
-    "NEE", "DUK",
+    "XOM", "CVX", "COP", "OXY", "FCX", "LIN",
+    # Industrials / Defense
+    "CAT", "BA", "GE", "UNP", "RTX", "HON", "LMT", "DE",
+    # Communications / Streaming
+    "DIS", "NFLX", "CMCSA", "T", "VZ", "TMUS", "SPOT",
+    # Real Estate / Utilities
+    "AMT", "PLD", "EQIX", "NEE", "DUK",
 ]
 
 @app.route("/api/discover")
@@ -3007,35 +3011,37 @@ def discover():
     cached analyze pipeline.  Each entry carries a `cached_at` timestamp
     so the UI can show freshness ("Updated 4m ago") and users understand
     that values may slightly differ from a real-time analyze call.
+
+    Concurrency: yfinance calls are I/O-bound on Yahoo's API, so a
+    ThreadPoolExecutor reduces a cold-cache cold-start from ~150s
+    (sequential) to ~10-20s (10 concurrent threads).  Cached tickers
+    return from the in-process cache effectively for free.
     """
-    out = []
     now = time.time()
-    for t in DISCOVERY_TICKERS:
+
+    def _fetch_one(t):
         try:
             ck = _analyze_cache_key(t, {})
             entry = _ANALYZE_CACHE.get(ck)
+            d = None
             cached_at_age = None
             if entry is not None:
                 ts, payload = entry
                 if now - ts < _ANALYZE_CACHE_TTL_S:
                     d = payload
                     cached_at_age = int(now - ts)
-                else:
-                    d = None
-            else:
-                d = None
 
             if d is None:
-                # Cache miss — do a fresh fetch via analyze()
                 with app.test_request_context(f"/api/analyze?ticker={t}"):
                     resp = analyze()
                 if isinstance(resp, tuple):
                     resp = resp[0]
                 d = resp.get_json() if hasattr(resp, "get_json") else None
-                cached_at_age = 0   # just computed
+                cached_at_age = 0
+
             if not d or d.get("error"):
-                continue
-            out.append({
+                return None
+            return {
                 "ticker":      d.get("ticker") or t,
                 "name":        d.get("company_name"),
                 "sector":      d.get("sector"),
@@ -3048,12 +3054,19 @@ def discover():
                 "is_etf":      bool(d.get("is_etf")),
                 "extreme":     bool(d.get("extreme_mos_flag")),
                 "age_seconds": cached_at_age,
-            })
+            }
         except Exception:
-            continue
+            return None
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        results = list(pool.map(_fetch_one, DISCOVERY_TICKERS))
+
+    out = [r for r in results if r is not None]
     return jsonify({
         "items": out,
         "count": len(out),
+        "universe_size": len(DISCOVERY_TICKERS),
         "generated_at": int(now),
     })
 
