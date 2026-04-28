@@ -888,6 +888,15 @@ button { font-family: inherit; cursor: pointer; }
   box-shadow: 0 12px 28px -10px var(--accent-glow);
 }
 .lb-row.is-mine { border-color: var(--accent-strong); background: rgba(94,234,212,0.04); }
+.lb-row.is-fresh {
+  animation: lb-row-arrive 1500ms var(--ease-out);
+}
+@keyframes lb-row-arrive {
+  0%   { background: var(--accent-soft); border-color: var(--accent); transform: translateX(-8px); opacity: 0.7; }
+  60%  { background: var(--accent-soft); border-color: var(--accent); transform: translateX(0); opacity: 1; }
+  100% { background: transparent; border-color: rgba(255,255,255,0.04); }
+}
+@media (prefers-reduced-motion: reduce) { .lb-row.is-fresh { animation: none; } }
 
 .lb-rank {
   font-family: var(--font-mono);

@@ -2939,7 +2939,9 @@ def leaderboard_submit():
         "user_token":   user_token,
         "tickers":      tickers,
         "note":         note,
-        "submitted_at": int(time.time()),
+        # Float timestamp so re-publishes within the same second still
+        # preserve recency ordering for the "Most Recent" sort.
+        "submitted_at": time.time(),
     })
     # Keep only the most recent 200 entries to bound storage
     entries = sorted(entries, key=lambda e: -e.get("submitted_at", 0))[:200]

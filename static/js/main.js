@@ -1974,6 +1974,7 @@ function setupSubmitToLeaderboard() {
     const u = ensureValusUser(name);
 
     submitBtn.textContent = "Publishing…";
+    submitBtn.disabled = true;
     try {
       const res = await fetch("/api/leaderboard/submit", {
         method: "POST",
@@ -1983,12 +1984,17 @@ function setupSubmitToLeaderboard() {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       submitBtn.textContent = "✓ Published";
+      // Auto-navigate to the leaderboard so the user sees their rank.
+      // Brief delay so the success state is visible.
       setTimeout(() => {
-        submitBtn.textContent = "Publish";
         modal.classList.add("hidden");
-      }, 900);
+        submitBtn.textContent = "Publish";
+        submitBtn.disabled = false;
+        openLeaderboardPage();
+      }, 700);
     } catch (e) {
       submitBtn.textContent = "Try again";
+      submitBtn.disabled = false;
       setTimeout(() => { submitBtn.textContent = "Publish"; }, 1200);
     }
   };
@@ -1996,32 +2002,64 @@ function setupSubmitToLeaderboard() {
 
 // ── Leaderboard page ───────────────────────────────────────────────────
 let _LB_SORT = "avg_mos";
+let _LB_POLL_TIMER = null;
 
 async function openLeaderboardPage() {
   hideAllViews();
   $("leaderboardPage").classList.remove("hidden");
   window.scrollTo({ top: 0, behavior: "instant" });
+  // Reset seen-IDs and fingerprint so first render shows everything
+  _LB_SEEN_IDS = new Set();
+  _LB_LAST_FINGERPRINT = "";
   await loadLeaderboard();
+  // Light polling: refresh every 20s while on the leaderboard page so
+  // new submissions from other users automatically appear.
+  if (_LB_POLL_TIMER) clearInterval(_LB_POLL_TIMER);
+  _LB_POLL_TIMER = setInterval(() => {
+    if (!$("leaderboardPage").classList.contains("hidden")) {
+      loadLeaderboard(false);   // silent — no spinner flash
+    } else {
+      clearInterval(_LB_POLL_TIMER);
+      _LB_POLL_TIMER = null;
+    }
+  }, 20000);
 }
 function closeLeaderboardPage() {
   $("leaderboardPage").classList.add("hidden");
   document.querySelector(".hero")?.classList.remove("hidden");
+  if (_LB_POLL_TIMER) {
+    clearInterval(_LB_POLL_TIMER);
+    _LB_POLL_TIMER = null;
+  }
 }
 
-async function loadLeaderboard() {
-  $("lbLoading").classList.remove("hidden");
-  $("lbEmpty").classList.add("hidden");
-  $("lbList").innerHTML = "";
+let _LB_LAST_FINGERPRINT = "";
+
+async function loadLeaderboard(showSpinner = true) {
+  if (showSpinner) {
+    $("lbLoading").classList.remove("hidden");
+    $("lbEmpty").classList.add("hidden");
+    $("lbList").innerHTML = "";
+  }
   try {
     const res = await fetch(`/api/leaderboard?sort=${encodeURIComponent(_LB_SORT)}`);
     const data = await res.json();
-    renderLeaderboard(data.items || []);
+    const items = data.items || [];
+    // Skip re-render if nothing changed (preserves scroll position on polls)
+    const fp = JSON.stringify(items.map(e => [e.id, e.avg_mos, e.ticker_count]));
+    if (fp === _LB_LAST_FINGERPRINT) return;
+    _LB_LAST_FINGERPRINT = fp;
+    renderLeaderboard(items);
   } catch {
     renderLeaderboard([]);
   } finally {
     $("lbLoading").classList.add("hidden");
   }
 }
+
+// Track which entries have been seen so newly-arrived submissions
+// can briefly highlight when they show up via polling.
+let _LB_SEEN_IDS = new Set();
 
 function renderLeaderboard(items) {
   const list  = $("lbList");
@@ -2033,19 +2071,33 @@ function renderLeaderboard(items) {
   }
   empty.classList.add("hidden");
 
+  // Track current user — used to mark "MINE" and to auto-scroll to it
   const u = getValusUser();
-  const myToken = u?.token;
+  const myName = (u?.name || "").trim().toLowerCase();
+
+  // Diff: which IDs are NEW since last render?
+  const newIds = new Set();
+  items.forEach(it => {
+    if (!_LB_SEEN_IDS.has(it.id)) newIds.add(it.id);
+  });
+  // Don't flash brand-new on first ever render
+  const isFirstRender = _LB_SEEN_IDS.size === 0;
+  items.forEach(it => _LB_SEEN_IDS.add(it.id));
 
   list.innerHTML = items.map((entry, idx) => {
     const avg = entry.avg_mos;
     const avgClass = avg == null ? "" : (avg > 5 ? "positive" : (avg < -5 ? "negative" : ""));
     const tickersStr = (entry.tickers || []).slice(0, 6).join(" · ") +
                        (entry.tickers.length > 6 ? ` +${entry.tickers.length - 6} more` : "");
+    const isMine = myName && entry.name && entry.name.trim().toLowerCase() === myName;
+    const isFresh = !isFirstRender && newIds.has(entry.id);
     return `
-      <div class="lb-row" data-lb-id="${escHtml(entry.id)}" data-lb-tickers="${escHtml((entry.tickers || []).join(','))}">
+      <div class="lb-row ${isMine ? 'is-mine' : ''} ${isFresh ? 'is-fresh' : ''}"
+           data-lb-id="${escHtml(entry.id)}"
+           data-lb-tickers="${escHtml((entry.tickers || []).join(','))}">
         <span class="lb-rank">${idx + 1}</span>
         <div class="lb-info">
-          <div class="lb-name">${escHtml(entry.name)}</div>
+          <div class="lb-name">${escHtml(entry.name)}${isMine ? '<span class="lb-name__mine">MINE</span>' : ''}</div>
           <div class="lb-tickers">${escHtml(tickersStr)}</div>
           ${entry.note ? `<div class="lb-note">"${escHtml(entry.note)}"</div>` : ""}
         </div>
@@ -2073,6 +2125,14 @@ function renderLeaderboard(items) {
       openSharedPortfolio(tickers);
     };
   });
+
+  // Scroll to user's own row if it's not in viewport
+  const mine = list.querySelector(".lb-row.is-mine");
+  if (mine && !isFirstRender) {
+    // Only scroll on first render or after publish — not on every poll
+  } else if (mine && isFirstRender) {
+    setTimeout(() => mine.scrollIntoView({ behavior: "smooth", block: "center" }), 400);
+  }
 }
 
 function setupLeaderboard() {
