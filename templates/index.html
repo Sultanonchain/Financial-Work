@@ -23,6 +23,10 @@
       <span class="brand-tag">Institutional Research Tool</span>
     </div>
     <div class="header-actions">
+      <button class="header-btn" id="discoverBtn" type="button" aria-label="Discover undervalued stocks">
+        <span class="header-btn__icon">⌖</span>
+        <span class="header-btn__label">Discover</span>
+      </button>
       <button class="header-btn" id="portfolioBtn" type="button" aria-label="Open portfolio">
         <span class="header-btn__icon">★</span>
         <span class="header-btn__label">Portfolio</span>
@@ -39,10 +43,16 @@
     <div class="pf-page__head">
       <button class="copy-btn" id="pfBackBtn" type="button">← Back to research</button>
       <div class="pf-page__title">
-        <h1>My Portfolio</h1>
-        <p>Real-time DCF tracking across your watchlist.</p>
+        <h1 id="pfPageTitle">My Portfolio</h1>
+        <p id="pfPageTagline">Real-time DCF tracking across your watchlist.</p>
       </div>
-      <button class="copy-btn" id="pfRefreshBtn" type="button">↻ Refresh prices</button>
+      <div class="pf-page__actions">
+        <button class="copy-btn" id="pfShareBtn" type="button">↗ Share</button>
+        <button class="copy-btn" id="pfRefreshBtn" type="button">↻ Refresh</button>
+      </div>
+    </div>
+    <div class="pf-shared-banner hidden" id="pfSharedBanner">
+      ★ <strong>Shared portfolio</strong> — read-only view. Found something interesting? <a href="/" id="pfSharedHome">Build your own.</a>
     </div>
 
     <!-- Summary cards (4 metrics) -->
@@ -274,6 +284,46 @@
   </div>
 </main>
 
+<!-- ── DISCOVERY PAGE — Sector heatmap ────────────────────────────────── -->
+<main class="discover-page hidden" id="discoverPage">
+  <div class="container">
+    <div class="pf-page__head">
+      <button class="copy-btn" id="discBackBtn" type="button">← Back</button>
+      <div class="pf-page__title">
+        <h1>Discover</h1>
+        <p>Live VALUS verdict across 50+ S&amp;P 500 names. Find what's mispriced right now.</p>
+      </div>
+      <button class="copy-btn" id="discRefreshBtn" type="button">↻ Refresh</button>
+    </div>
+
+    <!-- Filter bar -->
+    <div class="card disc-filters">
+      <div class="disc-filter-row">
+        <span class="disc-filter-label">Filter:</span>
+        <button class="disc-tier-pill active" data-disc-tier="all" type="button">All</button>
+        <button class="disc-tier-pill" data-disc-tier="undervalued" type="button">Undervalued</button>
+        <button class="disc-tier-pill" data-disc-tier="fair" type="button">Fair Value</button>
+        <button class="disc-tier-pill" data-disc-tier="overvalued" type="button">Overvalued</button>
+        <button class="disc-tier-pill" data-disc-tier="speculative" type="button">Speculative</button>
+      </div>
+      <div class="disc-filter-row">
+        <span class="disc-filter-label">Sort:</span>
+        <button class="disc-tier-pill active" data-disc-sort="mos" type="button">By MOS</button>
+        <button class="disc-tier-pill" data-disc-sort="ticker" type="button">By Ticker</button>
+        <button class="disc-tier-pill" data-disc-sort="sector" type="button">By Sector</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="disc-loading hidden" id="discLoading">
+        <div class="spinner"></div>
+        <span>Loading 50+ stocks…</span>
+      </div>
+      <div class="disc-grid" id="discGrid"></div>
+    </div>
+  </div>
+</main>
+
 <!-- ── BTC HODL HERO ─────────────────────────────────────────────────── -->
 <main class="btc-hero hidden" id="btcHero">
   <div class="container">
@@ -486,6 +536,58 @@
           <div class="card">
             <div class="section-title">Price · last 12 months</div>
             <div class="chart-wrap"><canvas id="priceChart"></canvas></div>
+          </div>
+
+          <!-- Custom DCF assumptions — live sliders -->
+          <div class="card custom-dcf">
+            <div class="section-title-row">
+              <div class="section-title">Try your own assumptions</div>
+              <button class="copy-btn copy-btn--small" id="cdResetBtn" type="button">↺ Reset</button>
+            </div>
+
+            <div class="cd-result">
+              <div class="cd-result__col">
+                <span class="cd-result__label">VALUS fair value</span>
+                <span class="cd-result__value numeric" id="cdValusIV">—</span>
+              </div>
+              <div class="cd-arrow">→</div>
+              <div class="cd-result__col cd-result__col--your">
+                <span class="cd-result__label">Your fair value</span>
+                <span class="cd-result__value numeric" id="cdYourIV">—</span>
+                <span class="cd-result__delta numeric" id="cdYourDelta">—</span>
+              </div>
+            </div>
+
+            <div class="cd-sliders">
+              <div class="cd-slider-row">
+                <div class="cd-slider-head">
+                  <span class="cd-slider-label">Stage 1 growth · g₁</span>
+                  <span class="cd-slider-value numeric" id="cdS1Val">—</span>
+                </div>
+                <input type="range" class="dcf-slider cd-slider" id="cdS1" min="0" max="50" step="0.5"/>
+              </div>
+              <div class="cd-slider-row">
+                <div class="cd-slider-head">
+                  <span class="cd-slider-label">Stage 2 growth · g₂</span>
+                  <span class="cd-slider-value numeric" id="cdS2Val">—</span>
+                </div>
+                <input type="range" class="dcf-slider cd-slider" id="cdS2" min="0" max="30" step="0.5"/>
+              </div>
+              <div class="cd-slider-row">
+                <div class="cd-slider-head">
+                  <span class="cd-slider-label">Discount rate · WACC</span>
+                  <span class="cd-slider-value numeric" id="cdWaccVal">—</span>
+                </div>
+                <input type="range" class="dcf-slider cd-slider" id="cdWacc" min="3" max="20" step="0.1"/>
+              </div>
+              <div class="cd-slider-row">
+                <div class="cd-slider-head">
+                  <span class="cd-slider-label">Terminal growth · g_T</span>
+                  <span class="cd-slider-value numeric" id="cdTgVal">—</span>
+                </div>
+                <input type="range" class="dcf-slider cd-slider" id="cdTg" min="0.5" max="5" step="0.1"/>
+              </div>
+            </div>
           </div>
 
           <!-- DCF projection chart + interactive year scrubber -->

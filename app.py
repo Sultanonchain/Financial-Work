@@ -2778,11 +2778,116 @@ def statements():
         return jsonify({"error": str(e)}), 500
 
 
+# ── Analyze response cache (15-min TTL) ────────────────────────────────
+# Repeated visits to the same ticker (e.g. portfolio refresh, share-link
+# clicks, discovery heatmap) hit the cache for sub-100ms responses.
+_ANALYZE_CACHE = {}      # {(ticker, params_str): (timestamp, response_dict)}
+_ANALYZE_CACHE_TTL_S = 900   # 15 minutes
+_ANALYZE_CACHE_MAX = 500     # cap to bound memory
+
+def _analyze_cache_key(ticker, args):
+    relevant = sorted((k, v) for k, v in args.items() if k != "ticker")
+    return f"{ticker}|{relevant}"
+
+def _analyze_cache_get(key):
+    entry = _ANALYZE_CACHE.get(key)
+    if entry is None: return None
+    ts, payload = entry
+    if time.time() - ts < _ANALYZE_CACHE_TTL_S:
+        return payload
+    _ANALYZE_CACHE.pop(key, None)
+    return None
+
+def _analyze_cache_set(key, payload):
+    _ANALYZE_CACHE[key] = (time.time(), payload)
+    if len(_ANALYZE_CACHE) > _ANALYZE_CACHE_MAX:
+        # Drop the oldest entry to bound size
+        oldest = min(_ANALYZE_CACHE.keys(), key=lambda k: _ANALYZE_CACHE[k][0])
+        _ANALYZE_CACHE.pop(oldest, None)
+
+
+# ── Discovery: pre-curated S&P 500 sample, grouped by sector ──────────────
+# Picked to span every major sector at meaningful market-cap.  When the
+# /api/discover endpoint is hit, each ticker is run through the cached
+# analyze pipeline and a thin summary is returned.
+DISCOVERY_TICKERS = [
+    # Tech
+    "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA",
+    "ORCL", "CRM", "ADBE", "AMD", "INTC", "AVGO",
+    # Financials
+    "JPM", "BAC", "WFC", "GS", "MS", "BRK-B", "V", "MA", "AXP",
+    # Healthcare
+    "JNJ", "UNH", "LLY", "PFE", "ABBV", "MRK", "TMO",
+    # Consumer
+    "WMT", "HD", "MCD", "NKE", "KO", "PEP", "SBUX", "COST", "TGT",
+    # Energy / Materials
+    "XOM", "CVX", "COP", "FCX", "LIN",
+    # Industrials
+    "CAT", "BA", "GE", "UNP", "RTX", "HON",
+    # Communications
+    "DIS", "NFLX", "CMCSA", "T", "VZ",
+    # Real Estate
+    "AMT", "PLD",
+    # Utilities
+    "NEE", "DUK",
+]
+
+@app.route("/api/discover")
+def discover():
+    """
+    Returns a thin summary for every ticker in DISCOVERY_TICKERS using the
+    cached analyze pipeline.  Frontend renders as a sector heatmap.
+    """
+    out = []
+    for t in DISCOVERY_TICKERS:
+        try:
+            # Re-use the cache: build the same key analyze() builds and probe.
+            # If miss, do a full fetch via the /api/analyze flow by
+            # invoking the analyze function under a synthetic request.
+            ck = _analyze_cache_key(t, {})
+            cached = _analyze_cache_get(ck)
+            if cached is not None:
+                d = cached
+            else:
+                # Fetch directly without going through Flask routing
+                with app.test_request_context(f"/api/analyze?ticker={t}"):
+                    resp = analyze()
+                if isinstance(resp, tuple):    # (response, status)
+                    resp = resp[0]
+                d = resp.get_json() if hasattr(resp, "get_json") else None
+            if not d or d.get("error"):
+                continue
+            out.append({
+                "ticker":    d.get("ticker") or t,
+                "name":      d.get("company_name"),
+                "sector":    d.get("sector"),
+                "industry":  d.get("industry"),
+                "price":     d.get("current_price"),
+                "iv":        d.get("intrinsic_value"),
+                "mos":       d.get("margin_of_safety"),
+                "tier":      (d.get("priced_for") or {}).get("tier"),
+                "label":     (d.get("priced_for") or {}).get("label"),
+                "is_etf":    bool(d.get("is_etf")),
+                "extreme":   bool(d.get("extreme_mos_flag")),
+            })
+        except Exception:
+            continue
+    return jsonify({"items": out, "count": len(out)})
+
+
 @app.route("/api/analyze")
 def analyze():
     ticker = request.args.get("ticker", "").strip().upper()
     if not ticker:
         return jsonify({"error": "Ticker is required"}), 400
+
+    # Cache lookup
+    _ck = _analyze_cache_key(ticker, dict(request.args))
+    _cached = _analyze_cache_get(_ck)
+    if _cached is not None:
+        resp = jsonify(_cached)
+        resp.headers["X-Valus-Cache"] = "HIT"
+        return resp
 
     try:
         # ── User overrides ────────────────────────────────────────────────────
@@ -2820,7 +2925,7 @@ def analyze():
                           for d, c in hist["Close"].dropna().items()]
             except Exception:
                 pass
-            return jsonify({
+            etf_payload = {
                 "ticker":        ticker,
                 "is_etf":        True,
                 "company_name":  info.get("longName") or info.get("shortName") or ticker,
@@ -2837,7 +2942,9 @@ def analyze():
                 "etf_message":   ("DCF valuation does not apply to ETFs. ETFs hold a "
                                   "basket of assets — to value an ETF, look at the "
                                   "weighted intrinsic value of its underlying holdings."),
-            })
+            }
+            _analyze_cache_set(_ck, etf_payload)
+            return jsonify(etf_payload)
 
         cashflow      = stock.cashflow
         income_stmt   = stock.income_stmt
@@ -4337,11 +4444,42 @@ def analyze():
             "st_robotaxi_s2_applied":    st_robotaxi_s2_applied if is_structural_transformer else False,
         }
 
-        return jsonify(clean(result))
+        cleaned = clean(result)
+        _analyze_cache_set(_ck, cleaned)
+        resp = jsonify(cleaned)
+        resp.headers["X-Valus-Cache"] = "MISS"
+        return resp
 
     except Exception as e:
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
 
+def _warm_discovery_cache():
+    """
+    Background thread that pre-runs the discovery list so the FIRST user
+    hitting /api/discover gets a fast response instead of waiting ~150s.
+    Re-warms every 12 minutes to keep cache fresh.
+    """
+    import threading
+    def loop():
+        while True:
+            try:
+                for t in DISCOVERY_TICKERS:
+                    ck = _analyze_cache_key(t, {})
+                    if _analyze_cache_get(ck) is None:
+                        try:
+                            with app.test_request_context(f"/api/analyze?ticker={t}"):
+                                analyze()
+                        except Exception:
+                            pass
+                        time.sleep(0.4)   # gentle on yfinance
+            except Exception:
+                pass
+            time.sleep(12 * 60)
+    threading.Thread(target=loop, daemon=True).start()
+
+
 if __name__ == "__main__":
+    # Kick off background warmup once
+    _warm_discovery_cache()
     app.run(debug=True, port=5050)

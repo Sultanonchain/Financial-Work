@@ -126,6 +126,7 @@ async function analyze(ticker, params = {}) {
       throw new Error(data.error || `HTTP ${res.status}`);
     }
     hideLoading();
+    pushTickerToURL(ticker);
     if (isBTC) {
       renderBTCHero(data);
     } else if (data.is_etf) {
@@ -197,6 +198,7 @@ function renderResults(d) {
   renderMiniStats(d);
   renderDrawerContent(d);
   syncAddPortfolioButtonForCurrent();
+  if (typeof window._cdReset === "function") window._cdReset();
 
   attachCardGlow();
   $("results").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1486,12 +1488,24 @@ let _PF_SORT = "added";   // ticker | mos | added
 
 function openPortfolioPage() {
   // Hide ALL other views — portfolio is its own dedicated page
+  hideAllViews?.();
   $("results").classList.add("hidden");
-  $("btcHero").classList.add("hidden");
+  $("btcHero")?.classList.add("hidden");
+  $("etfHero")?.classList.add("hidden");
+  $("discoverPage")?.classList.add("hidden");
   document.querySelector(".hero")?.classList.add("hidden");
   $("loading")?.classList.add("hidden");
   $("error")?.classList.add("hidden");
   $("portfolioPage").classList.remove("hidden");
+  // Restore the user's own-portfolio chrome (in case the page is currently
+  // showing a shared view from a /?p=... deep link)
+  _IS_SHARED_VIEW = false;
+  $("pfSharedBanner")?.classList.add("hidden");
+  $("pfPageTitle").textContent = "My Portfolio";
+  $("pfPageTagline").textContent = "Real-time DCF tracking across your watchlist.";
+  $("pfRefreshBtn").style.display = "";
+  $("pfShareBtn").style.display = "";
+  $("pfAllocationCard").style.display = "";
   renderPortfolioPage();
   window.scrollTo({ top: 0, behavior: "instant" });
 }
@@ -1789,6 +1803,398 @@ function setupModalDismiss() {
    Boot
    ════════════════════════════════════════════════════════════════════════ */
 
+// ── Custom DCF — live recompute from user-controlled sliders ──────────
+function recomputeCustomIV(d, s1Pct, s2Pct, waccPct, tgPct) {
+  const baseFcf = d.base_fcf || 0;
+  if (!baseFcf) return null;
+  const yrs = d.projection_years || 10;
+  const stage1Years = Math.ceil(yrs / 2);
+
+  const s1   = s1Pct  / 100;
+  const s2   = s2Pct  / 100;
+  const wacc = waccPct / 100;
+  const tg   = tgPct  / 100;
+
+  // Guard: WACC must exceed terminal growth for Gordon Growth stability
+  if (wacc <= tg) return null;
+
+  let totalPv = 0;
+  let fcf = baseFcf;
+  for (let y = 1; y <= yrs; y++) {
+    const g = y <= stage1Years ? s1 : s2;
+    fcf = fcf * (1 + g);
+    totalPv += fcf / Math.pow(1 + wacc, y);
+  }
+  // Gordon Growth terminal value
+  const terminalFcf = fcf * (1 + tg);
+  const tv = terminalFcf / (wacc - tg);
+  const tvPv = tv / Math.pow(1 + wacc, yrs);
+
+  const enterprise = totalPv + tvPv;
+  const netDebt    = d.net_debt || 0;
+  const equity     = enterprise - netDebt;
+  const shares     = d.shares_outstanding || 1;
+  return equity / shares;
+}
+
+function updateSliderFill(slider) {
+  const min = parseFloat(slider.min);
+  const max = parseFloat(slider.max);
+  const val = parseFloat(slider.value);
+  const pct = ((val - min) / (max - min)) * 100;
+  slider.style.setProperty("--slider-pct", `${pct}%`);
+}
+
+function setupCustomDCFSliders() {
+  const ids = ["cdS1", "cdS2", "cdWacc", "cdTg"];
+  const sliders = ids.map($).filter(Boolean);
+  if (sliders.length !== 4) return;
+
+  const reset = () => {
+    if (!_LAST_DATA) return;
+    const d = _LAST_DATA;
+    $("cdS1").value   = d.stage1_growth   ?? 10;
+    $("cdS2").value   = d.stage2_growth   ?? 6;
+    $("cdWacc").value = d.wacc            ?? 9;
+    $("cdTg").value   = d.terminal_growth ?? 2.5;
+    sliders.forEach(updateSliderFill);
+    update();
+  };
+
+  const update = () => {
+    if (!_LAST_DATA) return;
+    const d = _LAST_DATA;
+    const s1   = parseFloat($("cdS1").value);
+    const s2   = parseFloat($("cdS2").value);
+    const wacc = parseFloat($("cdWacc").value);
+    const tg   = parseFloat($("cdTg").value);
+
+    $("cdS1Val").textContent   = `${fmt(s1, 1)}%`;
+    $("cdS2Val").textContent   = `${fmt(s2, 1)}%`;
+    $("cdWaccVal").textContent = `${fmt(wacc, 1)}%`;
+    $("cdTgVal").textContent   = `${fmt(tg, 1)}%`;
+
+    const valusIv = d.intrinsic_value;
+    $("cdValusIV").textContent = valusIv != null ? fmtPrice(valusIv) : "—";
+
+    const yourIv = recomputeCustomIV(d, s1, s2, wacc, tg);
+    if (yourIv != null && isFinite(yourIv) && yourIv > 0) {
+      $("cdYourIV").textContent = fmtPrice(yourIv);
+      const deltaEl = $("cdYourDelta");
+      if (d.current_price && d.current_price > 0) {
+        const newMos = (yourIv - d.current_price) / d.current_price * 100;
+        deltaEl.textContent = `${fmtPct(newMos)} vs current price`;
+        deltaEl.classList.toggle("positive", newMos > 0);
+        deltaEl.classList.toggle("negative", newMos < 0);
+      } else {
+        deltaEl.textContent = "";
+      }
+    } else {
+      $("cdYourIV").textContent = "—";
+      $("cdYourDelta").textContent = "";
+    }
+  };
+
+  // Bind input handlers
+  sliders.forEach(s => {
+    s.oninput = () => { updateSliderFill(s); update(); };
+  });
+  const resetBtn = $("cdResetBtn");
+  if (resetBtn) resetBtn.onclick = reset;
+
+  // Expose for renderResults to call after analysis
+  window._cdReset = reset;
+}
+
+// ── Discovery page ────────────────────────────────────────────────────
+let _DISC_DATA = [];
+let _DISC_TIER_FILTER = "all";
+let _DISC_SORT = "mos";
+
+function tierBucket(tier) {
+  if (!tier) return "neutral";
+  if (["distress", "deep_discount", "discount"].includes(tier)) return "undervalued";
+  if (tier === "fair_value") return "fair";
+  if (["growth", "excellence"].includes(tier)) return "overvalued";
+  if (tier === "miracle") return "speculative";
+  return "neutral";
+}
+
+function tierColor(tier) {
+  const bucket = tierBucket(tier);
+  const map = {
+    undervalued: { accent: "#34d399", strong: "rgba(52,211,153,0.35)", glow: "rgba(52,211,153,0.30)" },
+    fair:        { accent: "#60a5fa", strong: "rgba(96,165,250,0.35)", glow: "rgba(96,165,250,0.25)" },
+    overvalued:  { accent: "#fbbf24", strong: "rgba(251,191,36,0.35)", glow: "rgba(251,191,36,0.25)" },
+    speculative: { accent: "#f87171", strong: "rgba(248,113,113,0.35)", glow: "rgba(248,113,113,0.30)" },
+    neutral:     { accent: "#6b7382", strong: "rgba(107,115,130,0.35)", glow: "rgba(107,115,130,0.20)" },
+  };
+  return map[bucket] || map.neutral;
+}
+
+async function openDiscoverPage() {
+  hideAllViews();
+  $("discoverPage").classList.remove("hidden");
+  window.scrollTo({ top: 0, behavior: "instant" });
+  if (_DISC_DATA.length === 0) {
+    await loadDiscover();
+  } else {
+    renderDiscover();
+  }
+}
+
+function closeDiscoverPage() {
+  $("discoverPage").classList.add("hidden");
+  document.querySelector(".hero")?.classList.remove("hidden");
+}
+
+async function loadDiscover() {
+  $("discLoading").classList.remove("hidden");
+  $("discGrid").innerHTML = "";
+  try {
+    const res = await fetch("/api/discover");
+    const data = await res.json();
+    _DISC_DATA = data.items || [];
+  } catch {
+    _DISC_DATA = [];
+  }
+  $("discLoading").classList.add("hidden");
+  renderDiscover();
+}
+
+function renderDiscover() {
+  const grid = $("discGrid");
+  if (!grid) return;
+  // Filter out extreme-MOS outliers from sorting comparisons (BRK-B share-class
+  // quirk gives +19,661% which would always dominate the top spot).  We still
+  // show them, just don't let them control the order.
+  let items = [..._DISC_DATA];
+  if (_DISC_TIER_FILTER !== "all") {
+    items = items.filter(it => tierBucket(it.tier) === _DISC_TIER_FILTER);
+  }
+  function sortMos(it) {
+    if (it.extreme || it.mos == null) return -Infinity;
+    return it.mos;
+  }
+  if (_DISC_SORT === "mos") {
+    items.sort((a, b) => sortMos(b) - sortMos(a));
+  } else if (_DISC_SORT === "ticker") {
+    items.sort((a, b) => (a.ticker || "").localeCompare(b.ticker || ""));
+  } else if (_DISC_SORT === "sector") {
+    items.sort((a, b) => (a.sector || "").localeCompare(b.sector || ""));
+  }
+
+  grid.innerHTML = items.map(it => {
+    const c = tierColor(it.tier);
+    const mos = it.mos != null ? fmtPct(it.mos) : "—";
+    const cap = it.mos != null ? Math.min(Math.abs(it.mos), 100) : 50;
+    return `
+      <div class="disc-cell" data-disc-ticker="${escHtml(it.ticker)}"
+           style="--tier-accent:${c.accent};--tier-strong:${c.strong};--tier-glow:${c.glow};">
+        <div class="disc-cell__head">
+          <span class="disc-cell__ticker">${escHtml(it.ticker)}</span>
+          <span class="disc-cell__mos">${mos}</span>
+        </div>
+        <div class="disc-cell__name">${escHtml(it.name || "—")}</div>
+        <div class="disc-cell__tier">${escHtml(it.label || "—")}</div>
+        <div class="disc-cell__bar"><div class="disc-cell__bar-fill" style="width:${cap}%"></div></div>
+      </div>
+    `;
+  }).join("");
+
+  grid.querySelectorAll(".disc-cell").forEach(cell => {
+    cell.onclick = () => {
+      closeDiscoverPage();
+      const t = cell.dataset.discTicker;
+      $("tickerInput").value = t;
+      analyze(t);
+    };
+  });
+}
+
+function setupDiscover() {
+  const btn = $("discoverBtn");
+  if (btn) btn.onclick = openDiscoverPage;
+  const back = $("discBackBtn");
+  if (back) back.onclick = closeDiscoverPage;
+  const refresh = $("discRefreshBtn");
+  if (refresh) refresh.onclick = loadDiscover;
+  document.querySelectorAll("[data-disc-tier]").forEach(b => {
+    b.onclick = () => {
+      _DISC_TIER_FILTER = b.dataset.discTier;
+      document.querySelectorAll("[data-disc-tier]").forEach(x =>
+        x.classList.toggle("active", x === b));
+      renderDiscover();
+    };
+  });
+  document.querySelectorAll("[data-disc-sort]").forEach(b => {
+    b.onclick = () => {
+      _DISC_SORT = b.dataset.discSort;
+      document.querySelectorAll("[data-disc-sort]").forEach(x =>
+        x.classList.toggle("active", x === b));
+      renderDiscover();
+    };
+  });
+}
+
+// ── Shared portfolio (read-only via URL) ───────────────────────────────
+let _IS_SHARED_VIEW = false;
+
+async function openSharedPortfolio(tickers) {
+  hideAllViews();
+  document.querySelector(".hero")?.classList.add("hidden");
+  $("portfolioPage").classList.remove("hidden");
+  $("pfSharedBanner").classList.remove("hidden");
+  $("pfPageTitle").textContent = "Shared Portfolio";
+  $("pfPageTagline").textContent = `${tickers.length} stock${tickers.length === 1 ? "" : "s"} · live VALUS verdict on each`;
+
+  // Hide refresh + share buttons (this view is read-only)
+  $("pfRefreshBtn").style.display = "none";
+  $("pfShareBtn").style.display   = "none";
+
+  _IS_SHARED_VIEW = true;
+  $("portfolioList").innerHTML = `<div class="text-muted" style="padding:24px; text-align:center;">Loading ${tickers.length} stocks…</div>`;
+
+  // Fetch each in parallel via the cached endpoint (snappy)
+  const data = await Promise.all(tickers.map(async t => {
+    try {
+      const res = await fetch(`/api/analyze?ticker=${encodeURIComponent(t)}`);
+      const d = await res.json();
+      if (d.error) return null;
+      return {
+        ticker: d.ticker || t,
+        name:   d.company_name || t,
+        sector: d.sector || "—",
+        price:  d.current_price,
+        iv:     d.intrinsic_value,
+        mos:    d.margin_of_safety,
+        tier:   d.priced_for?.label || "",
+      };
+    } catch { return null; }
+  }));
+  const items = data.filter(Boolean);
+
+  // Render the shared list (no remove buttons)
+  renderSharedList(items);
+}
+
+function renderSharedList(items) {
+  const list = $("portfolioList");
+  const empty = $("portfolioEmpty");
+  if (!items.length) {
+    empty.classList.remove("hidden");
+    list.innerHTML = "";
+    return;
+  }
+  empty.classList.add("hidden");
+
+  list.innerHTML = items.map(it => {
+    const mosClass = it.mos == null ? "neutral" : (it.mos > 5 ? "positive" : (it.mos < -5 ? "negative" : "neutral"));
+    return `
+      <div class="pf-item" data-pf-ticker="${escHtml(it.ticker)}">
+        <span class="pf-item__ticker">${escHtml(it.ticker)}</span>
+        <span class="pf-item__name">${escHtml(it.name || "")}</span>
+        <span class="pf-item__price">${it.price != null ? fmtPrice(it.price) : "—"}</span>
+        <span class="pf-item__mos ${mosClass}">${it.mos != null ? fmtPct(it.mos) : "—"}</span>
+      </div>
+    `;
+  }).join("");
+  list.querySelectorAll(".pf-item").forEach(row => {
+    row.onclick = () => {
+      const t = row.dataset.pfTicker;
+      // Leave shared view; analyze the picked stock
+      _IS_SHARED_VIEW = false;
+      $("pfSharedBanner").classList.add("hidden");
+      $("portfolioPage").classList.add("hidden");
+      document.querySelector(".hero")?.classList.remove("hidden");
+      $("tickerInput").value = t;
+      analyze(t);
+    };
+  });
+
+  // Summary: count + avg MOS + undervalued + best
+  const mosVals = items.filter(it => it.mos != null).map(it => it.mos);
+  const avg = mosVals.length ? mosVals.reduce((a, b) => a + b, 0) / mosVals.length : null;
+  const under = items.filter(it => it.mos != null && it.mos > 5).length;
+  const best = items.filter(it => it.mos != null).sort((a, b) => b.mos - a.mos)[0];
+  $("pfCount").textContent = items.length;
+  $("pfAvgMos").textContent = avg != null ? fmtPct(avg) : "—";
+  $("pfUnderCount").textContent = `${under} / ${items.length}`;
+  $("pfBest").textContent = best ? `${best.ticker} ${fmtPct(best.mos)}` : "—";
+  $("pfAllocationCard").style.display = "none";   // simpler shared view
+}
+
+function setupSharePortfolio() {
+  const shareBtn = $("pfShareBtn");
+  if (!shareBtn) return;
+  shareBtn.onclick = () => {
+    const items = pfRead();
+    if (items.length === 0) {
+      shareBtn.textContent = "Add stocks first ★";
+      setTimeout(() => { shareBtn.textContent = "↗ Share"; }, 1500);
+      return;
+    }
+    const tickers = items.map(it => it.ticker).join(",");
+    const url = `${window.location.origin}/?p=${encodeURIComponent(tickers)}`;
+    navigator.clipboard.writeText(url).then(() => {
+      shareBtn.classList.add("starred");
+      shareBtn.textContent = "✓ Link copied";
+      setTimeout(() => {
+        shareBtn.classList.remove("starred");
+        shareBtn.textContent = "↗ Share";
+      }, 1800);
+    });
+  };
+}
+
+// Helper to hide every top-level view at once
+function hideAllViews() {
+  $("results").classList.add("hidden");
+  $("btcHero")?.classList.add("hidden");
+  $("etfHero")?.classList.add("hidden");
+  $("portfolioPage")?.classList.add("hidden");
+  $("discoverPage")?.classList.add("hidden");
+  $("loading")?.classList.add("hidden");
+  $("error")?.classList.add("hidden");
+  document.querySelector(".hero")?.classList.add("hidden");
+}
+
+// ── URL deep-linking ──────────────────────────────────────────────────
+// Supports:
+//   /?t=AAPL          → auto-analyze that ticker on load
+//   /?p=AAPL,MSFT     → open shared (read-only) portfolio view
+function readURLParams() {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    ticker:    (params.get("t") || params.get("ticker") || "").trim().toUpperCase(),
+    portfolio: (params.get("p") || params.get("portfolio") || "").trim().toUpperCase(),
+  };
+}
+
+async function bootFromURL() {
+  const { ticker, portfolio } = readURLParams();
+  if (portfolio) {
+    const tickers = portfolio.split(",").map(t => t.trim()).filter(Boolean);
+    if (tickers.length > 0) {
+      openSharedPortfolio(tickers);
+      return;
+    }
+  }
+  if (ticker) {
+    $("tickerInput").value = ticker;
+    analyze(ticker);
+  }
+}
+
+// Update the URL bar when analyzing (without page reload)
+function pushTickerToURL(ticker) {
+  if (!ticker) return;
+  const url = new URL(window.location.href);
+  url.searchParams.set("t", ticker);
+  url.searchParams.delete("p");
+  window.history.replaceState({}, "", url);
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   setupSearch();
   setupAdvancedToggle();
@@ -1797,5 +2203,9 @@ document.addEventListener("DOMContentLoaded", () => {
   setupPortfolioPage();
   setupTierGlossary();
   setupModalDismiss();
+  setupCustomDCFSliders();
+  setupSharePortfolio();
+  setupDiscover();
   pfUpdateBadge();
+  bootFromURL();
 });
