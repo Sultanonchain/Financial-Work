@@ -2836,43 +2836,177 @@ DISCOVERY_TICKERS = [
 def discover():
     """
     Returns a thin summary for every ticker in DISCOVERY_TICKERS using the
-    cached analyze pipeline.  Frontend renders as a sector heatmap.
+    cached analyze pipeline.  Each entry carries a `cached_at` timestamp
+    so the UI can show freshness ("Updated 4m ago") and users understand
+    that values may slightly differ from a real-time analyze call.
     """
     out = []
+    now = time.time()
     for t in DISCOVERY_TICKERS:
         try:
-            # Re-use the cache: build the same key analyze() builds and probe.
-            # If miss, do a full fetch via the /api/analyze flow by
-            # invoking the analyze function under a synthetic request.
             ck = _analyze_cache_key(t, {})
-            cached = _analyze_cache_get(ck)
-            if cached is not None:
-                d = cached
+            entry = _ANALYZE_CACHE.get(ck)
+            cached_at_age = None
+            if entry is not None:
+                ts, payload = entry
+                if now - ts < _ANALYZE_CACHE_TTL_S:
+                    d = payload
+                    cached_at_age = int(now - ts)
+                else:
+                    d = None
             else:
-                # Fetch directly without going through Flask routing
+                d = None
+
+            if d is None:
+                # Cache miss — do a fresh fetch via analyze()
                 with app.test_request_context(f"/api/analyze?ticker={t}"):
                     resp = analyze()
-                if isinstance(resp, tuple):    # (response, status)
+                if isinstance(resp, tuple):
                     resp = resp[0]
                 d = resp.get_json() if hasattr(resp, "get_json") else None
+                cached_at_age = 0   # just computed
             if not d or d.get("error"):
                 continue
             out.append({
-                "ticker":    d.get("ticker") or t,
-                "name":      d.get("company_name"),
-                "sector":    d.get("sector"),
-                "industry":  d.get("industry"),
-                "price":     d.get("current_price"),
-                "iv":        d.get("intrinsic_value"),
-                "mos":       d.get("margin_of_safety"),
-                "tier":      (d.get("priced_for") or {}).get("tier"),
-                "label":     (d.get("priced_for") or {}).get("label"),
-                "is_etf":    bool(d.get("is_etf")),
-                "extreme":   bool(d.get("extreme_mos_flag")),
+                "ticker":      d.get("ticker") or t,
+                "name":        d.get("company_name"),
+                "sector":      d.get("sector"),
+                "industry":    d.get("industry"),
+                "price":       d.get("current_price"),
+                "iv":          d.get("intrinsic_value"),
+                "mos":         d.get("margin_of_safety"),
+                "tier":        (d.get("priced_for") or {}).get("tier"),
+                "label":       (d.get("priced_for") or {}).get("label"),
+                "is_etf":      bool(d.get("is_etf")),
+                "extreme":     bool(d.get("extreme_mos_flag")),
+                "age_seconds": cached_at_age,
             })
         except Exception:
             continue
-    return jsonify({"items": out, "count": len(out)})
+    return jsonify({
+        "items": out,
+        "count": len(out),
+        "generated_at": int(now),
+    })
+
+
+# ── Leaderboard / shared portfolios (soft sign-in via display name) ───
+import os, json as _json, uuid
+
+LEADERBOARD_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                ".valus_leaderboard.json")
+_LEADERBOARD_LOCK = False   # poor-man's mutex for the JSON file
+
+def _read_leaderboard():
+    if not os.path.exists(LEADERBOARD_FILE):
+        return []
+    try:
+        with open(LEADERBOARD_FILE) as f:
+            return _json.load(f)
+    except Exception:
+        return []
+
+def _write_leaderboard(entries):
+    with open(LEADERBOARD_FILE, "w") as f:
+        _json.dump(entries, f)
+
+
+@app.route("/api/leaderboard/submit", methods=["POST"])
+def leaderboard_submit():
+    """
+    Accept a portfolio submission for the public leaderboard.
+    Body: { name: str, user_token: str, tickers: [str], note: str }
+    Replaces any existing submission from the same user_token (soft auth
+    via localStorage-stored token — not real auth, just lets users edit).
+    """
+    body = request.get_json(silent=True) or {}
+    name = (body.get("name") or "").strip()[:40]
+    user_token = (body.get("user_token") or "").strip()[:64]
+    tickers = body.get("tickers") or []
+    note = (body.get("note") or "").strip()[:200]
+
+    if not name:       return jsonify({"error": "Display name is required"}), 400
+    if not user_token: return jsonify({"error": "User token is required"}),  400
+    tickers = [str(t).strip().upper() for t in tickers if str(t).strip()][:50]
+    if not tickers:    return jsonify({"error": "At least one ticker required"}), 400
+
+    entries = _read_leaderboard()
+    # Replace prior submission from same token, or append new
+    entries = [e for e in entries if e.get("user_token") != user_token]
+    entries.append({
+        "id":           uuid.uuid4().hex[:10],
+        "name":         name,
+        "user_token":   user_token,
+        "tickers":      tickers,
+        "note":         note,
+        "submitted_at": int(time.time()),
+    })
+    # Keep only the most recent 200 entries to bound storage
+    entries = sorted(entries, key=lambda e: -e.get("submitted_at", 0))[:200]
+    _write_leaderboard(entries)
+    return jsonify({"ok": True, "count": len(entries)})
+
+
+@app.route("/api/leaderboard/delete", methods=["POST"])
+def leaderboard_delete():
+    body = request.get_json(silent=True) or {}
+    user_token = (body.get("user_token") or "").strip()[:64]
+    if not user_token: return jsonify({"error": "user_token required"}), 400
+    entries = _read_leaderboard()
+    entries = [e for e in entries if e.get("user_token") != user_token]
+    _write_leaderboard(entries)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/leaderboard")
+def leaderboard():
+    """
+    Returns top portfolios with computed MOS metrics.  Heavy lifting is
+    cached — each portfolio entry computes avg_mos / undervalued_count
+    by re-using the analyze cache for each ticker.  Sorted by score
+    (avg_mos by default, can be tweaked via ?sort=).
+    """
+    sort = request.args.get("sort", "avg_mos")
+    raw = _read_leaderboard()
+    enriched = []
+    for entry in raw:
+        mos_vals = []
+        details = []
+        for tk in entry.get("tickers", []):
+            ck = _analyze_cache_key(tk, {})
+            ent = _ANALYZE_CACHE.get(ck)
+            if not ent: continue
+            ts, payload = ent
+            if time.time() - ts > _ANALYZE_CACHE_TTL_S: continue
+            mos = payload.get("margin_of_safety")
+            tier = (payload.get("priced_for") or {}).get("tier")
+            details.append({"ticker": tk, "mos": mos, "tier": tier})
+            if mos is not None and not payload.get("extreme_mos_flag"):
+                mos_vals.append(mos)
+        avg_mos = (sum(mos_vals) / len(mos_vals)) if mos_vals else None
+        under_count = sum(1 for v in mos_vals if v > 5)
+        enriched.append({
+            "id":              entry["id"],
+            "name":            entry["name"],
+            "tickers":         entry["tickers"],
+            "note":            entry.get("note", ""),
+            "submitted_at":    entry["submitted_at"],
+            "avg_mos":         round(avg_mos, 1) if avg_mos is not None else None,
+            "undervalued_count": under_count,
+            "ticker_count":    len(entry["tickers"]),
+            "details":         details,
+        })
+
+    if sort == "recent":
+        enriched.sort(key=lambda e: -e.get("submitted_at", 0))
+    elif sort == "size":
+        enriched.sort(key=lambda e: -(e.get("ticker_count") or 0))
+    else:    # avg_mos default
+        enriched.sort(key=lambda e: -(e.get("avg_mos") if e.get("avg_mos") is not None else -999))
+    return jsonify({"items": enriched[:50], "total": len(enriched)})
+
+
+@app.route("/api/analyze")
 
 
 @app.route("/api/analyze")

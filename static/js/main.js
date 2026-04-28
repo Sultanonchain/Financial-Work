@@ -1906,6 +1906,190 @@ function setupCustomDCFSliders() {
   window._cdReset = reset;
 }
 
+// ── Low confidence explainer ───────────────────────────────────────────
+function setupLowConfExplainer() {
+  // Delegated click — the chip is rendered dynamically inside the MOS pill
+  document.addEventListener("click", (e) => {
+    if (e.target.closest(".mos-confidence-chip")) {
+      $("lowConfModal").classList.remove("hidden");
+    }
+  });
+}
+
+// ── Soft sign-in: stable user_token + display name in localStorage ─────
+const VALUS_USER_KEY = "valus.user.v1";
+function getValusUser() {
+  try {
+    const raw = localStorage.getItem(VALUS_USER_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return null;
+}
+function ensureValusUser(name) {
+  let u = getValusUser();
+  if (!u) {
+    // Generate a stable random token (browser-bound)
+    const tok = "u_" + Array.from(crypto.getRandomValues(new Uint8Array(12)))
+      .map(b => b.toString(16).padStart(2, "0")).join("");
+    u = { token: tok, name: name || "" };
+  }
+  if (name) u.name = name;
+  localStorage.setItem(VALUS_USER_KEY, JSON.stringify(u));
+  return u;
+}
+
+// ── Submit-to-leaderboard modal ────────────────────────────────────────
+function setupSubmitToLeaderboard() {
+  const publishBtn = $("pfPublishBtn");
+  const submitBtn  = $("lbSubmitBtn");
+  const modal      = $("submitLbModal");
+  const nameEl     = $("lbName");
+  const noteEl     = $("lbNote");
+  if (!publishBtn || !modal) return;
+
+  publishBtn.onclick = () => {
+    const items = pfRead();
+    if (items.length === 0) {
+      publishBtn.textContent = "Add stocks first ★";
+      setTimeout(() => { publishBtn.textContent = "🏆 Publish"; }, 1500);
+      return;
+    }
+    // Pre-populate with last-used name if any
+    const u = getValusUser();
+    if (u && u.name) nameEl.value = u.name;
+    modal.classList.remove("hidden");
+    setTimeout(() => nameEl.focus(), 50);
+  };
+
+  submitBtn.onclick = async () => {
+    const name = nameEl.value.trim();
+    if (!name) {
+      nameEl.style.borderColor = "var(--negative)";
+      setTimeout(() => { nameEl.style.borderColor = ""; }, 1200);
+      return;
+    }
+    const items = pfRead();
+    const tickers = items.map(it => it.ticker);
+    const note = noteEl.value.trim();
+    const u = ensureValusUser(name);
+
+    submitBtn.textContent = "Publishing…";
+    try {
+      const res = await fetch("/api/leaderboard/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, user_token: u.token, tickers, note }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      submitBtn.textContent = "✓ Published";
+      setTimeout(() => {
+        submitBtn.textContent = "Publish";
+        modal.classList.add("hidden");
+      }, 900);
+    } catch (e) {
+      submitBtn.textContent = "Try again";
+      setTimeout(() => { submitBtn.textContent = "Publish"; }, 1200);
+    }
+  };
+}
+
+// ── Leaderboard page ───────────────────────────────────────────────────
+let _LB_SORT = "avg_mos";
+
+async function openLeaderboardPage() {
+  hideAllViews();
+  $("leaderboardPage").classList.remove("hidden");
+  window.scrollTo({ top: 0, behavior: "instant" });
+  await loadLeaderboard();
+}
+function closeLeaderboardPage() {
+  $("leaderboardPage").classList.add("hidden");
+  document.querySelector(".hero")?.classList.remove("hidden");
+}
+
+async function loadLeaderboard() {
+  $("lbLoading").classList.remove("hidden");
+  $("lbEmpty").classList.add("hidden");
+  $("lbList").innerHTML = "";
+  try {
+    const res = await fetch(`/api/leaderboard?sort=${encodeURIComponent(_LB_SORT)}`);
+    const data = await res.json();
+    renderLeaderboard(data.items || []);
+  } catch {
+    renderLeaderboard([]);
+  } finally {
+    $("lbLoading").classList.add("hidden");
+  }
+}
+
+function renderLeaderboard(items) {
+  const list  = $("lbList");
+  const empty = $("lbEmpty");
+  if (items.length === 0) {
+    list.innerHTML = "";
+    empty.classList.remove("hidden");
+    return;
+  }
+  empty.classList.add("hidden");
+
+  const u = getValusUser();
+  const myToken = u?.token;
+
+  list.innerHTML = items.map((entry, idx) => {
+    const avg = entry.avg_mos;
+    const avgClass = avg == null ? "" : (avg > 5 ? "positive" : (avg < -5 ? "negative" : ""));
+    const tickersStr = (entry.tickers || []).slice(0, 6).join(" · ") +
+                       (entry.tickers.length > 6 ? ` +${entry.tickers.length - 6} more` : "");
+    return `
+      <div class="lb-row" data-lb-id="${escHtml(entry.id)}" data-lb-tickers="${escHtml((entry.tickers || []).join(','))}">
+        <span class="lb-rank">${idx + 1}</span>
+        <div class="lb-info">
+          <div class="lb-name">${escHtml(entry.name)}</div>
+          <div class="lb-tickers">${escHtml(tickersStr)}</div>
+          ${entry.note ? `<div class="lb-note">"${escHtml(entry.note)}"</div>` : ""}
+        </div>
+        <div class="lb-stat">
+          <span class="lb-stat__label">Avg MOS</span>
+          <span class="lb-stat__value ${avgClass}">${avg != null ? fmtPct(avg) : "—"}</span>
+        </div>
+        <div class="lb-stat">
+          <span class="lb-stat__label">Underv.</span>
+          <span class="lb-stat__value">${entry.undervalued_count}/${entry.ticker_count}</span>
+        </div>
+        <div class="lb-stat">
+          <span class="lb-stat__label">Picks</span>
+          <span class="lb-stat__value">${entry.ticker_count}</span>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  list.querySelectorAll(".lb-row").forEach(row => {
+    row.onclick = () => {
+      const tickers = row.dataset.lbTickers.split(",").filter(Boolean);
+      if (tickers.length === 0) return;
+      closeLeaderboardPage();
+      openSharedPortfolio(tickers);
+    };
+  });
+}
+
+function setupLeaderboard() {
+  const btn = $("leaderboardBtn");
+  if (btn) btn.onclick = openLeaderboardPage;
+  $("lbBackBtn")?.addEventListener("click", closeLeaderboardPage);
+  $("lbRefreshBtn")?.addEventListener("click", loadLeaderboard);
+  document.querySelectorAll("[data-lb-sort]").forEach(b => {
+    b.onclick = () => {
+      _LB_SORT = b.dataset.lbSort;
+      document.querySelectorAll("[data-lb-sort]").forEach(x =>
+        x.classList.toggle("active", x === b));
+      loadLeaderboard();
+    };
+  });
+}
+
 // ── Discovery page ────────────────────────────────────────────────────
 let _DISC_DATA = [];
 let _DISC_TIER_FILTER = "all";
@@ -1984,13 +2168,22 @@ function renderDiscover() {
     items.sort((a, b) => (a.sector || "").localeCompare(b.sector || ""));
   }
 
+  function ageTxt(ageS) {
+    if (ageS == null) return "";
+    if (ageS < 30) return "now";
+    if (ageS < 60) return `${Math.round(ageS)}s`;
+    if (ageS < 3600) return `${Math.round(ageS/60)}m ago`;
+    return `${Math.round(ageS/3600)}h ago`;
+  }
   grid.innerHTML = items.map(it => {
     const c = tierColor(it.tier);
     const mos = it.mos != null ? fmtPct(it.mos) : "—";
     const cap = it.mos != null ? Math.min(Math.abs(it.mos), 100) : 50;
+    const age = ageTxt(it.age_seconds);
     return `
       <div class="disc-cell" data-disc-ticker="${escHtml(it.ticker)}"
            style="--tier-accent:${c.accent};--tier-strong:${c.strong};--tier-glow:${c.glow};">
+        ${age ? `<span class="disc-cell__age" title="Cached snapshot">${escHtml(age)}</span>` : ""}
         <div class="disc-cell__head">
           <span class="disc-cell__ticker">${escHtml(it.ticker)}</span>
           <span class="disc-cell__mos">${mos}</span>
@@ -2206,6 +2399,9 @@ document.addEventListener("DOMContentLoaded", () => {
   setupCustomDCFSliders();
   setupSharePortfolio();
   setupDiscover();
+  setupLowConfExplainer();
+  setupSubmitToLeaderboard();
+  setupLeaderboard();
   pfUpdateBadge();
   bootFromURL();
 });

@@ -27,6 +27,10 @@
         <span class="header-btn__icon">⌖</span>
         <span class="header-btn__label">Discover</span>
       </button>
+      <button class="header-btn" id="leaderboardBtn" type="button" aria-label="Leaderboard">
+        <span class="header-btn__icon">🏆</span>
+        <span class="header-btn__label">Leaderboard</span>
+      </button>
       <button class="header-btn" id="portfolioBtn" type="button" aria-label="Open portfolio">
         <span class="header-btn__icon">★</span>
         <span class="header-btn__label">Portfolio</span>
@@ -47,6 +51,7 @@
         <p id="pfPageTagline">Real-time DCF tracking across your watchlist.</p>
       </div>
       <div class="pf-page__actions">
+        <button class="copy-btn starred" id="pfPublishBtn" type="button">🏆 Publish</button>
         <button class="copy-btn" id="pfShareBtn" type="button">↗ Share</button>
         <button class="copy-btn" id="pfRefreshBtn" type="button">↻ Refresh</button>
       </div>
@@ -281,6 +286,125 @@
       <div class="chart-wrap"><canvas id="etfChart"></canvas></div>
       <div class="etf-message" id="etfMessage"></div>
     </section>
+  </div>
+</main>
+
+<!-- ── LOW-CONFIDENCE EXPLAINER MODAL ─────────────────────────────────── -->
+<div class="modal hidden" id="lowConfModal" role="dialog" aria-modal="true">
+  <div class="modal__backdrop" data-modal-close></div>
+  <div class="modal__panel">
+    <div class="modal__head">
+      <h2 class="modal__title">Why "Low Confidence"?</h2>
+      <button class="modal__close" data-modal-close aria-label="Close">✕</button>
+    </div>
+    <div class="modal__body">
+      <p class="tg-intro">
+        VALUS flags a margin of safety as <strong>low confidence</strong> when its
+        absolute value exceeds <strong>±100%</strong>.  When the gap between fair
+        value and price is that extreme, the DCF inputs are usually mispriced.
+      </p>
+      <div class="tg-list">
+        <div class="tg-row tier-warning">
+          <span class="tg-dot"></span>
+          <div class="tg-body">
+            <span class="tg-label">Share-class mismatch</span>
+            <span class="tg-desc">Berkshire Hathaway B-shares (BRK-B) trade at ~1/1500th of A-shares.  yfinance occasionally returns A-share fundamentals against B-share price, producing a 19,000%+ MOS that's purely a unit error.</span>
+          </div>
+        </div>
+        <div class="tg-row tier-warning">
+          <span class="tg-dot"></span>
+          <div class="tg-body">
+            <span class="tg-label">Forward-earnings spike</span>
+            <span class="tg-desc">When TTM FCF is depressed but next-year estimates are sharply higher, the DCF can use the inflated forward number as base, multiplying by a decade of growth and producing an unrealistic IV.</span>
+          </div>
+        </div>
+        <div class="tg-row tier-warning">
+          <span class="tg-dot"></span>
+          <div class="tg-body">
+            <span class="tg-label">Leverage non-monotonicity</span>
+            <span class="tg-desc">In highly-levered industrials (CCL, F, BA, AAL), higher growth requires more capex and debt — the equity value can actually <em>fall</em> as growth rises.  The reverse-DCF binary search converges in unexpected places.</span>
+          </div>
+        </div>
+        <div class="tg-row tier-warning">
+          <span class="tg-dot"></span>
+          <div class="tg-body">
+            <span class="tg-label">Stale or split-adjusted prices</span>
+            <span class="tg-desc">When yfinance hasn't propagated a recent stock split or merger, the price and fundamentals temporarily disagree.</span>
+          </div>
+        </div>
+      </div>
+      <p class="tg-intro" style="margin-top: 16px;">
+        <strong>What to do:</strong> open the methodology breakdown and check whether
+        Reality Reconciliation, Cash-Rich Premium, or the Sultan Split are the
+        ones doing the heavy lifting.  Cross-check against analyst targets and
+        recent filings before relying on the IV.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- ── SUBMIT TO LEADERBOARD MODAL ───────────────────────────────────── -->
+<div class="modal hidden" id="submitLbModal" role="dialog" aria-modal="true">
+  <div class="modal__backdrop" data-modal-close></div>
+  <div class="modal__panel" style="max-width: 480px;">
+    <div class="modal__head">
+      <h2 class="modal__title">Submit to leaderboard</h2>
+      <button class="modal__close" data-modal-close aria-label="Close">✕</button>
+    </div>
+    <div class="modal__body">
+      <p class="tg-intro">
+        Pick a display name. Your portfolio will be visible on the public
+        leaderboard, sortable by margin of safety.  Flex your undervalued picks.
+      </p>
+      <div class="advanced-field">
+        <label for="lbName">Display name</label>
+        <input id="lbName" type="text" maxlength="40" placeholder="e.g. SultanX, ValueHunter, ..." class="lb-input"/>
+      </div>
+      <div class="advanced-field" style="margin-top: 12px;">
+        <label for="lbNote">Note (optional)</label>
+        <input id="lbNote" type="text" maxlength="200" placeholder="e.g. Cash-rich + cyclical recovery thesis" class="lb-input"/>
+      </div>
+      <div style="display:flex; gap:8px; margin-top:20px; justify-content: flex-end;">
+        <button class="copy-btn" data-modal-close type="button">Cancel</button>
+        <button class="copy-btn starred" id="lbSubmitBtn" type="button">Publish</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── LEADERBOARD PAGE ────────────────────────────────────────────────── -->
+<main class="lb-page hidden" id="leaderboardPage">
+  <div class="container">
+    <div class="pf-page__head">
+      <button class="copy-btn" id="lbBackBtn" type="button">← Back</button>
+      <div class="pf-page__title">
+        <h1>Leaderboard</h1>
+        <p>See who's spotted the best value picks. Sorted by margin of safety.</p>
+      </div>
+      <button class="copy-btn" id="lbRefreshBtn" type="button">↻ Refresh</button>
+    </div>
+
+    <div class="card disc-filters">
+      <div class="disc-filter-row">
+        <span class="disc-filter-label">Sort:</span>
+        <button class="disc-tier-pill active" data-lb-sort="avg_mos" type="button">Avg MOS</button>
+        <button class="disc-tier-pill" data-lb-sort="recent" type="button">Most Recent</button>
+        <button class="disc-tier-pill" data-lb-sort="size" type="button">Most Holdings</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="lb-loading hidden" id="lbLoading">
+        <div class="spinner"></div>
+        <span>Loading leaderboard…</span>
+      </div>
+      <div class="lb-list" id="lbList"></div>
+      <div class="lb-empty hidden" id="lbEmpty">
+        <div class="portfolio-empty__icon">🏆</div>
+        <div class="portfolio-empty__title">No one's submitted yet</div>
+        <div class="portfolio-empty__sub">Be the first — build a portfolio and click "Submit to leaderboard".</div>
+      </div>
+    </div>
   </div>
 </main>
 
