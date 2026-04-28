@@ -179,7 +179,9 @@ button { font-family: inherit; cursor: pointer; }
    ════════════════════════════════════════════════════════════════════════ */
 
 .site-header {
-  position: sticky; top: 0; z-index: 50;
+  position: sticky; top: 0; z-index: 80;   /* above .hero (60) so portfolio
+                                              button stays clickable when
+                                              scrolled past the search bar */
   padding: var(--space-4) 0;
   background: var(--bg-frosted-2);
   backdrop-filter: blur(18px) saturate(140%);
@@ -921,6 +923,7 @@ button { font-family: inherit; cursor: pointer; }
   display: flex; flex-direction: column; gap: var(--space-3);
   margin-bottom: var(--space-5);
   position: relative; z-index: 1;
+  transition: opacity 200ms var(--ease-out);
 }
 .reason {
   display: flex; gap: var(--space-3); align-items: flex-start;
@@ -1508,6 +1511,230 @@ table.dt tfoot td { font-weight: 600; color: var(--ink-primary); border-top: 1px
 /* Charts (canvas + svg both supported) */
 .chart-wrap { position: relative; height: 240px; }
 .chart-wrap canvas, .chart-wrap svg { width: 100% !important; height: 100% !important; }
+
+/* ════════════════════════════════════════════════════════════════════════
+   BTC HODL hero — special view for ₿ tickers
+   ════════════════════════════════════════════════════════════════════════ */
+
+.btc-hero { padding: var(--space-6) 0 var(--space-9); }
+.btc-hero.hidden { display: none; }
+
+.btc-card {
+  position: relative;
+  padding: var(--space-8) var(--space-7) var(--space-7);
+  border-radius: var(--radius-xl);
+  background: linear-gradient(180deg, #1a1408 0%, #110a04 100%);
+  box-shadow:
+    0 1px 0 rgba(255,191,0,0.10) inset,
+    0 0 0 1px rgba(247, 147, 26, 0.20),
+    0 32px 80px -16px rgba(0,0,0,0.8),
+    0 0 160px -20px rgba(247, 147, 26, 0.40);
+  overflow: hidden;
+}
+
+.btc-card__bg {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(900px circle at 25% 0%, rgba(247, 147, 26, 0.30) 0%, transparent 55%),
+    radial-gradient(700px circle at 80% 100%, rgba(247, 147, 26, 0.18) 0%, transparent 55%);
+  opacity: 0.85;
+}
+.btc-card > * { position: relative; z-index: 1; }
+
+.btc-card__top {
+  display: flex; flex-direction: column; align-items: center;
+  gap: var(--space-3);
+  text-align: center;
+  margin-bottom: var(--space-6);
+}
+
+.btc-mark {
+  width: 72px; height: 72px;
+  display: grid; place-items: center;
+  font-family: var(--font-display);
+  font-size: 56px;
+  font-weight: 700;
+  color: #f7931a;
+  background: rgba(247, 147, 26, 0.10);
+  border: 1px solid rgba(247, 147, 26, 0.40);
+  border-radius: 50%;
+  box-shadow: 0 0 40px rgba(247, 147, 26, 0.50);
+  animation: btc-pulse 2.6s var(--ease-out) infinite;
+}
+@keyframes btc-pulse {
+  0%, 100% { box-shadow: 0 0 40px rgba(247, 147, 26, 0.50); transform: scale(1); }
+  50%      { box-shadow: 0 0 80px rgba(247, 147, 26, 0.85); transform: scale(1.04); }
+}
+
+.btc-headline {
+  font-size: 88px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 0.95;
+  background: linear-gradient(180deg, #ffd685 0%, #f7931a 60%, #c97200 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 60px rgba(247, 147, 26, 0.40);
+}
+
+.btc-tagline {
+  font-size: 16px;
+  color: #d9c8a5;
+  margin: 0;
+  max-width: 560px;
+  line-height: 1.5;
+}
+.btc-tagline span {
+  display: block;
+  margin-top: 4px;
+  color: #f7931a;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+.btc-price-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: var(--space-5);
+  align-items: center;
+  margin-bottom: var(--space-6);
+  padding: var(--space-5);
+  background: rgba(0,0,0,0.30);
+  border: 1px solid rgba(247, 147, 26, 0.15);
+  border-radius: var(--radius);
+}
+.btc-price-block { display: flex; flex-direction: column; gap: 6px; }
+.btc-price-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: #b8a37a;
+}
+.btc-price-value {
+  font-size: 56px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  color: #ffd685;
+  font-feature-settings: "tnum" 1;
+  line-height: 1;
+  text-shadow: 0 0 30px rgba(247, 147, 26, 0.50);
+}
+.btc-price-deltas { display: flex; gap: var(--space-3); margin-top: 6px; }
+.btc-delta {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  font-feature-settings: "tnum" 1;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: rgba(0,0,0,0.30);
+}
+.btc-delta.positive { color: #34d399; background: rgba(52, 211, 153, 0.12); }
+.btc-delta.negative { color: #f87171; background: rgba(248, 113, 113, 0.12); }
+
+.btc-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-3);
+}
+.btc-stat {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: var(--space-2) 0;
+}
+.btc-stat__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #b8a37a;
+}
+.btc-stat__value {
+  font-size: 16px;
+  font-weight: 600;
+  color: #ffd685;
+  font-feature-settings: "tnum" 1;
+}
+
+.btc-chart-wrap {
+  position: relative;
+  height: 260px;
+  margin-bottom: var(--space-6);
+  padding: var(--space-4);
+  background: rgba(0,0,0,0.30);
+  border: 1px solid rgba(247, 147, 26, 0.15);
+  border-radius: var(--radius);
+}
+.btc-chart-wrap canvas { width: 100% !important; height: 100% !important; }
+
+.btc-quote {
+  margin: 0 0 var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  border-left: 3px solid #f7931a;
+  font-style: italic;
+  font-size: 16px;
+  color: #d9c8a5;
+  line-height: 1.5;
+  background: rgba(0,0,0,0.20);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.btc-traits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+  justify-content: center;
+}
+.btc-trait {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.10em;
+  color: #f7931a;
+  background: rgba(247, 147, 26, 0.08);
+  border: 1px solid rgba(247, 147, 26, 0.25);
+  padding: 6px 12px;
+  border-radius: var(--radius-pill);
+}
+
+.btc-cta-row {
+  display: flex; gap: var(--space-3); justify-content: center;
+}
+.btc-cta-row .copy-btn {
+  background: rgba(247, 147, 26, 0.10);
+  border-color: rgba(247, 147, 26, 0.35);
+  color: #f7931a;
+}
+.btc-cta-row .copy-btn:hover {
+  background: rgba(247, 147, 26, 0.20);
+  color: #ffd685;
+  border-color: #f7931a;
+}
+.btc-cta-row .copy-btn.starred {
+  background: rgba(247, 147, 26, 0.25);
+  color: #ffd685;
+}
+
+@media (max-width: 768px) {
+  .btc-card { padding: var(--space-6) var(--space-4) var(--space-5); }
+  .btc-headline { font-size: 64px; }
+  .btc-price-value { font-size: 40px; }
+  .btc-price-row { grid-template-columns: 1fr; }
+  .btc-stats { grid-template-columns: repeat(2, 1fr); }
+  .btc-chart-wrap { height: 200px; }
+  .btc-cta-row { flex-direction: column; }
+}
+@media (max-width: 480px) {
+  .btc-headline { font-size: 52px; }
+  .btc-mark { width: 60px; height: 60px; font-size: 44px; }
+  .btc-price-value { font-size: 32px; }
+}
 
 /* ════════════════════════════════════════════════════════════════════════
    Footer

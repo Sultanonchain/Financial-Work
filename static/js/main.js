@@ -92,13 +92,24 @@ function animateNumber(el, from, to, durationMs, formatter) {
    API layer
    ════════════════════════════════════════════════════════════════════════ */
 
+// ── Crypto / BTC routing ──────────────────────────────────────────────────
+function isBTCTicker(t) {
+  const u = (t || "").toUpperCase().trim().replace(/-USD$/, "").replace(/^\$/, "");
+  return u === "BTC" || u === "BITCOIN" || u === "₿" || u === "XBT";
+}
+function normalizeBTCTicker(t) { return isBTCTicker(t) ? "BTC-USD" : t; }
+
 async function analyze(ticker, params = {}) {
   showLoading();
   hideError();
   $("results").classList.add("hidden");
+  $("btcHero").classList.add("hidden");
+
+  const isBTC = isBTCTicker(ticker);
+  const fetchTicker = normalizeBTCTicker(ticker);
 
   const url = new URL("/api/analyze", window.location.origin);
-  url.searchParams.set("ticker", ticker);
+  url.searchParams.set("ticker", fetchTicker);
   for (const [k, v] of Object.entries(params)) {
     if (v != null && v !== "") url.searchParams.set(k, v);
   }
@@ -110,7 +121,11 @@ async function analyze(ticker, params = {}) {
       throw new Error(data.error || `HTTP ${res.status}`);
     }
     hideLoading();
-    renderResults(data);
+    if (isBTC) {
+      renderBTCHero(data);
+    } else {
+      renderResults(data);
+    }
   } catch (err) {
     hideLoading();
     showError(err.message || "Failed to load analysis");
@@ -157,6 +172,144 @@ function renderResults(d) {
 
   attachCardGlow();
   $("results").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   BTC HODL hero — special view for ₿ tickers
+   ════════════════════════════════════════════════════════════════════════ */
+
+let btcChartInstance = null;
+
+function renderBTCHero(d) {
+  _LAST_DATA = d;
+  $("btcHero").classList.remove("hidden");
+  $("results").classList.add("hidden");
+
+  const price = d.current_price;
+  const hist  = d.price_history || [];
+  const high  = d["52w_high"];
+  const low   = d["52w_low"];
+  const mcap  = d.market_cap;
+
+  // Animate price count-up
+  animateNumber($("btcPrice"), 0, price || 0, 700, v => fmtPrice(v));
+
+  // 24h delta — last vs second-to-last close
+  if (hist.length >= 2) {
+    const last = hist[hist.length - 1].close;
+    const yest = hist[hist.length - 2].close;
+    if (yest > 0) {
+      const d24 = (last - yest) / yest * 100;
+      const el = $("btcDelta24h");
+      el.textContent = `24h ${fmtPct(d24)}`;
+      el.classList.toggle("positive", d24 >= 0);
+      el.classList.toggle("negative", d24 < 0);
+    }
+  }
+
+  // 1y delta
+  if (hist.length >= 30) {
+    const last = hist[hist.length - 1].close;
+    const first = hist[0].close;
+    if (first > 0) {
+      const d1y = (last - first) / first * 100;
+      const el = $("btcDelta1y");
+      el.textContent = `1y ${fmtPct(d1y)}`;
+      el.classList.toggle("positive", d1y >= 0);
+      el.classList.toggle("negative", d1y < 0);
+    }
+  }
+
+  $("btcMcap").textContent = mcap != null ? fmtBig(mcap) : "—";
+  $("btcHigh").textContent = high != null ? fmtPrice(high) : "—";
+  $("btcLow").textContent  = low  != null ? fmtPrice(low)  : "—";
+
+  // Render chart with orange BTC theme
+  const canvas = $("btcChart");
+  if (canvas && hist.length > 0) {
+    const ctx = canvas.getContext("2d");
+    if (btcChartInstance) btcChartInstance.destroy();
+    const labels = hist.map(h => h.date);
+    const prices = hist.map(h => h.close);
+    btcChartInstance = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [{
+          data: prices,
+          borderColor: "#f7931a",
+          borderWidth: 2.5,
+          backgroundColor: (ctx) => {
+            const chart = ctx.chart;
+            const { ctx: c, chartArea } = chart;
+            if (!chartArea) return "rgba(247, 147, 26, 0.10)";
+            const grad = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+            grad.addColorStop(0, "rgba(247, 147, 26, 0.45)");
+            grad.addColorStop(1, "rgba(247, 147, 26, 0)");
+            return grad;
+          },
+          fill: true, tension: 0.3, pointRadius: 0, pointHoverRadius: 5,
+          pointHoverBackgroundColor: "#ffd685", pointHoverBorderColor: "#f7931a"
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: "#1a1408", borderColor: "#f7931a",
+            borderWidth: 1, titleColor: "#ffd685", bodyColor: "#d9c8a5",
+            callbacks: { label: c => `$${fmt(c.parsed.y, 2)}` }
+          }
+        },
+        scales: {
+          x: { ticks: { color: "#b8a37a", maxTicksLimit: 6, autoSkip: true }, grid: { display: false } },
+          y: { ticks: { color: "#b8a37a", callback: v => `$${fmt(v / 1000, 0)}k` }, grid: { color: "rgba(247, 147, 26, 0.06)" } }
+        }
+      }
+    });
+  }
+
+  // Add to portfolio button
+  const btcAdd = $("btcAddPortfolio");
+  if (btcAdd) {
+    const updateBtcAddState = () => {
+      if (pfHas("BTC-USD")) {
+        btcAdd.classList.add("starred");
+        btcAdd.textContent = "★ In Portfolio";
+      } else {
+        btcAdd.classList.remove("starred");
+        btcAdd.textContent = "★ Add to Portfolio";
+      }
+    };
+    btcAdd.onclick = () => {
+      if (pfHas("BTC-USD")) {
+        pfRemove("BTC-USD");
+      } else {
+        pfAdd({
+          ticker: "BTC-USD",
+          name: "Bitcoin",
+          sector: "Crypto",
+          price: d.current_price,
+          iv: null,
+          mos: null,
+          tier: "HODL",
+        });
+      }
+      updateBtcAddState();
+    };
+    updateBtcAddState();
+  }
+
+  // Back to stocks
+  const back = $("btcBack");
+  if (back) back.onclick = () => {
+    $("btcHero").classList.add("hidden");
+    $("tickerInput").focus();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  $("btcHero").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -241,17 +394,149 @@ function renderHeroVerdict(d) {
   activateScenarioVisual("base");
 }
 
+// Sector-aware bear / bull case reasons.  Returns a 3-item array of
+// numbered narratives explaining what would have to happen for that
+// scenario to materialise.
+function generateScenarioReasons(which, slot, d) {
+  if (which === "base" || !slot || slot.value == null) {
+    return (d.verdict_summary || {}).reasons || [];
+  }
+  const price   = d.current_price;
+  const value   = slot.value;
+  const upside  = (value - price) / price * 100;
+  const sect    = (d.sector || "").toLowerCase();
+  const ind     = (d.industry || "").toLowerCase();
+  const isTech  = sect.includes("technology") || sect.includes("communication");
+  const isFin   = sect.includes("financial");
+  const isEnergy= sect.includes("energy");
+  const isHC    = sect.includes("healthcare");
+  const isStruct= !!d.structural_transformer;
+  const isCons  = sect.includes("consumer");
+  const isInd   = sect.includes("industrial");
+
+  const ivStr   = fmtPrice(value);
+  const upStr   = fmtPct(upside);
+
+  if (which === "bull") {
+    if (isStruct)  return [
+      `For the bull case at ${ivStr} (${upStr}), platform optionality (AI, robotics, or autonomy) materialises faster than the market expects and revenue compounds at the upper sector ceiling.`,
+      `Operating margins expand 200-500bps as platform scale kicks in; capex efficiency improves and the network effect deepens the moat.`,
+      `Multiple expansion follows execution — the market re-rates the equity to reflect the optionality value embedded in the platform business.`,
+    ];
+    if (isTech)    return [
+      `For the bull case at ${ivStr} (${upStr}), the AI tailwind compounds — cloud / software / silicon demand accelerates and operating leverage drives margins higher.`,
+      `Free cash flow conversion stays at 25%+ of revenue; capital allocation continues to favor buybacks and high-ROIC R&D.`,
+      `Multiple expansion comes from durable growth — the market keeps paying for moat-tech businesses with secular tailwinds.`,
+    ];
+    if (isFin)     return [
+      `For the bull case at ${ivStr} (${upStr}), the rate environment supports net interest margin and loan growth accelerates 8%+.`,
+      `Credit losses stay contained, capital ratios hold at regulatory comfort, and ROE expands toward sector-leading levels.`,
+      `Capital return ramps — buybacks and dividends compound book value per share faster than peers.`,
+    ];
+    if (isEnergy)  return [
+      `For the bull case at ${ivStr} (${upStr}), commodity prices hold elevated and capital discipline drives free-cash-flow yield to double-digits.`,
+      `Production stays flat-to-up while capex remains restrained — the FCF flywheel converts directly to dividends + buybacks.`,
+      `Any recession is shallow and short; demand recovery + supply constraints push margins to cycle-high levels.`,
+    ];
+    if (isHC)      return [
+      `For the bull case at ${ivStr} (${upStr}), pipeline assets reach commercial milestones and existing franchises hold pricing power.`,
+      `R&D efficiency improves and approvals/launches drive double-digit revenue growth with expanding gross margins.`,
+      `Multiple expansion follows scientific success — the market pays a premium for proven execution against unmet medical needs.`,
+    ];
+    if (isInd || isCons) return [
+      `For the bull case at ${ivStr} (${upStr}), demand stays robust through any cycle softness; pricing power offsets input-cost inflation.`,
+      `Operational efficiency gains and disciplined capital deployment expand operating margins 100-300bps.`,
+      `Capital return — buybacks, dividends, debt paydown — drives per-share intrinsic value higher faster than reported earnings.`,
+    ];
+    return [
+      `For the bull case at ${ivStr} (${upStr}), revenue grows at the top of the sector band and operating margins expand on improving mix.`,
+      `Capital allocation creates additional shareholder value via buybacks, dividend growth, or accretive M&A.`,
+      `Multiple holds or expands — the market continues to reward execution and cash-flow durability.`,
+    ];
+  }
+
+  // Bear case
+  if (isStruct)  return [
+    `For the bear case at ${ivStr} (${upStr}), the platform thesis stalls — AI / robotics / autonomy roadmap slips and capex stays elevated without payoff.`,
+    `Growth reverts toward the base business as competition catches up; the speculative premium evaporates.`,
+    `Multiple compresses as the market re-prices on actual cash flows rather than long-tail optionality.`,
+  ];
+  if (isTech)    return [
+    `For the bear case at ${ivStr} (${upStr}), AI / cloud demand normalises and growth halves as the category matures.`,
+    `Competition compresses operating margins; pricing power weakens and unit economics deteriorate.`,
+    `Multiple compresses materially — the market re-rates from "growth" to "GARP" valuation framework.`,
+  ];
+  if (isFin)     return [
+    `For the bear case at ${ivStr} (${upStr}), rates roll over and net interest margin compresses 50-100bps.`,
+    `Credit losses spike on commercial real estate or consumer lending; loan-loss provisions weigh on earnings.`,
+    `Regulatory capital requirements rise, restricting buybacks and forcing equity dilution at the wrong moment.`,
+  ];
+  if (isEnergy)  return [
+    `For the bear case at ${ivStr} (${upStr}), commodity prices fall sharply on demand softness or excess supply.`,
+    `Capex commitments stay fixed but cash flow contracts — dividends face risk and net debt creeps higher.`,
+    `Multiple compresses on cycle fears — the market discounts a longer downturn than priced today.`,
+  ];
+  if (isHC)      return [
+    `For the bear case at ${ivStr} (${upStr}), key pipeline assets fail or face surprise regulatory / pricing pressure.`,
+    `Revenue concentration creates patent-cliff risk; competition from biosimilars or generics accelerates.`,
+    `Multiple compresses as investors discount future R&D productivity and policy headwinds.`,
+  ];
+  if (isInd || isCons) return [
+    `For the bear case at ${ivStr} (${upStr}), demand softens on macro deceleration; volumes decline mid-single-digits.`,
+    `Input-cost inflation outpaces pricing power; operating margins compress 100-200bps.`,
+    `Capital return slows — buybacks pause, debt paydown takes priority, and the multiple re-rates lower.`,
+  ];
+  return [
+    `For the bear case at ${ivStr} (${upStr}), macro headwinds and competitive pressure cut revenue growth meaningfully below trend.`,
+    `Operating margins compress as fixed costs absorb a smaller revenue base; cash conversion deteriorates.`,
+    `Multiple re-rates lower as the market discounts a longer / deeper slowdown than currently priced.`,
+  ];
+}
+
+const TIER_BY_SCENARIO = {
+  bear: "tier-negative",
+  base: null,           // restore original priced_for tier
+  bull: "tier-positive",
+};
+
 function activateScenario(which) {
   if (!_LAST_DATA) return;
   const sc = _LAST_DATA.scenarios || {};
   const slot = sc[which];
   if (!slot || slot.value == null) return;
 
+  // Animate IV value
   const ivEl = $("vIV");
   const cur  = parseFloat(ivEl.textContent.replace(/[^0-9.-]/g,"")) || 0;
-  animateNumber(ivEl, cur, slot.value, 350, v => fmtPrice(v));
+  animateNumber(ivEl, cur, slot.value, 380, v => fmtPrice(v));
 
-  // Update MOS to match
+  // Swap hero card tier color (red for bear, green for bull, original for base)
+  const hero = $("heroVerdict");
+  hero.classList.remove("tier-positive", "tier-info", "tier-warning", "tier-negative");
+  if (which === "base") {
+    const orig = tierClassFor((_LAST_DATA.priced_for || {}).tier || "fair_value");
+    hero.classList.add(orig);
+    // Restore tier badge color too
+    const tb = $("vTierBadge");
+    tb.classList.remove("tier-positive", "tier-info", "tier-warning", "tier-negative");
+    tb.classList.add(orig);
+  } else {
+    const cls = TIER_BY_SCENARIO[which];
+    hero.classList.add(cls);
+    const tb = $("vTierBadge");
+    tb.classList.remove("tier-positive", "tier-info", "tier-warning", "tier-negative");
+    tb.classList.add(cls);
+  }
+
+  // Update tier label
+  const tierLabelMap = { bear: "Bear case scenario", bull: "Bull case scenario" };
+  if (which === "base") {
+    $("vTierLabel").textContent = (_LAST_DATA.priced_for || {}).label || "—";
+  } else {
+    $("vTierLabel").textContent = tierLabelMap[which];
+  }
+
+  // Update MOS
   if (_LAST_DATA.current_price && slot.value) {
     const newMos = (slot.value - _LAST_DATA.current_price) / _LAST_DATA.current_price * 100;
     $("vMosPct").textContent = fmtPct(newMos);
@@ -266,6 +551,28 @@ function activateScenario(which) {
       fillEl.classList.add("negative"); fillEl.classList.remove("positive");
     }
     fillEl.style.width = `${widthPct}%`;
+  }
+
+  // Swap reasons + verdict line
+  const reasons = generateScenarioReasons(which, slot, _LAST_DATA);
+  const reasonsHtml = reasons.map((r, i) =>
+    `<div class="reason"><span class="reason__num">${i+1}</span><span class="reason__txt">${escHtml(r)}</span></div>`
+  ).join("");
+  const reasonsEl = $("vReasons");
+  reasonsEl.style.opacity = "0";
+  setTimeout(() => {
+    reasonsEl.innerHTML = reasonsHtml;
+    reasonsEl.style.opacity = "1";
+  }, 180);
+
+  // Swap verdict line based on scenario
+  const vline = $("vVerdict");
+  if (which === "bear") {
+    vline.textContent = `What would have to be true for the bear case to play out — and how the model would re-rate from there.`;
+  } else if (which === "bull") {
+    vline.textContent = `What would have to be true for the bull case to play out — and the upside the market hasn't yet priced in.`;
+  } else {
+    vline.textContent = (_LAST_DATA.verdict_summary || {}).verdict || (_LAST_DATA.priced_for || {}).narrative || "";
   }
 
   activateScenarioVisual(which);
