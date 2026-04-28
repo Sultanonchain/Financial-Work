@@ -5,12 +5,6 @@
   ],
   "routes": [
     { "src": "/static/(.*)", "dest": "/static/$1" },
-    { "src": "/(.*)", "dest": "/app.py" }
-  ],
-  "env": {
-    "SECRET_KEY":            "@valus_secret_key",
-    "GOOGLE_CLIENT_ID":      "@valus_google_client_id",
-    "GOOGLE_CLIENT_SECRET":  "@valus_google_client_secret",
-    "KV_URL":                "@valus_kv_url"
-  }
+    { "src": "/(.*)",        "dest": "/app.py" }
+  ]
 }
