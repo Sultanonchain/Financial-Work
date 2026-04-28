@@ -1426,11 +1426,16 @@ def _build_verdict_summary(ticker, priced_for, implied_growth_pct, model_growth_
     if has_growth and mos is not None:
         gap = implied_growth_pct - model_growth_pct
         if mos > 5:
-            # MODEL SAYS UNDERVALUED — explain market is being conservative
-            ig_txt = (f"contracting {abs(implied_growth_pct):.1f}%/yr"
-                      if implied_growth_pct < -1 else
-                      f"flat (~{max(implied_growth_pct,0):.1f}%/yr)" if implied_growth_pct < 5 else
-                      f"~{implied_growth_pct:.1f}%/yr")
+            # MODEL SAYS UNDERVALUED — explain market is being conservative.
+            # Avoid quoting a literal 0.0% — read as if the company is dying.
+            if implied_growth_pct < -1:
+                ig_txt = f"contracting {abs(implied_growth_pct):.1f}%/yr"
+            elif implied_growth_pct < 2:
+                ig_txt = "near-zero growth"
+            elif implied_growth_pct < 5:
+                ig_txt = f"low single-digit growth (~{implied_growth_pct:.1f}%/yr)"
+            else:
+                ig_txt = f"~{implied_growth_pct:.1f}%/yr"
             reasons.append(
                 f"At ${price:.2f} the market is pricing in revenue growth of {ig_txt} "
                 f"for the next decade — VALUS forecasts {model_growth_pct:.1f}%/yr, "
@@ -3628,6 +3633,11 @@ def analyze():
                 )
                 if implied_g is not None:
                     implied_growth_pct = round(implied_g * 100, 1)
+                    # Suppress noise: if reverse-DCF converged to the lower
+                    # bound (≈0.0%), the result is unreliable for narrative.
+                    # Mark as None so downstream fallbacks use MOS-driven copy.
+                    if abs(implied_growth_pct) < 0.5:
+                        implied_growth_pct = None
                     expectation_gap = build_expectation_gap(
                         implied_g            = implied_g,
                         model_g              = s1,
@@ -3920,13 +3930,15 @@ def analyze():
                     "label": "Forecasted growth",
                     "value": None,
                     "format": "compound",
-                    "active": s1 is not None,
+                    "active": (s1 is not None and s1 > 0.005),  # >0.5%
                     "detail": (f"Stage 1 (yrs 1-5): {s1*100:.1f}% · "
                                f"Stage 2 (yrs 6-10): {s2*100:.1f}% · "
-                               f"Terminal: {tg*100:.1f}%") if (s1 and s2) else "—",
+                               f"Terminal: {tg*100:.1f}%")
+                              if (s1 and s2 and s1 > 0.005) else
+                              "Growth assumptions unavailable — DCF used multiples-based or sector-specific path.",
                     "extra": {
-                        "stage1_pct": round(s1*100, 1) if s1 else None,
-                        "stage2_pct": round(s2*100, 1) if s2 else None,
+                        "stage1_pct": round(s1*100, 1) if s1 and s1 > 0.005 else None,
+                        "stage2_pct": round(s2*100, 1) if s2 and s2 > 0.005 else None,
                         "terminal_pct": round(tg*100, 1),
                         "growth_source": growth_source,
                     },

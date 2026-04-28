@@ -104,6 +104,8 @@ async function analyze(ticker, params = {}) {
   hideError();
   $("results").classList.add("hidden");
   $("btcHero").classList.add("hidden");
+  const pfPage = $("portfolioPage");
+  if (pfPage) pfPage.classList.add("hidden");
 
   const isBTC = isBTCTicker(ticker);
   const fetchTicker = normalizeBTCTicker(ticker);
@@ -1339,35 +1341,71 @@ function syncAddPortfolioButtonForCurrent() {
   }
 }
 
-function openPortfolioModal() {
-  renderPortfolio();
-  $("portfolioModal").classList.remove("hidden");
+// ── Portfolio page (full-screen view, replaces modal) ─────────────────
+let _PF_SORT = "added";   // ticker | mos | added
+
+function openPortfolioPage() {
+  // Hide other views
+  $("results").classList.add("hidden");
+  $("btcHero").classList.add("hidden");
+  $("portfolioPage").classList.remove("hidden");
+  renderPortfolioPage();
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
-function closePortfolioModal() {
-  $("portfolioModal").classList.add("hidden");
+function closePortfolioPage() {
+  $("portfolioPage").classList.add("hidden");
+  // Restore the appropriate previous view, if any
+  if (_LAST_DATA && isBTCTicker(_LAST_DATA.ticker)) {
+    $("btcHero").classList.remove("hidden");
+  } else if (_LAST_DATA) {
+    $("results").classList.remove("hidden");
+  }
 }
 
-function renderPortfolio() {
-  const items = pfRead();
+const SECTOR_PALETTE = [
+  "#5eead4", "#34d399", "#60a5fa", "#a78bfa",
+  "#fbbf24", "#f472b6", "#f87171", "#fb923c",
+];
+
+function getSectorColor(idx) { return SECTOR_PALETTE[idx % SECTOR_PALETTE.length]; }
+
+function renderPortfolioPage() {
+  const itemsRaw = pfRead();
   const list  = $("portfolioList");
   const empty = $("portfolioEmpty");
-  const foot  = $("portfolioFoot");
 
+  // Apply sort
+  const items = [...itemsRaw];
+  if (_PF_SORT === "ticker") {
+    items.sort((a, b) => (a.ticker || "").localeCompare(b.ticker || ""));
+  } else if (_PF_SORT === "mos") {
+    items.sort((a, b) => (b.mos ?? -Infinity) - (a.mos ?? -Infinity));
+  } else {
+    // 'added' — most recent first
+    items.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+  }
+
+  // Empty state
   if (items.length === 0) {
     empty.classList.remove("hidden");
     list.innerHTML = "";
-    foot.hidden = true;
+    $("pfAllocationCard").style.display = "none";
+    $("pfCount").textContent = "0";
+    $("pfAvgMos").textContent = "—";
+    $("pfUnderCount").textContent = "0 / 0";
+    $("pfBest").textContent = "—";
     return;
   }
   empty.classList.add("hidden");
-  foot.hidden = false;
+  $("pfAllocationCard").style.display = "";
 
+  // Render holdings
   list.innerHTML = items.map(it => {
     const mosClass = it.mos == null ? "neutral" : (it.mos > 5 ? "positive" : (it.mos < -5 ? "negative" : "neutral"));
     return `
       <div class="pf-item" data-pf-ticker="${escHtml(it.ticker)}">
         <span class="pf-item__ticker">${escHtml(it.ticker)}</span>
-        <span class="pf-item__name">${escHtml(it.name)}</span>
+        <span class="pf-item__name">${escHtml(it.name || "")}</span>
         <span class="pf-item__price">${it.price != null ? fmtPrice(it.price) : "—"}</span>
         <span class="pf-item__mos ${mosClass}">${it.mos != null ? fmtPct(it.mos) : "—"}</span>
         <button class="pf-item__remove" data-pf-remove="${escHtml(it.ticker)}" aria-label="Remove">✕</button>
@@ -1375,12 +1413,11 @@ function renderPortfolio() {
     `;
   }).join("");
 
-  // Click a row → analyze; remove button stops propagation
   list.querySelectorAll(".pf-item").forEach(row => {
     row.onclick = (e) => {
       if (e.target.closest("[data-pf-remove]")) return;
+      closePortfolioPage();
       const t = row.dataset.pfTicker;
-      closePortfolioModal();
       $("tickerInput").value = t;
       analyze(t);
     };
@@ -1389,30 +1426,203 @@ function renderPortfolio() {
     btn.onclick = (e) => {
       e.stopPropagation();
       pfRemove(btn.dataset.pfRemove);
-      renderPortfolio();
+      renderPortfolioPage();
       syncAddPortfolioButtonForCurrent();
     };
   });
 
-  // Summary
+  // Summary metrics
   $("pfCount").textContent = items.length;
   const mosVals = items.filter(it => it.mos != null).map(it => it.mos);
   const avgMos = mosVals.length ? mosVals.reduce((a, b) => a + b, 0) / mosVals.length : null;
-  $("pfAvgMos").textContent = avgMos != null ? fmtPct(avgMos) : "—";
-  $("pfUnderCount").textContent = `${items.filter(it => it.mos != null && it.mos > 5).length} / ${items.length}`;
+  const avgEl = $("pfAvgMos");
+  avgEl.textContent = avgMos != null ? fmtPct(avgMos) : "—";
+  avgEl.classList.toggle("text-positive", avgMos != null && avgMos > 5);
+  avgEl.classList.toggle("text-negative", avgMos != null && avgMos < -5);
+
+  const underCount = items.filter(it => it.mos != null && it.mos > 5).length;
+  $("pfUnderCount").textContent = `${underCount} / ${items.length}`;
+
+  const best = items.filter(it => it.mos != null).sort((a, b) => b.mos - a.mos)[0];
+  $("pfBest").textContent = best ? `${best.ticker} ${fmtPct(best.mos)}` : "—";
+
+  // Sector allocation
+  const bySector = {};
+  items.forEach(it => {
+    const s = it.sector || "Other";
+    bySector[s] = (bySector[s] || 0) + 1;
+  });
+  const sectors = Object.entries(bySector);
+  const total = items.length;
+  const bar = $("pfAllocationBar");
+  const legend = $("pfAllocationLegend");
+  bar.innerHTML = sectors.map(([s, n], idx) => {
+    const pct = (n / total) * 100;
+    const color = getSectorColor(idx);
+    return `<div class="pf-alloc-segment" style="width:${pct}%; background:${color};" title="${escHtml(s)}: ${n}"></div>`;
+  }).join("");
+  legend.innerHTML = sectors.map(([s, n], idx) => {
+    const color = getSectorColor(idx);
+    const pct = (n / total) * 100;
+    return `<span class="pf-legend-item"><span class="pf-legend-dot" style="background:${color};"></span>${escHtml(s)} · ${n} (${pct.toFixed(0)}%)</span>`;
+  }).join("");
 }
 
-function setupPortfolioModal() {
-  const btn = $("portfolioBtn");
-  if (btn) btn.onclick = openPortfolioModal;
+async function refreshPortfolioPrices() {
+  const items = pfRead();
+  if (items.length === 0) return;
+  const refreshBtn = $("pfRefreshBtn");
+  if (refreshBtn) refreshBtn.textContent = "↻ Refreshing…";
+
+  const updated = await Promise.all(items.map(async it => {
+    try {
+      const res = await fetch(`/api/analyze?ticker=${encodeURIComponent(it.ticker)}`);
+      const d = await res.json();
+      if (d.error) return it;
+      return {
+        ...it,
+        price: d.current_price,
+        iv: d.intrinsic_value,
+        mos: d.margin_of_safety,
+        tier: d.priced_for?.label || it.tier,
+        sector: d.sector || it.sector,
+        name: d.company_name || it.name,
+      };
+    } catch { return it; }
+  }));
+  pfWrite(updated);
+  renderPortfolioPage();
+  if (refreshBtn) refreshBtn.textContent = "↻ Refresh prices";
 }
+
+function setupPortfolioPage() {
+  const btn = $("portfolioBtn");
+  if (btn) btn.onclick = openPortfolioPage;
+
+  const back = $("pfBackBtn");
+  if (back) back.onclick = closePortfolioPage;
+
+  const refresh = $("pfRefreshBtn");
+  if (refresh) refresh.onclick = refreshPortfolioPrices;
+
+  const start = $("pfStartBtn");
+  if (start) start.onclick = () => {
+    closePortfolioPage();
+    $("tickerInput").focus();
+  };
+
+  // Sort toggle
+  document.querySelectorAll("[data-pf-sort]").forEach(btn => {
+    btn.onclick = () => {
+      _PF_SORT = btn.dataset.pfSort;
+      document.querySelectorAll("[data-pf-sort]").forEach(b =>
+        b.classList.toggle("active", b === btn)
+      );
+      renderPortfolioPage();
+    };
+  });
+}
+
+// Tier metadata for the focused glossary modal — single source of truth
+const TIER_META = {
+  distress:      { label: "Priced for Distress",      mos: "MOS > +50%",            color: "tier-positive",
+                   desc: "Market is overly pessimistic. Trading well below fair value, often during macro fear or sector rotation. Meaningful upside if fundamentals stabilise." },
+  deep_discount: { label: "Priced for Deep Discount", mos: "MOS +40% to +50%",      color: "tier-positive",
+                   desc: "Significantly undervalued — strong signal if VALUS's growth assumptions hold. Worth a quality check to avoid value traps." },
+  discount:      { label: "Priced for Discount",      mos: "MOS +15% to +40%",      color: "tier-positive",
+                   desc: "Trading below fundamental value. Modest opportunity zone — model and analysts both see room above current price." },
+  fair_value:    { label: "Priced for Fair Value",    mos: "MOS −10% to +15%",      color: "tier-info",
+                   desc: "Market and VALUS aligned. The price reflects fundamentals as the model sees them — no clear edge in either direction." },
+  growth:        { label: "Priced for Growth",        mos: "MOS −10% to −25%",      color: "tier-warning",
+                   desc: "Market is paying a growth premium — modestly overvalued by VALUS. Acceptable if you believe execution will deliver above-base growth." },
+  excellence:    { label: "Priced for Excellence",    mos: "MOS −25% to −50%",      color: "tier-warning",
+                   desc: "Market expects flawless execution. Premium pricing requires growth, margins, and capital discipline to all work together — limited margin of error if any leg slips." },
+  miracle:       { label: "Priced for Miracle",       mos: "MOS < −50% or speculative growth", color: "tier-negative",
+                   desc: "Market is pricing in extraordinary outcomes that fewer than 1% of public companies achieve over a decade. Speculative — driven by momentum, not fundamentals." },
+};
 
 function setupTierGlossary() {
-  const tierBtn = $("tierInfoBtn");
+  const tierBtn = $("vTierBadge");
   const modal   = $("tierGlossaryModal");
   if (tierBtn && modal) {
-    tierBtn.onclick = () => modal.classList.remove("hidden");
+    tierBtn.onclick = () => openTierModal();
   }
+  // Expand/collapse "see all 7 tiers"
+  const expandBtn = $("tgExpandBtn");
+  const fullList  = $("tgFullList");
+  if (expandBtn && fullList) {
+    expandBtn.onclick = () => {
+      const expanded = expandBtn.getAttribute("aria-expanded") === "true";
+      const next = !expanded;
+      expandBtn.setAttribute("aria-expanded", String(next));
+      fullList.classList.toggle("hidden", !next);
+      expandBtn.querySelector("span").textContent =
+        next ? "Hide other tiers" : "See all 7 verdict tiers";
+    };
+  }
+}
+
+function openTierModal() {
+  if (!_LAST_DATA) return;
+  const pf = _LAST_DATA.priced_for || {};
+  const tier = pf.tier;
+  const meta = TIER_META[tier];
+  const currentEl = $("tgCurrent");
+  const fullList  = $("tgFullList");
+  const expandBtn = $("tgExpandBtn");
+
+  if (!meta || !currentEl) return;
+
+  // Reset full list to hidden each time
+  fullList.classList.add("hidden");
+  if (expandBtn) {
+    expandBtn.setAttribute("aria-expanded", "false");
+    expandBtn.querySelector("span").textContent = "See all 7 verdict tiers";
+  }
+
+  const mos = _LAST_DATA.margin_of_safety;
+  const iv  = _LAST_DATA.intrinsic_value;
+  const px  = _LAST_DATA.current_price;
+  const ig  = _LAST_DATA.implied_growth_pct;
+  const ceil = _LAST_DATA.sector_growth_ceiling_pct;
+  const ceilLbl = _LAST_DATA.sector_growth_ceiling_label;
+
+  // Inline numbers tailored to this stock
+  const numsHtml = `
+    <div class="tg-current__numbers">
+      <div class="tg-num">
+        <span class="tg-num__label">Margin of safety</span>
+        <span class="tg-num__value">${mos != null ? fmtPct(mos) : "—"}</span>
+      </div>
+      <div class="tg-num">
+        <span class="tg-num__label">Fair value</span>
+        <span class="tg-num__value">${iv != null ? fmtPrice(iv) : "—"}</span>
+      </div>
+      <div class="tg-num">
+        <span class="tg-num__label">Sector ceiling</span>
+        <span class="tg-num__value">${ceil != null ? `${ceil}% (${escHtml(ceilLbl || "—")})` : "—"}</span>
+      </div>
+    </div>
+  `;
+
+  // Mark up the focused current-tier card with the right tier color class
+  currentEl.className = `tg-current ${meta.color}`;
+  currentEl.innerHTML = `
+    <div class="tg-current__header">
+      <span class="tg-current__dot"></span>
+      <span class="tg-current__label">${escHtml(meta.label)}</span>
+      <span class="tg-current__mos">${escHtml(meta.mos)}</span>
+    </div>
+    <div class="tg-current__desc">${escHtml(meta.desc)}</div>
+    ${numsHtml}
+  `;
+
+  // Highlight the matching row in the full list
+  fullList.querySelectorAll(".tg-row").forEach(row => {
+    row.classList.toggle("is-current", row.dataset.tier === tier);
+  });
+
+  $("tierGlossaryModal").classList.remove("hidden");
 }
 
 function closeAllModals() {
@@ -1440,7 +1650,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupAdvancedToggle();
   setupCopyButton();
   setupAddPortfolioButton();
-  setupPortfolioModal();
+  setupPortfolioPage();
   setupTierGlossary();
   setupModalDismiss();
   pfUpdateBadge();

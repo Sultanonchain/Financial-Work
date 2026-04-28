@@ -33,40 +33,65 @@
   </div>
 </header>
 
-<!-- ── PORTFOLIO MODAL ──────────────────────────────────────────────── -->
-<div class="modal hidden" id="portfolioModal" role="dialog" aria-modal="true" aria-labelledby="portfolioTitle">
-  <div class="modal__backdrop" data-modal-close></div>
-  <div class="modal__panel">
-    <div class="modal__head">
-      <h2 class="modal__title" id="portfolioTitle">My Portfolio</h2>
-      <button class="modal__close" data-modal-close aria-label="Close">✕</button>
+<!-- ── PORTFOLIO PAGE ─────────────────────────────────────────────────── -->
+<main class="portfolio-page hidden" id="portfolioPage">
+  <div class="container">
+    <div class="pf-page__head">
+      <button class="copy-btn" id="pfBackBtn" type="button">← Back to research</button>
+      <div class="pf-page__title">
+        <h1>My Portfolio</h1>
+        <p>Real-time DCF tracking across your watchlist.</p>
+      </div>
+      <button class="copy-btn" id="pfRefreshBtn" type="button">↻ Refresh prices</button>
     </div>
-    <div class="modal__body">
+
+    <!-- Summary cards (4 metrics) -->
+    <div class="pf-summary-grid" id="pfSummaryGrid">
+      <div class="pf-stat">
+        <span class="pf-stat__label">Holdings</span>
+        <span class="pf-stat__value numeric" id="pfCount">0</span>
+      </div>
+      <div class="pf-stat">
+        <span class="pf-stat__label">Avg margin of safety</span>
+        <span class="pf-stat__value numeric" id="pfAvgMos">—</span>
+      </div>
+      <div class="pf-stat">
+        <span class="pf-stat__label">Undervalued</span>
+        <span class="pf-stat__value numeric" id="pfUnderCount">0 / 0</span>
+      </div>
+      <div class="pf-stat">
+        <span class="pf-stat__label">Best opportunity</span>
+        <span class="pf-stat__value numeric" id="pfBest">—</span>
+      </div>
+    </div>
+
+    <!-- Sector allocation visualization -->
+    <div class="card pf-allocation" id="pfAllocationCard">
+      <div class="section-title">Sector allocation</div>
+      <div class="pf-allocation__bar" id="pfAllocationBar"></div>
+      <div class="pf-allocation__legend" id="pfAllocationLegend"></div>
+    </div>
+
+    <!-- Sortable holdings table -->
+    <div class="card">
+      <div class="section-title-row">
+        <div class="section-title">Holdings</div>
+        <div class="pf-sort-toggle">
+          <button class="pf-sort" data-pf-sort="ticker" type="button">Ticker</button>
+          <button class="pf-sort" data-pf-sort="mos" type="button">MOS</button>
+          <button class="pf-sort active" data-pf-sort="added" type="button">Recently added</button>
+        </div>
+      </div>
       <div class="portfolio-empty" id="portfolioEmpty">
         <div class="portfolio-empty__icon">★</div>
         <div class="portfolio-empty__title">No stocks in your portfolio yet</div>
         <div class="portfolio-empty__sub">Search any ticker and tap "Add to Portfolio" to start tracking it.</div>
+        <button class="copy-btn" id="pfStartBtn" type="button" style="margin-top: 16px;">Start adding stocks</button>
       </div>
       <div class="portfolio-list" id="portfolioList"></div>
     </div>
-    <div class="modal__foot" id="portfolioFoot" hidden>
-      <div class="portfolio-summary">
-        <div class="portfolio-summary__row">
-          <span class="portfolio-summary__label">Holdings</span>
-          <span class="portfolio-summary__value" id="pfCount">0</span>
-        </div>
-        <div class="portfolio-summary__row">
-          <span class="portfolio-summary__label">Avg margin of safety</span>
-          <span class="portfolio-summary__value" id="pfAvgMos">—</span>
-        </div>
-        <div class="portfolio-summary__row">
-          <span class="portfolio-summary__label">Undervalued</span>
-          <span class="portfolio-summary__value" id="pfUnderCount">0</span>
-        </div>
-      </div>
-    </div>
   </div>
-</div>
+</main>
 
 <!-- ── HERO SEARCH ────────────────────────────────────────────────────── -->
 <section class="hero">
@@ -138,70 +163,84 @@
   <div class="modal__backdrop" data-modal-close></div>
   <div class="modal__panel">
     <div class="modal__head">
-      <h2 class="modal__title" id="tierGlossaryTitle">What does each verdict mean?</h2>
+      <h2 class="modal__title" id="tierGlossaryTitle">Why this verdict?</h2>
       <button class="modal__close" data-modal-close aria-label="Close">✕</button>
     </div>
     <div class="modal__body">
-      <p class="tg-intro">
-        VALUS classifies every stock into one of seven verdict tiers based on
-        how its price compares to the model's fair value (margin of safety).
-        Each tier tells you a different story about what the market is pricing in.
-      </p>
-      <div class="tg-list">
-        <div class="tg-row tier-positive">
+      <!-- The current stock's tier, prominently -->
+      <div class="tg-current" id="tgCurrent"></div>
+
+      <!-- How VALUS arrived at this verdict -->
+      <div class="tg-how">
+        <div class="tg-how__title">How VALUS arrived at this rating</div>
+        <ol class="tg-how__steps">
+          <li>VALUS computes an intrinsic value (DCF + reality reconciliation + Sultan Split + cash premium).</li>
+          <li>It compares that fair value to the current market price → <em>margin of safety</em>.</li>
+          <li>The implied growth rate (reverse-DCF) sanity-checks against the sector growth ceiling.</li>
+          <li>The verdict tier is assigned based on the margin of safety, with a sector-ceiling override for speculative growth.</li>
+        </ol>
+      </div>
+
+      <!-- Expandable: see all 7 tiers -->
+      <button class="tg-expand" id="tgExpandBtn" type="button" aria-expanded="false">
+        <span>See all 7 verdict tiers</span>
+        <span class="tg-expand__chev">▾</span>
+      </button>
+      <div class="tg-list hidden" id="tgFullList">
+        <div class="tg-row tier-positive" data-tier="distress">
           <span class="tg-dot"></span>
           <div class="tg-body">
             <span class="tg-label">Priced for Distress</span>
             <span class="tg-mos">MOS &gt; +50%</span>
-            <span class="tg-desc">Market is overly pessimistic. Trading well below fair value, often during macro fear or sector rotation. Meaningful upside if fundamentals stabilise.</span>
+            <span class="tg-desc">Market is overly pessimistic. Trading well below fair value, often during macro fear or sector rotation.</span>
           </div>
         </div>
-        <div class="tg-row tier-positive">
+        <div class="tg-row tier-positive" data-tier="deep_discount">
           <span class="tg-dot"></span>
           <div class="tg-body">
             <span class="tg-label">Priced for Deep Discount</span>
             <span class="tg-mos">MOS +40% to +50%</span>
-            <span class="tg-desc">Significantly undervalued — strong buy signal if VALUS's growth assumptions hold. Often value-trap candidates worth a quality check.</span>
+            <span class="tg-desc">Significantly undervalued — strong signal if VALUS's growth assumptions hold.</span>
           </div>
         </div>
-        <div class="tg-row tier-positive">
+        <div class="tg-row tier-positive" data-tier="discount">
           <span class="tg-dot"></span>
           <div class="tg-body">
             <span class="tg-label">Priced for Discount</span>
             <span class="tg-mos">MOS +15% to +40%</span>
-            <span class="tg-desc">Trading below fundamental value. Modest opportunity zone — model and analysts both see room above current price.</span>
+            <span class="tg-desc">Trading below fundamental value. Modest opportunity zone.</span>
           </div>
         </div>
-        <div class="tg-row tier-info">
+        <div class="tg-row tier-info" data-tier="fair_value">
           <span class="tg-dot"></span>
           <div class="tg-body">
             <span class="tg-label">Priced for Fair Value</span>
             <span class="tg-mos">MOS −10% to +15%</span>
-            <span class="tg-desc">Market and VALUS aligned. No clear edge — the price reflects fundamentals as the model sees them. Hold or wait for a better entry.</span>
+            <span class="tg-desc">Market and VALUS aligned. No clear edge — hold or wait for a better entry.</span>
           </div>
         </div>
-        <div class="tg-row tier-warning">
+        <div class="tg-row tier-warning" data-tier="growth">
           <span class="tg-dot"></span>
           <div class="tg-body">
             <span class="tg-label">Priced for Growth</span>
             <span class="tg-mos">MOS −10% to −25%</span>
-            <span class="tg-desc">Market paying a growth premium — modestly overvalued by VALUS. Acceptable if you believe execution will deliver above-base growth.</span>
+            <span class="tg-desc">Market paying a growth premium — acceptable if execution delivers above-base growth.</span>
           </div>
         </div>
-        <div class="tg-row tier-warning">
+        <div class="tg-row tier-warning" data-tier="excellence">
           <span class="tg-dot"></span>
           <div class="tg-body">
             <span class="tg-label">Priced for Excellence</span>
             <span class="tg-mos">MOS −25% to −50%</span>
-            <span class="tg-desc">Market expects flawless execution. Premium pricing requires growth, margins, and capital discipline to all work — limited margin of error if any leg slips.</span>
+            <span class="tg-desc">Market expects flawless execution. Limited margin of error if any leg slips.</span>
           </div>
         </div>
-        <div class="tg-row tier-negative">
+        <div class="tg-row tier-negative" data-tier="miracle">
           <span class="tg-dot"></span>
           <div class="tg-body">
             <span class="tg-label">Priced for Miracle</span>
-            <span class="tg-mos">MOS &lt; −50% OR implied growth &gt; sector ceiling × 1.2</span>
-            <span class="tg-desc">Market pricing in extraordinary outcomes that fewer than 1% of public companies achieve over a decade. Speculative — favored by momentum, not fundamentals.</span>
+            <span class="tg-mos">MOS &lt; −50% or implied growth &gt; sector ceiling × 1.2</span>
+            <span class="tg-desc">Market pricing in outcomes fewer than 1% of public companies achieve. Speculative.</span>
           </div>
         </div>
       </div>
@@ -319,11 +358,11 @@
         </div>
       </div>
 
-      <div class="tier-badge" id="vTierBadge">
+      <button class="tier-badge tier-badge--btn" id="vTierBadge" type="button" aria-label="See what this verdict means">
         <span class="tier-badge__dot"></span>
         <span id="vTierLabel">—</span>
-        <button class="tier-info" id="tierInfoBtn" type="button" aria-label="What does this verdict mean?">ⓘ</button>
-      </div>
+        <span class="tier-badge__info" aria-hidden="true">ⓘ</span>
+      </button>
 
       <div class="reasons" id="vReasons"></div>
 
