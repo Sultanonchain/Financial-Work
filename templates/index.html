@@ -644,25 +644,7 @@
       <div class="drawer__inner">
         <div class="drawer__content">
 
-          <!-- DCF assumptions -->
-          <div class="card">
-            <div class="section-title">DCF assumptions</div>
-            <div class="assumptions-grid" id="assumptionsGrid"></div>
-          </div>
-
-          <!-- Notes / flags -->
-          <div class="card" id="notesCard">
-            <div class="section-title">Model notes</div>
-            <div class="notes-list" id="notesList"></div>
-          </div>
-
-          <!-- Price chart -->
-          <div class="card">
-            <div class="section-title">Price · last 12 months</div>
-            <div class="chart-wrap"><canvas id="priceChart"></canvas></div>
-          </div>
-
-          <!-- Custom DCF assumptions — live sliders -->
+          <!-- Custom DCF assumptions (top — most engaging) -->
           <div class="card custom-dcf">
             <div class="section-title-row">
               <div class="section-title">Try your own assumptions</div>
@@ -759,6 +741,24 @@
             </div>
 
             <div class="dcf-chart-footer" id="dcfChartFooter"></div>
+          </div>
+
+          <!-- DCF assumptions (the model's actual values, for reference) -->
+          <div class="card">
+            <div class="section-title">DCF assumptions used by VALUS</div>
+            <div class="assumptions-grid" id="assumptionsGrid"></div>
+          </div>
+
+          <!-- Notes / flags -->
+          <div class="card" id="notesCard">
+            <div class="section-title">Model notes</div>
+            <div class="notes-list" id="notesList"></div>
+          </div>
+
+          <!-- Price chart -->
+          <div class="card">
+            <div class="section-title">Price · last 12 months</div>
+            <div class="chart-wrap"><canvas id="priceChart"></canvas></div>
           </div>
 
           <!-- Projection table -->

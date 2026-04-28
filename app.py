@@ -2893,22 +2893,32 @@ def discover():
 # ── Leaderboard / shared portfolios (soft sign-in via display name) ───
 import os, json as _json, uuid
 
-LEADERBOARD_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                ".valus_leaderboard.json")
-_LEADERBOARD_LOCK = False   # poor-man's mutex for the JSON file
+# Storage strategy: try /tmp first (writable on Vercel + local), then a
+# process-level in-memory list as the final fallback.  This makes the
+# leaderboard work in any deployment, with the trade-off that data may
+# not persist across cold starts on read-only file systems.
+LEADERBOARD_FILE = "/tmp/.valus_leaderboard.json"
+_LEADERBOARD_MEM = []   # last-resort in-memory store
 
 def _read_leaderboard():
-    if not os.path.exists(LEADERBOARD_FILE):
-        return []
-    try:
-        with open(LEADERBOARD_FILE) as f:
-            return _json.load(f)
-    except Exception:
-        return []
+    if os.path.exists(LEADERBOARD_FILE):
+        try:
+            with open(LEADERBOARD_FILE) as f:
+                return _json.load(f)
+        except Exception:
+            pass
+    return list(_LEADERBOARD_MEM)
 
 def _write_leaderboard(entries):
-    with open(LEADERBOARD_FILE, "w") as f:
-        _json.dump(entries, f)
+    global _LEADERBOARD_MEM
+    _LEADERBOARD_MEM = list(entries)   # always update in-memory mirror
+    try:
+        with open(LEADERBOARD_FILE, "w") as f:
+            _json.dump(entries, f)
+    except Exception:
+        # Filesystem read-only (some serverless platforms) — in-memory copy
+        # above will be used.  No exception propagates to the user.
+        pass
 
 
 @app.route("/api/leaderboard/submit", methods=["POST"])

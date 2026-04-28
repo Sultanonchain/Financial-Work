@@ -105,10 +105,11 @@ async function analyze(ticker, params = {}) {
   $("results").classList.add("hidden");
   $("btcHero").classList.add("hidden");
   $("etfHero")?.classList.add("hidden");
+  $("portfolioPage")?.classList.add("hidden");
+  $("discoverPage")?.classList.add("hidden");
+  $("leaderboardPage")?.classList.add("hidden");
   // Make sure hero search section is visible (in case we came from portfolio)
   document.querySelector(".hero")?.classList.remove("hidden");
-  const pfPage = $("portfolioPage");
-  if (pfPage) pfPage.classList.add("hidden");
 
   const isBTC = isBTCTicker(ticker);
   const fetchTicker = normalizeBTCTicker(ticker);
@@ -1366,9 +1367,12 @@ function setupSearch() {
   function submit() {
     const t = input.value.trim().toUpperCase();
     if (!t) return;
-    // Always dismiss the autocomplete dropdown when submitting
+    // Cancel any pending debounced suggestion fetch — without this, a
+    // setTimeout fired ~180ms after Enter would re-open the dropdown
+    // on top of the freshly-loaded analysis.
+    if (timer) { clearTimeout(timer); timer = null; }
     dd.classList.add("hidden");
-    input.blur();   // clear focus so dropdown stays closed and mobile keyboard hides
+    input.blur();
     const params = {};
     const yrs = $("advYrs").value;
     const s1  = $("advS1").value;
@@ -2400,13 +2404,17 @@ function setupSharePortfolio() {
   };
 }
 
-// Helper to hide every top-level view at once
+// Helper to hide every top-level view at once.  Each top-level <main>
+// must be listed here or the app will end up showing two pages stacked.
 function hideAllViews() {
-  $("results").classList.add("hidden");
+  $("results")?.classList.add("hidden");
   $("btcHero")?.classList.add("hidden");
   $("etfHero")?.classList.add("hidden");
   $("portfolioPage")?.classList.add("hidden");
   $("discoverPage")?.classList.add("hidden");
+  $("leaderboardPage")?.classList.add("hidden");   // was missing — caused
+                                                   // leaderboard + discover
+                                                   // to stack visually
   $("loading")?.classList.add("hidden");
   $("error")?.classList.add("hidden");
   document.querySelector(".hero")?.classList.add("hidden");
