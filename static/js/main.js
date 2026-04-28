@@ -1451,15 +1451,18 @@ function setupAddPortfolioButton() {
   const btn = $("addPortfolioBtn");
   const txt = $("addPortfolioTxt");
   if (!btn) return;
-  btn.onclick = () => {
+  btn.onclick = async () => {
     if (!_LAST_DATA) return;
     const t = _LAST_DATA.ticker;
+    // Removing is allowed without auth (the user already added it pre-auth);
+    // adding requires sign-in to associate the entry with an identity.
     if (pfHas(t)) {
       pfRemove(t);
       btn.classList.remove("starred");
       txt.textContent = "★ Add to Portfolio";
       return;
     }
+    if (!(await requireAuthWithRedirectIntent("portfolio"))) return;
     pfAdd({
       ticker: t,
       name: _LAST_DATA.company_name || t,
@@ -1920,8 +1923,17 @@ function setupLowConfExplainer() {
   });
 }
 
-// ── Soft sign-in: stable user_token + display name in localStorage ─────
-const VALUS_USER_KEY = "valus.user.v1";
+// ── Auth state machine ─────────────────────────────────────────────────
+// _ME holds the OAuth-derived identity ({sub, name, picture, email})
+// or null when signed out.  _AUTH_CONFIGURED is false when the deploy
+// has no GOOGLE_CLIENT_ID — in that case the sign-in flow is disabled
+// gracefully (modal explains, no broken redirect).
+const VALUS_USER_KEY = "valus.user.v1";   // legacy soft-token, kept for claim flow
+let _ME = null;
+let _AUTH_CONFIGURED = false;
+let _PENDING_INTENT = null;   // string set when an action prompted sign-in;
+                              // re-fired on auth_ok=1 redirect.
+
 function getValusUser() {
   try {
     const raw = localStorage.getItem(VALUS_USER_KEY);
@@ -1932,7 +1944,6 @@ function getValusUser() {
 function ensureValusUser(name) {
   let u = getValusUser();
   if (!u) {
-    // Generate a stable random token (browser-bound)
     const tok = "u_" + Array.from(crypto.getRandomValues(new Uint8Array(12)))
       .map(b => b.toString(16).padStart(2, "0")).join("");
     u = { token: tok, name: name || "" };
@@ -1940,6 +1951,158 @@ function ensureValusUser(name) {
   if (name) u.name = name;
   localStorage.setItem(VALUS_USER_KEY, JSON.stringify(u));
   return u;
+}
+
+async function refreshMe() {
+  try {
+    const r = await fetch("/api/me", { credentials: "same-origin" });
+    const data = await r.json();
+    _ME = data.user || null;
+    _AUTH_CONFIGURED = !!data.auth_configured;
+  } catch {
+    _ME = null;
+    _AUTH_CONFIGURED = false;
+  }
+  updateAuthControl();
+  // First-time sign-in: claim any legacy soft-token entries
+  if (_ME && !sessionStorage.getItem("valus.claimed")) {
+    const legacy = getValusUser();
+    if (legacy?.token) {
+      try {
+        await fetch("/api/leaderboard/claim", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_token: legacy.token }),
+        });
+      } catch {}
+    }
+    sessionStorage.setItem("valus.claimed", "1");
+  }
+}
+
+function updateAuthControl() {
+  const signInBtn = $("signInBtn");
+  const avatar    = $("authAvatar");
+  const avatarImg = $("authAvatarImg");
+  const avatarTxt = $("authAvatarName");
+  const menu      = $("authMenu");
+  const email     = $("authMenuEmail");
+  if (!signInBtn || !avatar) return;
+  if (_ME) {
+    signInBtn.classList.add("hidden");
+    avatar.classList.remove("hidden");
+    if (_ME.picture) {
+      avatarImg.src = _ME.picture;
+      avatarImg.style.display = "";
+    } else {
+      avatarImg.style.display = "none";
+    }
+    avatarTxt.textContent = _ME.name || "Account";
+    if (email) email.textContent = _ME.email || "";
+  } else {
+    signInBtn.classList.remove("hidden");
+    avatar.classList.add("hidden");
+    if (menu) menu.classList.add("hidden");
+  }
+}
+
+// Gate a protected action on auth.  If signed in, returns true; else
+// opens the sign-in modal with an intent-specific explainer and stores
+// the intent so it can fire after the OAuth roundtrip.
+async function requireAuth(intent) {
+  if (_ME) return true;
+  _PENDING_INTENT = intent;
+  showSignInModal(intent);
+  return false;
+}
+
+const INTENT_COPY = {
+  portfolio: "Sign in to save your portfolio across devices.",
+  publish:   "Sign in to publish your portfolio to the public leaderboard.",
+  default:   "Sign in to continue.",
+};
+
+function showSignInModal(intent) {
+  const modal = $("signInModal");
+  if (!modal) return;
+  $("signInIntent").textContent = INTENT_COPY[intent] || INTENT_COPY.default;
+  // If OAuth isn't configured on this deploy, dim the Google button and
+  // surface a clear explainer instead of a confusing redirect.
+  const notConfigured = $("signInNotConfigured");
+  const googleBtn = $("googleSignInBtn");
+  if (_AUTH_CONFIGURED) {
+    notConfigured.classList.add("hidden");
+    googleBtn.disabled = false;
+    googleBtn.style.opacity = "1";
+  } else {
+    notConfigured.classList.remove("hidden");
+    googleBtn.disabled = true;
+    googleBtn.style.opacity = "0.4";
+  }
+  modal.classList.remove("hidden");
+}
+
+function setupAuthControl() {
+  const signInBtn  = $("signInBtn");
+  const avatar     = $("authAvatar");
+  const menu       = $("authMenu");
+  const signOutBtn = $("authSignOutBtn");
+  const googleBtn  = $("googleSignInBtn");
+
+  if (signInBtn) signInBtn.onclick = () => showSignInModal("default");
+  if (googleBtn) googleBtn.onclick = () => {
+    if (!_AUTH_CONFIGURED) return;
+    // Preserve the current URL so we land back here after Google round-trip
+    const next = encodeURIComponent(window.location.pathname + window.location.search);
+    window.location.href = `/auth/login?next=${next}`;
+  };
+  if (avatar && menu) {
+    avatar.onclick = (e) => {
+      e.stopPropagation();
+      menu.classList.toggle("hidden");
+    };
+    document.addEventListener("click", (e) => {
+      if (!menu.contains(e.target) && !avatar.contains(e.target)) {
+        menu.classList.add("hidden");
+      }
+    });
+  }
+  if (signOutBtn) signOutBtn.onclick = async () => {
+    try {
+      await fetch("/auth/logout", { method: "POST", credentials: "same-origin" });
+    } catch {}
+    sessionStorage.removeItem("valus.claimed");
+    _ME = null;
+    updateAuthControl();
+  };
+
+  // After OAuth roundtrip, URL has ?auth_ok=1 — replay any pending intent
+  if (window.location.search.includes("auth_ok=1")) {
+    // Strip the marker from the URL but keep the rest
+    const url = new URL(window.location.href);
+    url.searchParams.delete("auth_ok");
+    window.history.replaceState({}, "", url);
+    // The intent (if any) was preserved in sessionStorage by the modal flow
+    const pendingIntent = sessionStorage.getItem("valus.pending_intent");
+    sessionStorage.removeItem("valus.pending_intent");
+    setTimeout(() => {
+      if (pendingIntent === "publish") {
+        // Open the publish modal automatically
+        $("pfPublishBtn")?.click();
+      } else if (pendingIntent === "portfolio") {
+        // Re-trigger the add-to-portfolio click from where they were
+        $("addPortfolioBtn")?.click();
+      }
+    }, 400);
+  }
+}
+
+// Wrap requireAuth to also persist intent across the OAuth redirect
+async function requireAuthWithRedirectIntent(intent) {
+  if (_ME) return true;
+  sessionStorage.setItem("valus.pending_intent", intent);
+  return requireAuth(intent);
 }
 
 // ── Submit-to-leaderboard modal ────────────────────────────────────────
@@ -1951,16 +2114,17 @@ function setupSubmitToLeaderboard() {
   const noteEl     = $("lbNote");
   if (!publishBtn || !modal) return;
 
-  publishBtn.onclick = () => {
+  publishBtn.onclick = async () => {
     const items = pfRead();
     if (items.length === 0) {
       publishBtn.textContent = "Add stocks first ★";
       setTimeout(() => { publishBtn.textContent = "🏆 Publish"; }, 1500);
       return;
     }
-    // Pre-populate with last-used name if any
-    const u = getValusUser();
-    if (u && u.name) nameEl.value = u.name;
+    // Gate on real auth — sign-in modal is shown if not signed in.
+    if (!(await requireAuthWithRedirectIntent("publish"))) return;
+    // Pre-populate display name from the OAuth identity
+    if (_ME?.name) nameEl.value = _ME.name;
     modal.classList.remove("hidden");
     setTimeout(() => nameEl.focus(), 50);
   };
@@ -1975,21 +2139,33 @@ function setupSubmitToLeaderboard() {
     const items = pfRead();
     const tickers = items.map(it => it.ticker);
     const note = noteEl.value.trim();
-    const u = ensureValusUser(name);
+    // Pass the legacy soft-token so the backend can dedupe a user who
+    // had a pre-auth submission under that token.
+    const legacy = getValusUser();
 
     submitBtn.textContent = "Publishing…";
     submitBtn.disabled = true;
     try {
       const res = await fetch("/api/leaderboard/submit", {
         method: "POST",
+        credentials: "same-origin",   // send the auth cookie
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, user_token: u.token, tickers, note }),
+        body: JSON.stringify({
+          name, tickers, note,
+          legacy_user_token: legacy?.token || null,
+        }),
       });
       const data = await res.json();
+      if (res.status === 401) {
+        // Session expired between modal-open and submit; re-prompt.
+        modal.classList.add("hidden");
+        submitBtn.textContent = "Publish";
+        submitBtn.disabled = false;
+        showSignInModal("publish");
+        return;
+      }
       if (data.error) throw new Error(data.error);
       submitBtn.textContent = "✓ Published";
-      // Auto-navigate to the leaderboard so the user sees their rank.
-      // Brief delay so the success state is visible.
       setTimeout(() => {
         modal.classList.add("hidden");
         submitBtn.textContent = "Publish";
@@ -2075,9 +2251,10 @@ function renderLeaderboard(items) {
   }
   empty.classList.add("hidden");
 
-  // Track current user — used to mark "MINE" and to auto-scroll to it
-  const u = getValusUser();
-  const myName = (u?.name || "").trim().toLowerCase();
+  // Track current user — prefer the OAuth `sub` (rock-solid identity);
+  // fall back to a name match for legacy entries that haven't been claimed.
+  const mySub  = _ME?.sub || null;
+  const myName = (_ME?.name || "").trim().toLowerCase();
 
   // Diff: which IDs are NEW since last render?
   const newIds = new Set();
@@ -2093,7 +2270,8 @@ function renderLeaderboard(items) {
     const avgClass = avg == null ? "" : (avg > 5 ? "positive" : (avg < -5 ? "negative" : ""));
     const tickersStr = (entry.tickers || []).slice(0, 6).join(" · ") +
                        (entry.tickers.length > 6 ? ` +${entry.tickers.length - 6} more` : "");
-    const isMine = myName && entry.name && entry.name.trim().toLowerCase() === myName;
+    const isMine = (mySub && entry.user_sub === mySub) ||
+                   (myName && entry.name && entry.name.trim().toLowerCase() === myName);
     const isFresh = !isFirstRender && newIds.has(entry.id);
     return `
       <div class="lb-row ${isMine ? 'is-mine' : ''} ${isFresh ? 'is-fresh' : ''}"
@@ -2470,6 +2648,9 @@ document.addEventListener("DOMContentLoaded", () => {
   setupLowConfExplainer();
   setupSubmitToLeaderboard();
   setupLeaderboard();
+  setupAuthControl();
   pfUpdateBadge();
+  // Fetch identity in parallel with bootFromURL — non-blocking
+  refreshMe();
   bootFromURL();
 });

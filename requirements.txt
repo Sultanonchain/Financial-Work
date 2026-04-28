@@ -4,3 +4,9 @@ yfinance>=0.2.40
 numpy>=1.26.0
 pandas>=2.0.0
 gunicorn>=21.2.0
+# Auth + persistent storage (both optional — app degrades gracefully
+# when env vars are absent, so local dev with no Google OAuth or Vercel
+# KV configured still works exactly like before).
+authlib>=1.3.0
+redis>=5.0.0
+requests>=2.31.0

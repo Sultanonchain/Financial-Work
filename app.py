@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, session, redirect, url_for
 from flask_cors import CORS
 import yfinance as yf
 import numpy as np
@@ -7,11 +7,83 @@ import requests
 import traceback
 import time
 import re
+import os
+import json as _json_top
 import xml.etree.ElementTree as ET
 from datetime import datetime
+from urllib.parse import urlencode, urlparse
+
+# Optional .env loading for local dev
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
 
 app = Flask(__name__)
-CORS(app)
+# Cookie session signing — falls back to a dev key (sign-in still works
+# locally but cookies don't survive a server restart).
+app.secret_key = os.environ.get("SECRET_KEY") or "dev-only-do-not-use-in-prod-" + str(int(time.time()))
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=bool(os.environ.get("VERCEL")),  # secure cookies on prod only
+)
+CORS(app, supports_credentials=True)
+
+# ── Vercel KV (Redis) adapter — durable storage when KV_URL is set ────
+# Falls back silently to a process-level dict + /tmp file when env is
+# missing (local dev with no KV provisioned still works exactly like
+# before).
+_kv = None
+try:
+    if os.environ.get("KV_URL"):
+        import redis as _redis
+        _kv = _redis.from_url(os.environ["KV_URL"], decode_responses=True,
+                              socket_connect_timeout=2, socket_timeout=2)
+        # Probe once on startup so a misconfigured KV fails loud at boot
+        # rather than at first user action.
+        _kv.ping()
+except Exception as _e:
+    print(f"[valus] KV unavailable, falling back to /tmp + in-memory: {_e}")
+    _kv = None
+
+def kv_get(key):
+    if _kv:
+        try: return _kv.get(key)
+        except Exception: pass
+    return None
+
+def kv_set(key, value, ttl=None):
+    if _kv:
+        try:
+            if ttl: _kv.setex(key, ttl, value)
+            else:   _kv.set(key, value)
+            return True
+        except Exception: pass
+    return False
+
+# ── Google OAuth (optional — gracefully disabled when env vars absent) ─
+_oauth = None
+_GOOGLE_CONFIGURED = bool(
+    os.environ.get("GOOGLE_CLIENT_ID") and
+    os.environ.get("GOOGLE_CLIENT_SECRET")
+)
+if _GOOGLE_CONFIGURED:
+    try:
+        from authlib.integrations.flask_client import OAuth
+        _oauth = OAuth(app)
+        _oauth.register(
+            name="google",
+            client_id=os.environ["GOOGLE_CLIENT_ID"],
+            client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
+            server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+            client_kwargs={"scope": "openid email profile"},
+        )
+    except Exception as _e:
+        print(f"[valus] OAuth setup failed: {_e}")
+        _oauth = None
+        _GOOGLE_CONFIGURED = False
 
 RISK_FREE_RATE   = 0.043   # 10-yr US Treasury proxy (Apr 2025 ~4.3%)
 EQUITY_RISK_PREM = 0.060   # FIN 415 template MRP (6.0% — matches academic standard)
@@ -2705,6 +2777,90 @@ def index():
     return render_template("index.html")
 
 
+# ════════════════════════════════════════════════════════════════════════
+# Auth — Google OAuth (optional, gracefully disabled if env vars missing)
+# ════════════════════════════════════════════════════════════════════════
+
+def require_user():
+    """
+    Returns (user_dict, error_response_or_None).
+    user_dict has keys: sub, email, name, picture.
+    """
+    user = session.get("user")
+    if not user:
+        return None, (jsonify({
+            "error": "sign-in required",
+            "auth_configured": _GOOGLE_CONFIGURED,
+        }), 401)
+    return user, None
+
+
+@app.route("/api/me")
+def api_me():
+    """
+    Returns the current signed-in user (or null) plus a flag telling the
+    frontend whether OAuth is configured at all (so it can show a useful
+    message if a deploy forgot to set the env vars).
+    """
+    return jsonify({
+        "user":             session.get("user"),
+        "auth_configured":  _GOOGLE_CONFIGURED,
+    })
+
+
+@app.route("/auth/login")
+def auth_login():
+    if not _GOOGLE_CONFIGURED or not _oauth:
+        return jsonify({
+            "error": "Google OAuth not configured on this deployment.",
+        }), 503
+    # Preserve where to land after OAuth — defaults to root
+    next_url = request.args.get("next", "/")
+    session["auth_next"] = next_url
+    redirect_uri = url_for("auth_callback", _external=True)
+    return _oauth.google.authorize_redirect(redirect_uri)
+
+
+@app.route("/auth/callback")
+def auth_callback():
+    if not _GOOGLE_CONFIGURED or not _oauth:
+        return redirect("/?auth_error=not_configured")
+    try:
+        token = _oauth.google.authorize_access_token()
+        # token contains 'userinfo' from the OIDC discovery flow
+        userinfo = token.get("userinfo") or {}
+        if not userinfo:
+            # Fallback: hit the userinfo endpoint manually
+            resp = _oauth.google.get("https://openidconnect.googleapis.com/v1/userinfo")
+            userinfo = resp.json() if resp.ok else {}
+        if not userinfo.get("sub"):
+            return redirect("/?auth_error=no_userinfo")
+        session["user"] = {
+            "sub":     userinfo["sub"],
+            "email":   userinfo.get("email"),
+            "name":    userinfo.get("name") or userinfo.get("email", "").split("@")[0],
+            "picture": userinfo.get("picture"),
+        }
+        session.permanent = True
+        next_url = session.pop("auth_next", "/") or "/"
+        # Sanity: only redirect to relative paths to prevent open-redirect
+        if not next_url.startswith("/") or next_url.startswith("//"):
+            next_url = "/"
+        return redirect(next_url + ("&" if "?" in next_url else "?") + "auth_ok=1")
+    except Exception as e:
+        print(f"[valus] OAuth callback failed: {e}")
+        return redirect("/?auth_error=callback_failed")
+
+
+@app.route("/auth/logout", methods=["POST", "GET"])
+def auth_logout():
+    session.pop("user", None)
+    session.pop("auth_next", None)
+    if request.method == "GET":
+        return redirect("/")
+    return jsonify({"ok": True})
+
+
 @app.route("/api/search")
 def search():
     q = request.args.get("q", "").strip()
@@ -2893,14 +3049,21 @@ def discover():
 # ── Leaderboard / shared portfolios (soft sign-in via display name) ───
 import os, json as _json, uuid
 
-# Storage strategy: try /tmp first (writable on Vercel + local), then a
-# process-level in-memory list as the final fallback.  This makes the
-# leaderboard work in any deployment, with the trade-off that data may
-# not persist across cold starts on read-only file systems.
+# Storage strategy:
+#   1. Vercel KV via redis-py if KV_URL is set (durable, multi-instance).
+#   2. /tmp/.valus_leaderboard.json as a local-dev / single-instance fallback.
+#   3. Process-level in-memory list as the final fallback.
 LEADERBOARD_FILE = "/tmp/.valus_leaderboard.json"
-_LEADERBOARD_MEM = []   # last-resort in-memory store
+LEADERBOARD_KEY  = "valus:leaderboard:v1"
+_LEADERBOARD_MEM = []
 
 def _read_leaderboard():
+    # KV first (multi-instance durability)
+    raw = kv_get(LEADERBOARD_KEY)
+    if raw:
+        try: return _json.loads(raw)
+        except Exception: pass
+    # /tmp file
     if os.path.exists(LEADERBOARD_FILE):
         try:
             with open(LEADERBOARD_FILE) as f:
@@ -2911,49 +3074,62 @@ def _read_leaderboard():
 
 def _write_leaderboard(entries):
     global _LEADERBOARD_MEM
-    _LEADERBOARD_MEM = list(entries)   # always update in-memory mirror
+    _LEADERBOARD_MEM = list(entries)
+    serialized = _json.dumps(entries)
+    # KV first — write-through
+    kv_set(LEADERBOARD_KEY, serialized)
+    # /tmp mirror so local dev still works without KV
     try:
         with open(LEADERBOARD_FILE, "w") as f:
-            _json.dump(entries, f)
+            f.write(serialized)
     except Exception:
-        # Filesystem read-only (some serverless platforms) — in-memory copy
-        # above will be used.  No exception propagates to the user.
         pass
 
 
 @app.route("/api/leaderboard/submit", methods=["POST"])
 def leaderboard_submit():
     """
-    Accept a portfolio submission for the public leaderboard.
-    Body: { name: str, user_token: str, tickers: [str], note: str }
-    Replaces any existing submission from the same user_token (soft auth
-    via localStorage-stored token — not real auth, just lets users edit).
+    Submit a portfolio to the public leaderboard.  Requires sign-in.
+    Body: { name: str (optional override), tickers: [str], note: str }
+    Entries are keyed to the OAuth `sub` so re-publishing replaces the
+    user's previous entry.
     """
+    user, err = require_user()
+    if err: return err
+
     body = request.get_json(silent=True) or {}
-    name = (body.get("name") or "").strip()[:40]
-    user_token = (body.get("user_token") or "").strip()[:64]
+    name = ((body.get("name") or "").strip()
+            or (user.get("name") or "").strip()
+            or (user.get("email") or "").split("@")[0])[:40]
     tickers = body.get("tickers") or []
     note = (body.get("note") or "").strip()[:200]
 
-    if not name:       return jsonify({"error": "Display name is required"}), 400
-    if not user_token: return jsonify({"error": "User token is required"}),  400
     tickers = [str(t).strip().upper() for t in tickers if str(t).strip()][:50]
-    if not tickers:    return jsonify({"error": "At least one ticker required"}), 400
+    if not tickers:
+        return jsonify({"error": "At least one ticker required"}), 400
+    if not name:
+        return jsonify({"error": "Display name is required"}), 400
 
     entries = _read_leaderboard()
-    # Replace prior submission from same token, or append new
-    entries = [e for e in entries if e.get("user_token") != user_token]
+    # Replace prior submission keyed to this user (Google `sub`).
+    # Also drop legacy entries that match the soft user_token from the
+    # claim flow if it was provided, so a user upgrading from soft-auth
+    # doesn't end up with two entries.
+    legacy_token = (body.get("legacy_user_token") or "").strip()[:64]
+    entries = [
+        e for e in entries
+        if e.get("user_sub") != user["sub"]
+        and (not legacy_token or e.get("user_token") != legacy_token)
+    ]
     entries.append({
         "id":           uuid.uuid4().hex[:10],
         "name":         name,
-        "user_token":   user_token,
+        "user_sub":     user["sub"],
+        "user_picture": user.get("picture"),
         "tickers":      tickers,
         "note":         note,
-        # Float timestamp so re-publishes within the same second still
-        # preserve recency ordering for the "Most Recent" sort.
         "submitted_at": time.time(),
     })
-    # Keep only the most recent 200 entries to bound storage
     entries = sorted(entries, key=lambda e: -e.get("submitted_at", 0))[:200]
     _write_leaderboard(entries)
     return jsonify({"ok": True, "count": len(entries)})
@@ -2961,13 +3137,39 @@ def leaderboard_submit():
 
 @app.route("/api/leaderboard/delete", methods=["POST"])
 def leaderboard_delete():
-    body = request.get_json(silent=True) or {}
-    user_token = (body.get("user_token") or "").strip()[:64]
-    if not user_token: return jsonify({"error": "user_token required"}), 400
+    user, err = require_user()
+    if err: return err
     entries = _read_leaderboard()
-    entries = [e for e in entries if e.get("user_token") != user_token]
+    entries = [e for e in entries if e.get("user_sub") != user["sub"]]
     _write_leaderboard(entries)
     return jsonify({"ok": True})
+
+
+@app.route("/api/leaderboard/claim", methods=["POST"])
+def leaderboard_claim():
+    """
+    Re-key any leaderboard entries from the legacy soft-auth user_token
+    to the now-signed-in OAuth sub.  Called once on first sign-in.
+    """
+    user, err = require_user()
+    if err: return err
+    body = request.get_json(silent=True) or {}
+    legacy_token = (body.get("user_token") or "").strip()[:64]
+    if not legacy_token:
+        return jsonify({"ok": True, "claimed": 0})
+    entries = _read_leaderboard()
+    claimed = 0
+    for e in entries:
+        if e.get("user_token") == legacy_token and not e.get("user_sub"):
+            e["user_sub"]     = user["sub"]
+            e["user_picture"] = user.get("picture")
+            # Keep legacy display name unless it's empty
+            e["name"]         = e.get("name") or user.get("name", "")
+            e.pop("user_token", None)
+            claimed += 1
+    if claimed:
+        _write_leaderboard(entries)
+    return jsonify({"ok": True, "claimed": claimed})
 
 
 @app.route("/api/leaderboard")
@@ -3000,6 +3202,8 @@ def leaderboard():
         enriched.append({
             "id":              entry["id"],
             "name":            entry["name"],
+            "user_sub":        entry.get("user_sub"),       # for "MINE" detection
+            "user_picture":    entry.get("user_picture"),   # avatar in row
             "tickers":         entry["tickers"],
             "note":            entry.get("note", ""),
             "submitted_at":    entry["submitted_at"],
