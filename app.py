@@ -1177,7 +1177,7 @@ def calc_wacc(info, income_stmt, tax_rate=0.21, fx_rate=1.0):
 
 def solve_implied_growth(price, base_fcf, s2_ratio, tg, wacc, yrs,
                           info, fx_rate, net_debt_override=None,
-                          low=0.0, high=3.0, tol=5e-5):
+                          low=0.0, high=1.5, tol=5e-5):
     """
     Reverse DCF: binary-search for the Stage-1 growth rate `g` such that
     run_dcf_single(g, ...) produces an intrinsic value ≈ current price.
@@ -1246,6 +1246,16 @@ def _priced_for_verdict(implied_g, sector_ceiling, price, iv, margin_of_safety=N
         return {"tier": "miracle", "label": "Priced for Miracle", "color": "red",
                 "narrative": (f"Market implies {implied_g*100:.1f}% growth — exceeds sector "
                               f"ceiling × 1.2; speculative.")}
+
+    # Hard speculative override — independent of MOS sign.  When implied
+    # growth blows past ceiling × 1.5, the model is fragile regardless of
+    # which direction MOS leans; surface it so investors don't see a
+    # "Priced for Discount" tag on a moonshot.
+    if (implied_g is not None and sector_ceiling
+            and implied_g > sector_ceiling * 1.50):
+        return {"tier": "miracle", "label": "Priced for Miracle", "color": "red",
+                "narrative": (f"Market implies {implied_g*100:.1f}% growth — far above sector "
+                              f"ceiling; treat output as low-confidence.")}
 
     if mos >= 40:
         return {"tier": "deep_discount", "label": "Priced for Deep Discount", "color": "green",
@@ -2910,7 +2920,8 @@ def history():
             })
         return jsonify({"prices": prices, "period": period})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        app.logger.exception("history fetch failed for %s", ticker)
+        return jsonify({"error": "Couldn't load price history. Try again."}), 500
 
 
 @app.route("/api/statements")
@@ -2931,7 +2942,8 @@ def statements():
             "tradingCurrency":   trading_ccy,
         }))
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        app.logger.exception("statements fetch failed for %s", ticker)
+        return jsonify({"error": "Couldn't load financial statements. Try again."}), 500
 
 
 # ── Analyze response cache (15-min TTL) ────────────────────────────────
@@ -3220,9 +3232,6 @@ def leaderboard():
     else:    # avg_mos default
         enriched.sort(key=lambda e: -(e.get("avg_mos") if e.get("avg_mos") is not None else -999))
     return jsonify({"items": enriched[:50], "total": len(enriched)})
-
-
-@app.route("/api/analyze")
 
 
 @app.route("/api/analyze")
@@ -3575,14 +3584,22 @@ def analyze():
             effective_max_s1 = max(ind_params["max_s1"], 0.35) if is_backbone_moat else ind_params["max_s1"]
 
             if s1_ov:
-                s1 = float(s1_ov) / 100 if float(s1_ov) > 1 else float(s1_ov)
+                _s1_raw = float(s1_ov) / 100 if float(s1_ov) > 1 else float(s1_ov)
+                # Clamp user override to the same sector ceiling we apply to
+                # auto-derived growth.  Without this, a URL like ?growth1=200
+                # runs the model at 200% Stage-1 for 5 years and produces a
+                # nonsense IV.  Floor at 0 to reject negative inputs.
+                s1 = max(min(_s1_raw, effective_max_s1), 0.0)
                 growth_source = "User override"
             else:
                 s1, growth_source = get_forward_growth(stock, info, fcf_series)
                 s1 = min(s1, effective_max_s1)
 
             if s2_ov:
-                s2 = float(s2_ov) / 100 if float(s2_ov) > 1 else float(s2_ov)
+                _s2_raw = float(s2_ov) / 100 if float(s2_ov) > 1 else float(s2_ov)
+                # Stage-2 ceiling is 65% of Stage-1 ceiling — same logic the
+                # auto path uses to keep mid-period growth credible.
+                s2 = max(min(_s2_raw, effective_max_s1 * 0.65), tg)
             else:
                 # Stage 2 = 55% of Stage 1 (standard mean-reversion taper), with:
                 #   • floor of (TG + 0.5pp) — prevents S2 falling below terminal rate
@@ -4364,6 +4381,32 @@ def analyze():
                     scenarios["weighted"] = round(scenarios["weighted"] * _factor, 2)
                     scenarios["weighted_upside"] = round((scenarios["weighted"] - price) / price * 100, 1) if price else None
 
+        # ── IV Sanity Clamp ───────────────────────────────────────────────────
+        # After all premium stacking (moat / cash-rich / momentum / debt) the
+        # IV can drift into nonsense territory for fragile-input names — small
+        # ADRs, tickers with one-period FCF history, share-class quirks.  Cap
+        # IV between 0.05× and 6× current price.  Anything beyond that is
+        # almost certainly a data artefact, not a real valuation insight, and
+        # showing it to investors as a "Priced for Discount" stock with a
+        # 19,000% upside number is the bug we're fixing here.
+        if intrinsic_value is not None and price and price > 0:
+            _iv_pre_clamp = intrinsic_value
+            _iv_ceiling   = price * 6.0
+            _iv_floor     = price * 0.05
+            intrinsic_value = max(min(intrinsic_value, _iv_ceiling), _iv_floor)
+            if intrinsic_value != _iv_pre_clamp:
+                margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
+                if scenarios:
+                    _factor = intrinsic_value / _iv_pre_clamp
+                    for _k in ("base", "bull", "bear"):
+                        _slot = scenarios.get(_k)
+                        if _slot and _slot.get("value") is not None:
+                            _slot["value"]  = round(_slot["value"] * _factor, 2)
+                            _slot["upside"] = round((_slot["value"] - price) / price * 100, 1)
+                    if scenarios.get("weighted") is not None:
+                        scenarios["weighted"] = round(scenarios["weighted"] * _factor, 2)
+                        scenarios["weighted_upside"] = round((scenarios["weighted"] - price) / price * 100, 1)
+
         # ── Scenario Coherence Enforcer (Bear < Base < Bull, sane spreads) ────
         if scenarios and intrinsic_value is not None:
             scenarios = _enforce_scenario_coherence(scenarios, intrinsic_value, price)
@@ -4663,7 +4706,14 @@ def analyze():
             "growth_source":     growth_source,
             "fcf_source":        fcf_source,
             "intrinsic_value":   round(intrinsic_value, 2) if intrinsic_value else None,
-            "margin_of_safety":  round(margin_of_safety, 1) if margin_of_safety is not None else None,
+            # MOS clamped to a sane display range. Anything beyond ±200 is
+            # almost always a data artefact (price=$0.30 ADR with $90 IV,
+            # forward-EPS spike, share-class mismatch). Raw value preserved
+            # in margin_of_safety_raw for transparency.
+            "margin_of_safety":  (round(max(min(margin_of_safety, 200.0), -99.0), 1)
+                                  if margin_of_safety is not None else None),
+            "margin_of_safety_raw": (round(margin_of_safety, 1)
+                                     if margin_of_safety is not None else None),
             "enterprise_value":  enterprise_value,
             "equity_value":      equity_value,
             "pv_terminal":       pv_terminal,
@@ -4801,7 +4851,12 @@ def analyze():
         return resp
 
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        # Log full trace server-side; never leak it to the client.  A raw
+        # Python stack trace in front of an investor is a credibility hit.
+        app.logger.exception("analyze failed for %s", ticker)
+        return jsonify({
+            "error": "We hit an issue analyzing that ticker. Try another, or try again in a moment.",
+        }), 500
 
 
 def _warm_discovery_cache():

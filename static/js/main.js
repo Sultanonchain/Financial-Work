@@ -100,6 +100,11 @@ function isBTCTicker(t) {
 function normalizeBTCTicker(t) { return isBTCTicker(t) ? "BTC-USD" : t; }
 
 async function analyze(ticker, params = {}) {
+  // Disable the Analyze button + swap label so a slow Yahoo response can't
+  // be double-fired by an impatient click.
+  const _btn = document.getElementById("analyzeBtn");
+  const _btnLabel = _btn ? _btn.textContent : null;
+  if (_btn) { _btn.disabled = true; _btn.textContent = "Analyzing…"; }
   showLoading();
   hideError();
   $("results").classList.add("hidden");
@@ -138,6 +143,8 @@ async function analyze(ticker, params = {}) {
   } catch (err) {
     hideLoading();
     showError(err.message || "Failed to load analysis");
+  } finally {
+    if (_btn) { _btn.disabled = false; _btn.textContent = _btnLabel || "Analyze"; }
   }
 }
 
@@ -440,7 +447,11 @@ function renderHeroVerdict(d) {
     // typically indicate a data quirk: stale price, share-class mismatch,
     // forward-earnings spike, leverage non-monotonicity).
     if (d.extreme_mos_flag) {
-      pctEl.innerHTML = `${fmtPct(mos)}<span class="mos-confidence-chip" title="MOS exceeds ±100% — DCF inputs may be mispriced. Treat as low-confidence and check the methodology.">Low Conf</span>`;
+      const raw = d.margin_of_safety_raw;
+      const label = (raw != null && raw > 200) ? "200%+"
+                  : (raw != null && raw < -99) ? "−99%"
+                  : fmtPct(mos);
+      pctEl.innerHTML = `${label}<span class="mos-confidence-chip" title="MOS clamped — raw model output exceeds ±100%. Inputs may be mispriced (forward-earnings spike, share-class mismatch, stale data). Treat as low-confidence.">Low Conf</span>`;
     } else {
       pctEl.textContent = fmtPct(mos);
     }
@@ -1379,8 +1390,8 @@ function setupSearch() {
     const s2  = $("advS2").value;
     const tg  = $("advTg").value;
     if (yrs) params.years = yrs;
-    if (s1)  params.s1 = s1;
-    if (s2)  params.s2 = s2;
+    if (s1)  params.growth1 = s1;
+    if (s2)  params.growth2 = s2;
     if (tg)  params.terminal = tg;
     analyze(t, params);
   }
@@ -2377,20 +2388,37 @@ function closeDiscoverPage() {
 async function loadDiscover() {
   $("discLoading").classList.remove("hidden");
   $("discGrid").innerHTML = "";
+  let failed = false;
   try {
     const res = await fetch("/api/discover");
+    if (!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
     _DISC_DATA = data.items || [];
   } catch {
     _DISC_DATA = [];
+    failed = true;
   }
   $("discLoading").classList.add("hidden");
-  renderDiscover();
+  renderDiscover(failed);
 }
 
-function renderDiscover() {
+function renderDiscover(failed = false) {
   const grid = $("discGrid");
   if (!grid) return;
+  if (_DISC_DATA.length === 0) {
+    grid.innerHTML = `
+      <div class="disc-empty" style="grid-column:1/-1;text-align:center;padding:48px 16px;color:var(--text-muted,#888);">
+        <div style="font-size:32px;margin-bottom:12px;">${failed ? "⚠" : "✦"}</div>
+        <div style="font-weight:600;margin-bottom:6px;">
+          ${failed ? "Couldn't load Discover" : "No undervalued ideas surfaced"}
+        </div>
+        <div style="font-size:14px;">
+          ${failed ? "Try refresh in a moment — Yahoo may be rate-limiting." : "Check back after the next discovery sweep."}
+        </div>
+        ${failed ? '<button onclick="loadDiscover()" style="margin-top:16px;padding:8px 20px;border:1px solid currentColor;background:transparent;color:inherit;cursor:pointer;border-radius:6px;">Retry</button>' : ""}
+      </div>`;
+    return;
+  }
   // Filter out extreme-MOS outliers from sorting comparisons (BRK-B share-class
   // quirk gives +19,661% which would always dominate the top spot).  We still
   // show them, just don't let them control the order.
