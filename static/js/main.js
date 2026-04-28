@@ -38,14 +38,15 @@ const fmtX = (n) => n == null ? "—" : `${fmt(n, 1)}×`;
    ════════════════════════════════════════════════════════════════════════ */
 
 const TIER_CLASSES = {
-  deep_discount: "tier-positive",
-  discount:      "tier-positive",
-  fair_value:    "tier-info",
-  growth:        "tier-warning",
-  excellence:    "tier-warning",
-  miracle:       "tier-negative",
-  decline:       "tier-negative",
-  distress:      "tier-positive",  // distressed = market overly pessimistic = opportunity
+  deep_discount:      "tier-positive",
+  discount:           "tier-positive",
+  fair_value:         "tier-info",
+  growth:             "tier-warning",
+  excellence:         "tier-warning",
+  miracle:            "tier-negative",
+  decline:            "tier-negative",
+  distress:           "tier-positive",  // distressed = market overly pessimistic = opportunity
+  strategic_discount: "tier-positive",  // strategic asset trading at low forward multiple
 };
 
 function tierClassFor(tier) {
@@ -479,6 +480,41 @@ function renderHeroVerdict(d) {
   tierBadge.classList.remove("tier-positive","tier-info","tier-warning","tier-negative");
   tierBadge.classList.add(tierCls);
   $("vTierLabel").textContent = pf.label || "Verdict pending";
+
+  // ── Strategic Asset banner ───────────────────────────────────────────
+  // Renders only when the backend tags this ticker as a strategic asset
+  // (CHIPS Act recipient, defense prime, energy sovereignty, critical
+  // material).  Includes per-ticker reason and any live policy tailwinds
+  // detected from the news scanner.
+  const stratBanner = $("vStrategicBanner");
+  if (stratBanner) {
+    if (d.is_strategic && d.strategic_label) {
+      stratBanner.classList.remove("hidden");
+      stratBanner.dataset.tier = d.strategic_tier || "";
+      $("vStrategicLabel").textContent = d.strategic_label;
+      $("vStrategicReason").textContent = d.strategic_reason || "";
+      $("vStrategicLive").classList.toggle("hidden", !d.strategic_live_amplified);
+      const chips = [];
+      if (d.policy_tailwind) {
+        const headlines = (d.policy_tailwind_labels || []).slice(0, 2)
+          .map(t => escHtml(t)).join("</span><span class='strategic-chip'>");
+        chips.push(`<span class="strategic-chip strategic-chip--up">⬈ Policy tailwind</span>`);
+        if (headlines) chips.push(`<span class="strategic-chip strategic-chip--news">${headlines}</span>`);
+      }
+      if (d.policy_headwind) {
+        chips.push(`<span class="strategic-chip strategic-chip--down">⬊ Policy headwind</span>`);
+      }
+      if (d.strategic_floor_applied) {
+        chips.push(`<span class="strategic-chip strategic-chip--info" title="Pure DCF said overvalued; strategic floor lifted IV toward sovereign-backstop level.">IV floor applied</span>`);
+      }
+      if (d.strategic_wacc_delta_pp) {
+        chips.push(`<span class="strategic-chip strategic-chip--info" title="WACC reduced to reflect government backstop on cost of capital.">WACC −${Math.abs(d.strategic_wacc_delta_pp).toFixed(2)}pp</span>`);
+      }
+      $("vStrategicChips").innerHTML = chips.join("");
+    } else {
+      stratBanner.classList.add("hidden");
+    }
+  }
 
   // Reasons
   const reasonsHtml = (vs.reasons || []).map((r, i) =>
@@ -2350,7 +2386,7 @@ let _DISC_SORT = "mos";
 
 function tierBucket(tier) {
   if (!tier) return "neutral";
-  if (["distress", "deep_discount", "discount"].includes(tier)) return "undervalued";
+  if (["distress", "deep_discount", "discount", "strategic_discount"].includes(tier)) return "undervalued";
   if (tier === "fair_value") return "fair";
   if (["growth", "excellence"].includes(tier)) return "overvalued";
   if (tier === "miracle") return "speculative";
@@ -2450,9 +2486,19 @@ function renderDiscover(failed = false) {
     const mos = it.mos != null ? fmtPct(it.mos) : "—";
     const cap = it.mos != null ? Math.min(Math.abs(it.mos), 100) : 50;
     const age = ageTxt(it.age_seconds);
+    const stratIcon  = it.is_strategic
+      ? `<span class="disc-cell__strategic" title="${escHtml(it.strategic_label || 'Strategic Asset')} — sovereign-capital backstop">⛨</span>`
+      : "";
+    const policyChip = it.policy_tailwind
+      ? `<span class="disc-cell__policy" title="Live policy tailwind in recent news">⬈ POLICY</span>`
+      : it.policy_headwind
+      ? `<span class="disc-cell__policy disc-cell__policy--down" title="Policy headwind in recent news">⬊ POLICY</span>`
+      : "";
     return `
       <div class="disc-cell" data-disc-ticker="${escHtml(it.ticker)}"
            style="--tier-accent:${c.accent};--tier-strong:${c.strong};--tier-glow:${c.glow};">
+        ${stratIcon}
+        ${policyChip}
         ${age ? `<span class="disc-cell__age" title="Cached snapshot">${escHtml(age)}</span>` : ""}
         <div class="disc-cell__head">
           <span class="disc-cell__ticker">${escHtml(it.ticker)}</span>

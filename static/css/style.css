@@ -2865,3 +2865,88 @@ a:focus-visible {
   0%   { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
+
+/* ── Strategic Asset banner ────────────────────────────────────────────────
+   Surfaces the curated national-security / sovereign-capital thesis on
+   tickers like MU, INTC, LMT, CEG.  Visually distinct from the tier badge —
+   uses a navy-to-amber gradient so it reads as "strategic" rather than
+   "valuation tier". */
+.strategic-banner {
+  margin: 14px 0 6px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(30,58,138,0.18), rgba(202,138,4,0.12));
+  border: 1px solid rgba(202,138,4,0.35);
+  color: var(--text, #e8e8e8);
+}
+.strategic-banner__head {
+  display: flex; align-items: center; gap: 10px;
+  font-weight: 600; font-size: 13px;
+  letter-spacing: 0.02em;
+}
+.strategic-banner__icon {
+  font-size: 18px; line-height: 1;
+  color: #ca8a04;
+}
+.strategic-banner__label {
+  text-transform: uppercase; letter-spacing: 0.06em;
+  font-size: 11px; opacity: 0.95;
+}
+.strategic-banner__live {
+  margin-left: auto;
+  font-size: 11px;
+  color: #22c55e;
+  display: inline-flex; align-items: center; gap: 4px;
+  animation: stratPulse 2.4s ease-in-out infinite;
+}
+@keyframes stratPulse {
+  0%, 100% { opacity: 0.6; }
+  50%      { opacity: 1.0; }
+}
+.strategic-banner__reason {
+  margin-top: 8px;
+  font-size: 13px; line-height: 1.5;
+  color: var(--text-soft, #cfcfcf);
+}
+.strategic-banner__chips {
+  margin-top: 10px;
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.strategic-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px; font-weight: 500;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.10);
+  color: var(--text-soft, #d6d6d6);
+}
+.strategic-chip--up    { color: #22c55e; border-color: rgba(34,197,94,0.35); }
+.strategic-chip--down  { color: #ef4444; border-color: rgba(239,68,68,0.35); }
+.strategic-chip--info  { color: #60a5fa; border-color: rgba(96,165,250,0.35); }
+.strategic-chip--news  { font-style: italic; opacity: 0.85; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Strategic indicator on Discover heatmap cells */
+.disc-cell__strategic {
+  position: absolute;
+  top: 8px; left: 8px;
+  font-size: 11px;
+  color: #ca8a04;
+  pointer-events: none;
+}
+.disc-cell__policy {
+  position: absolute;
+  bottom: 8px; left: 8px;
+  font-size: 9px; font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(34,197,94,0.15);
+  color: #22c55e;
+  border: 1px solid rgba(34,197,94,0.35);
+}
+.disc-cell__policy--down {
+  background: rgba(239,68,68,0.15);
+  color: #ef4444;
+  border-color: rgba(239,68,68,0.35);
+}

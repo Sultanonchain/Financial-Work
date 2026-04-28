@@ -619,6 +619,19 @@
         <span class="tier-badge__info" aria-hidden="true">ⓘ</span>
       </button>
 
+      <!-- Strategic Asset banner — only shown when is_strategic=true.
+           Surfaces the curated thesis (CHIPS Act, defense prime, etc.)
+           plus any live policy tailwinds detected from news. -->
+      <div class="strategic-banner hidden" id="vStrategicBanner">
+        <div class="strategic-banner__head">
+          <span class="strategic-banner__icon" aria-hidden="true">⛨</span>
+          <span class="strategic-banner__label" id="vStrategicLabel">Strategic Asset</span>
+          <span class="strategic-banner__live hidden" id="vStrategicLive" title="Live policy tailwind detected in recent news">● Live policy tailwind</span>
+        </div>
+        <div class="strategic-banner__reason" id="vStrategicReason">—</div>
+        <div class="strategic-banner__chips" id="vStrategicChips"></div>
+      </div>
+
       <div class="reasons" id="vReasons"></div>
 
       <div class="verdict-line" id="vVerdict">—</div>

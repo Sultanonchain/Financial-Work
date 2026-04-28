@@ -118,6 +118,36 @@ _RISK_KEYWORDS = [
     "sec charges", "department of justice", "preliminary injunction",
 ]
 
+# ── Policy / sovereign-capital signal ───────────────────────────────────────
+# These keywords detect *policy-driven* tailwinds and headwinds that pure
+# DCF can't see: CHIPS Act grants, DPA Title III orders, DOE loan guarantees,
+# tariff carve-outs, export-control wins.  Flagged separately from the
+# generic momentum/risk scanner so the UI can show "Policy Tailwind"
+# distinct from "Earnings Beat".
+_POLICY_TAILWIND_KEYWORDS = [
+    "chips act", "chips grant", "chips funding", "chips program office",
+    "doe loan", "doe loan guarantee", "loan guarantee", "loan programs office",
+    "dpa title iii", "defense production act", "title iii award",
+    "pentagon contract", "defense department contract", "dod contract",
+    "national security investment", "strategic stockpile", "tax credit",
+    "production tax credit", "investment tax credit", "ira credit",
+    "buy american", "section 232", "tariff exemption", "export control win",
+    "fedramp authorization", "fedramp high",
+    "ppa signed", "power purchase agreement",
+    "haleu", "sole source contract", "indefinite delivery",
+    "trusted foundry", "trusted supplier",
+]
+
+# Headwinds specific to policy / geopolitical risk (different bucket from
+# generic litigation risk — these speak to capital flow reversals).
+_POLICY_HEADWIND_KEYWORDS = [
+    "export control" ,    # generic — context-disambiguated below if it co-occurs with "win"
+    "outbound investment restriction", "cfius blocked",
+    "tariff retaliation", "china ban", "china restriction",
+    "delisting risk", "denied entity list", "entity list addition",
+    "sanctions added", "ofac sanctioned",
+]
+
 # ── Industry-specific DCF guardrails ──────────────────────────────────────────
 # These prevent Gordon Growth Model blow-up for mature/capital-intensive sectors.
 # max_tg:      maximum terminal growth rate (capped at long-run GDP)
@@ -271,6 +301,10 @@ def get_catalyst_insights(ticker: str, info: dict, stock) -> dict:
     has_risk          = False
     catalyst_labels   = []
     risk_labels       = []
+    # Policy-signal accumulators — distinct from generic momentum/risk so
+    # the UI can present "Policy Tailwind" as its own chip.
+    policy_tailwind_labels = []
+    policy_headwind_labels = []
     seven_days_ago    = now - 7 * 86400
 
     # ── 1. yfinance news ─────────────────────────────────────────────────────
@@ -288,6 +322,12 @@ def get_catalyst_insights(ticker: str, info: dict, stock) -> dict:
             is_strong = any(kw in text for kw in _CATALYST_STRONG)
             is_mod    = any(kw in text for kw in _CATALYST_MODERATE)
             is_risk   = any(kw in text for kw in _RISK_KEYWORDS)
+            # Policy detection — disambiguate "export control" so a *win*
+            # against a competitor reads as tailwind, not headwind.
+            is_policy_tw = any(kw in text for kw in _POLICY_TAILWIND_KEYWORDS)
+            is_policy_hw = any(kw in text for kw in _POLICY_HEADWIND_KEYWORDS) and not (
+                "export control" in text and any(w in text for w in ["win", "tailwind", "exemption", "carve-out", "carve out"])
+            )
 
             if is_strong:
                 has_positive = True
@@ -306,6 +346,11 @@ def get_catalyst_insights(ticker: str, info: dict, stock) -> dict:
                 if len(risk_labels) < 2:
                     risk_labels.append(raw_title[:70])
 
+            if is_policy_tw and len(policy_tailwind_labels) < 3:
+                policy_tailwind_labels.append(raw_title[:80])
+            if is_policy_hw and len(policy_headwind_labels) < 3:
+                policy_headwind_labels.append(raw_title[:80])
+
             if len(insights) < 3:
                 pub_ts   = item.get("providerPublishTime", 0)
                 date_str = datetime.fromtimestamp(pub_ts).strftime("%b %d") if pub_ts else ""
@@ -323,6 +368,10 @@ def get_catalyst_insights(ticker: str, info: dict, stock) -> dict:
             is_strong = any(kw in text for kw in _CATALYST_STRONG)
             is_mod    = any(kw in text for kw in _CATALYST_MODERATE)
             is_risk   = any(kw in text for kw in _RISK_KEYWORDS)
+            is_policy_tw = any(kw in text for kw in _POLICY_TAILWIND_KEYWORDS)
+            is_policy_hw = any(kw in text for kw in _POLICY_HEADWIND_KEYWORDS) and not (
+                "export control" in text and any(w in text for w in ["win", "tailwind", "exemption", "carve-out", "carve out"])
+            )
 
             if is_strong and not has_positive:
                 has_positive = True
@@ -336,6 +385,10 @@ def get_catalyst_insights(ticker: str, info: dict, stock) -> dict:
                 has_risk = True
                 wacc_risk_add = 0.01
                 risk_labels.append(f"SEC 8-K: {f['title'][:60]}")
+            if is_policy_tw and len(policy_tailwind_labels) < 3:
+                policy_tailwind_labels.append(f"SEC 8-K: {f['title'][:70]}")
+            if is_policy_hw and len(policy_headwind_labels) < 3:
+                policy_headwind_labels.append(f"SEC 8-K: {f['title'][:70]}")
 
             # Include filing as insight bullet if room remains
             if len(insights) < 3 and f["date"] and f["title"]:
@@ -362,6 +415,12 @@ def get_catalyst_insights(ticker: str, info: dict, stock) -> dict:
         "has_material_risk":     has_risk,
         "catalyst_labels":       catalyst_labels[:2],
         "risk_labels":           risk_labels[:2],
+        # Policy signals — separate from generic catalyst/risk so the UI
+        # can show them as their own chips with sovereign-capital framing.
+        "policy_tailwind":         bool(policy_tailwind_labels),
+        "policy_tailwind_labels":  policy_tailwind_labels[:3],
+        "policy_headwind":         bool(policy_headwind_labels),
+        "policy_headwind_labels":  policy_headwind_labels[:3],
     }
     _catalyst_cache[ticker] = {"ts": now, "data": result}
     return result
@@ -1212,6 +1271,109 @@ MAG_7_TICKERS = {"AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "META", "NVDA", "TSLA"
 
 def _is_mag7(ticker):
     return (ticker or "").upper() in MAG_7_TICKERS
+
+
+# ── Strategic Asset Classifier ──────────────────────────────────────────────
+# Recognizes companies where US capital allocation is policy-driven, not
+# purely market-driven.  Pure DCF systematically undervalues these names
+# because the discount rate doesn't reflect government backstops, CHIPS Act
+# subsidies, DPA Title III orders, or sovereign supply-chain mandates.
+#
+# Each entry carries a *per-ticker* reason string so the model isn't just
+# "you're on a list" — it's a transparent thesis the UI surfaces.
+#
+# Tier deltas (applied downstream to WACC, sector ceiling, IV floor):
+#   wacc_delta:    subtracted from WACC (lower = higher IV)
+#   ceiling_lift:  added to sector growth ceiling
+#   iv_floor_mult: minimum IV expressed as a multiple of price (e.g., 0.85
+#                  means strategic assets won't be tagged "overvalued by 50%"
+#                  when there's a clear policy thesis the model misses).
+#   narrative:     one-sentence framing for the verdict layer
+#
+# Curation principle: only tickers where the *reason for inclusion* is a
+# specific, citable government program or sovereign-supply role.  No
+# generic "national champion" hand-waving.
+
+STRATEGIC_ASSETS = {
+    # ── Tier 1: Semiconductor Sovereignty ─────────────────────────────────
+    "MU":   ("semi_sovereignty", "Sole US-headquartered DRAM and HBM producer · CHIPS Act $6.1B grant (Idaho/NY fabs) · HBM is the bottleneck for AI inference."),
+    "INTC": ("semi_sovereignty", "CHIPS Act $8.5B grant + $11B in loans · only US leading-edge logic foundry · DoD ‘trusted foundry’ pivot under DPA Title III."),
+    "TXN":  ("semi_sovereignty", "CHIPS Act $1.6B grant · analog/embedded silicon ubiquitous in US defense and auto."),
+    "ADI":  ("semi_sovereignty", "Defense + auto analog leader; supply-chain critical with strict export-control moat."),
+    "MCHP": ("semi_sovereignty", "Defense MCUs in satellites and missiles; ITAR/export-control protection."),
+    "ON":   ("semi_sovereignty", "Power semis for EVs and grid · NY fab supported by DPA framework."),
+    "AMAT": ("semi_sovereignty", "Semi capital equipment monopoly stack; export controls to China are a tailwind, not a risk."),
+    "KLAC": ("semi_sovereignty", "Process-control monopoly in semi metrology; export-control protected."),
+    "LRCX": ("semi_sovereignty", "Etch/deposition stack; same export-control moat as AMAT/KLAC."),
+
+    # ── Tier 2: Defense Primes ────────────────────────────────────────────
+    "LMT":  ("defense_prime", "F-35, missile defense, hypersonics — ~70% revenue from US gov; multi-decade contract backlog."),
+    "RTX":  ("defense_prime", "Patriot, NASAMS, hypersonics; record post-Ukraine restocking demand."),
+    "NOC":  ("defense_prime", "Sentinel ICBM, B-21 — sole-source on US strategic deterrent platforms."),
+    "GD":   ("defense_prime", "Virginia/Columbia-class subs and combat systems; sovereign-supplier lock."),
+    "LHX":  ("defense_prime", "Tactical comms and EW — Pentagon ‘irreplaceable supplier’ tier."),
+    "HII":  ("defense_prime", "Sole US builder of nuclear aircraft carriers and Virginia-class submarines."),
+
+    # ── Tier 3: Energy Sovereignty ────────────────────────────────────────
+    "CEG":  ("energy_sovereignty", "Largest US nuclear fleet · Microsoft 20-year PPA on Three Mile Island restart · AI datacenter power gold."),
+    "VST":  ("energy_sovereignty", "Comanche Peak nuclear + Texas gas; signed AI hyperscaler PPAs at premium pricing."),
+    "NEE":  ("energy_sovereignty", "Largest US wind/solar/nuclear utility · IRA tax-credit dominant beneficiary."),
+    "OXY":  ("energy_sovereignty", "Permian #1 + Direct Air Capture with DOE-backed Stratos plant; Buffett-aligned strategic stake."),
+
+    # ── Tier 4: Critical Materials & Nuclear ──────────────────────────────
+    "MP":   ("critical_material", "Mountain Pass — only operating US rare-earth mine and processor · DPA Title III funded."),
+    "LEU":  ("critical_material", "Sole US uranium enrichment producer · DOE HALEU contracts for next-gen reactors."),
+    "BWXT": ("critical_material", "Sole supplier of US Navy nuclear reactors and components."),
+}
+
+# Tier-level effects.  Strategic premium is meaningful but bounded — these
+# numbers are deliberately conservative so the layer never single-handedly
+# flips a verdict; it just keeps the model from systematically penalizing
+# strategic assets for the wrong reasons.
+_STRATEGIC_TIER_DELTAS = {
+    # tier:               (wacc_delta, ceiling_lift, iv_floor_mult, label)
+    "semi_sovereignty":   (-0.010, 0.05, 0.85, "Semiconductor Sovereignty"),
+    "defense_prime":      (-0.005, 0.02, 0.90, "Defense Prime"),
+    "energy_sovereignty": (-0.0075, 0.03, 0.88, "Energy Sovereignty"),
+    "critical_material":  (-0.010, 0.05, 0.85, "Critical Materials"),
+}
+
+
+def _strategic_classifier(ticker):
+    """
+    Returns a strategic-asset profile dict (or None for non-strategic names).
+
+    The classifier is intentionally curation-driven.  Algorithmic detection
+    of "national security relevance" from sector codes alone produces too
+    many false positives (every regional bank shows up under 'Financial
+    Services'); a transparent curated list with per-ticker reasons is more
+    defensible and easier to audit.
+    """
+    if not ticker:
+        return None
+    entry = STRATEGIC_ASSETS.get(ticker.upper())
+    if entry is None:
+        return None
+    tier, reason = entry
+    deltas = _STRATEGIC_TIER_DELTAS.get(tier)
+    if deltas is None:
+        return None
+    wacc_delta, ceiling_lift, iv_floor_mult, tier_label = deltas
+    return {
+        "is_strategic":     True,
+        "strategic_tier":   tier,
+        "strategic_label":  tier_label,
+        "strategic_reason": reason,
+        "wacc_delta":       wacc_delta,
+        "ceiling_lift":     ceiling_lift,
+        "iv_floor_mult":    iv_floor_mult,
+        "narrative": (
+            f"VALUS recognizes {ticker.upper()} as a strategic US asset — "
+            f"{tier_label}.  Pure DCF systematically undervalues these names "
+            "because the discount rate ignores government backstops and "
+            "policy-driven capital flows."
+        ),
+    }
 
 
 # ── "Priced For" Verdict ────────────────────────────────────────────────────
@@ -2983,6 +3145,8 @@ DISCOVERY_TICKERS = [
     "AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "META", "NVDA", "TSLA",
     "ORCL", "CRM", "ADBE", "AMD", "INTC", "AVGO", "QCOM", "TXN",
     "MU", "ARM", "NOW", "SNOW", "PLTR", "PANW", "CRWD",
+    # Strategic semis (analog/defense + cap equipment monopoly)
+    "ADI", "MCHP", "ON", "AMAT", "KLAC", "LRCX",
     # Financials — banks, payments, brokers
     "JPM", "BAC", "WFC", "GS", "MS", "BRK-B", "V", "MA", "AXP",
     "SCHW", "BLK", "SPGI", "COIN", "HOOD",
@@ -2998,10 +3162,13 @@ DISCOVERY_TICKERS = [
     "XOM", "CVX", "COP", "OXY", "FCX", "LIN",
     # Industrials / Defense
     "CAT", "BA", "GE", "UNP", "RTX", "HON", "LMT", "DE",
+    "NOC", "GD", "LHX", "HII",
     # Communications / Streaming
     "DIS", "NFLX", "CMCSA", "T", "VZ", "TMUS", "SPOT",
-    # Real Estate / Utilities
-    "AMT", "PLD", "EQIX", "NEE", "DUK",
+    # Real Estate / Utilities + Energy Sovereignty
+    "AMT", "PLD", "EQIX", "NEE", "DUK", "CEG", "VST",
+    # Critical Materials & Nuclear
+    "MP", "LEU", "BWXT",
 ]
 
 @app.route("/api/discover")
@@ -3053,7 +3220,12 @@ def discover():
                 "label":       (d.get("priced_for") or {}).get("label"),
                 "is_etf":      bool(d.get("is_etf")),
                 "extreme":     bool(d.get("extreme_mos_flag")),
-                "age_seconds": cached_at_age,
+                "age_seconds":     cached_at_age,
+                "is_strategic":    bool(d.get("is_strategic")),
+                "strategic_tier":  d.get("strategic_tier"),
+                "strategic_label": d.get("strategic_label"),
+                "policy_tailwind": bool(d.get("policy_tailwind")),
+                "policy_headwind": bool(d.get("policy_headwind")),
             }
         except Exception:
             return None
@@ -3350,7 +3522,26 @@ def analyze():
         has_material_risk       = catalyst["has_material_risk"]
         catalyst_labels         = catalyst["catalyst_labels"]
         risk_labels             = catalyst["risk_labels"]
+        policy_tailwind         = catalyst.get("policy_tailwind", False)
+        policy_tailwind_labels  = catalyst.get("policy_tailwind_labels", [])
+        policy_headwind         = catalyst.get("policy_headwind", False)
+        policy_headwind_labels  = catalyst.get("policy_headwind_labels", [])
         momentum_applied        = False   # set True when premium is baked into IV
+
+        # ── Strategic Asset Classifier ───────────────────────────────────────
+        # Recognizes US national-security / sovereign-capital names where pure
+        # DCF systematically understates value (CHIPS Act recipients, defense
+        # primes, energy sovereignty, critical materials).  Returns None for
+        # non-strategic tickers.  Effects are wired in later when WACC and
+        # sector ceiling are computed.
+        strategic = _strategic_classifier(ticker)
+        # Live policy tailwinds further deepen the strategic effect — a
+        # CHIPS Act announcement on a strategic name is a stronger signal
+        # than the curation alone.
+        if strategic and policy_tailwind:
+            strategic = dict(strategic)
+            strategic["wacc_delta"] -= 0.0025      # extra 25bp reduction
+            strategic["live_policy_amplifier"] = True
 
         # ── Price history (1Y default) ────────────────────────────────────────
         hist = stock.history(period="1y", interval="1d")
@@ -3538,6 +3729,8 @@ def analyze():
         backbone_stage1_years    = None   # set inside DCF block for backbone moat
         cash_rich_wacc_applied   = False  # set inside DCF block
         st_robotaxi_s2_applied   = False  # set inside DCF block for structural transformer
+        strategic_wacc_delta     = 0.0    # set inside DCF block for strategic asset
+        strategic_floor_applied  = False  # set after DCF when strategic floor lifts IV
         net_debt         = ((safe(info.get("totalDebt"), 0) or 0) - (safe(info.get("totalCash"), 0) or 0)) * fx_rate
         # FIN 415 defaults — overridden inside DCF block when data is available
         fin415_used         = False
@@ -3655,6 +3848,19 @@ def analyze():
                 # (vs 2.5% global hard cap for commodity businesses)
                 if not user_tg_override:
                     tg = min(tg, 0.030)
+
+            # ── Strategic Asset WACC reduction ────────────────────────────────
+            # National-security / sovereign-capital names (CHIPS recipients,
+            # defense primes, energy sovereignty, critical materials) have
+            # government backstops that reduce real cost of capital below
+            # what beta-based WACC implies.  Reduction floors at 6.5% so it
+            # never produces nonsensically low discount rates.
+            strategic_wacc_delta = 0.0
+            if strategic:
+                _wacc_pre = wacc
+                wacc = max(wacc + strategic["wacc_delta"], 0.065)
+                wacc_data["wacc"] = wacc
+                strategic_wacc_delta = round(_wacc_pre - wacc, 4)
 
             # ── Structural Transformer WACC ceiling ───────────────────────────
             # High-beta auto/industrial tickers get a market beta that reflects
@@ -4430,6 +4636,43 @@ def analyze():
             is_structural_transformer=is_structural_transformer,
             moat_detected=moat_detected,
         )
+        # Strategic asset ceiling lift — sovereign capital lets these names
+        # plausibly grow above their nominal sector ceiling.
+        if strategic and _ceiling is not None:
+            _ceiling = _ceiling + strategic["ceiling_lift"]
+            _ceiling_label = f"{_ceiling_label} + Strategic"
+
+        # Strategic IV floor — when DCF says the stock is meaningfully
+        # overvalued but the company is a curated strategic asset AND the
+        # market's forward multiple is below its sector average (the MU
+        # case: "lowest forward P/E in S&P"), the model raises IV toward
+        # the floor.  This refuses to print a distress verdict on a name
+        # the government is structurally backstopping.
+        strategic_floor_applied = False
+        if (strategic and intrinsic_value is not None and price and price > 0):
+            forward_pe   = safe(info.get("forwardPE"))
+            sector_fwd   = safe(info.get("trailingPE"))   # rough proxy when no sector avg
+            cheap_signal = (
+                (forward_pe is not None and forward_pe > 0 and forward_pe < 20) or
+                (analyst_target_price and analyst_target_price > price * 1.05)
+            )
+            iv_floor = price * strategic["iv_floor_mult"]
+            if intrinsic_value < iv_floor and cheap_signal:
+                _iv_pre = intrinsic_value
+                intrinsic_value = round(iv_floor, 2)
+                margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
+                strategic_floor_applied = True
+                if scenarios:
+                    _factor = intrinsic_value / _iv_pre if _iv_pre else 1.0
+                    for _k in ("base", "bull", "bear"):
+                        _slot = scenarios.get(_k)
+                        if _slot and _slot.get("value") is not None:
+                            _slot["value"]  = round(_slot["value"] * _factor, 2)
+                            _slot["upside"] = round((_slot["value"] - price) / price * 100, 1)
+                    if scenarios.get("weighted") is not None:
+                        scenarios["weighted"] = round(scenarios["weighted"] * _factor, 2)
+                        scenarios["weighted_upside"] = round((scenarios["weighted"] - price) / price * 100, 1)
+
         priced_for = _priced_for_verdict(
             implied_g       = (implied_growth_pct / 100) if implied_growth_pct is not None else None,
             sector_ceiling  = _ceiling,
@@ -4437,6 +4680,25 @@ def analyze():
             iv              = intrinsic_value,
             margin_of_safety = margin_of_safety,
         )
+
+        # Strategic Discount override — when a strategic asset prints a
+        # negative MOS but trades at a low forward multiple, the standard
+        # "Priced for Growth/Excellence/Miracle" tier mislabels it.  Promote
+        # to a "Strategic Discount" tier (green) with explicit narrative.
+        if (strategic and priced_for and margin_of_safety is not None
+                and margin_of_safety < 0):
+            forward_pe = safe(info.get("forwardPE"))
+            if forward_pe is not None and 0 < forward_pe < 20:
+                priced_for = {
+                    "tier":       "strategic_discount",
+                    "label":      "Strategic Discount",
+                    "color":      "green",
+                    "narrative": (
+                        f"Forward P/E {forward_pe:.1f} on a {strategic['strategic_label']} asset — "
+                        "market discounting a sovereign-backstopped franchise.  Pure DCF underestimates "
+                        "value here; treat as opportunity, not value trap."
+                    ),
+                }
         is_mag7 = _is_mag7(ticker)
 
         # ── Verdict Summary (clean numbered "why" explanation) ────────────────
@@ -4855,6 +5117,20 @@ def analyze():
             "st_capex_addback_rate_pct": round(st_capex_addback_rate * 100) if st_capex_abs > 0 else None,
             "st_capex_to_rev_pct":       round(st_capex_to_rev * 100, 1) if st_capex_to_rev else None,
             "st_robotaxi_s2_applied":    st_robotaxi_s2_applied if is_structural_transformer else False,
+            # ── Strategic Asset layer ─────────────────────────────────────
+            "is_strategic":              bool(strategic),
+            "strategic_tier":            strategic["strategic_tier"]   if strategic else None,
+            "strategic_label":           strategic["strategic_label"]  if strategic else None,
+            "strategic_reason":          strategic["strategic_reason"] if strategic else None,
+            "strategic_narrative":       strategic["narrative"]        if strategic else None,
+            "strategic_wacc_delta_pp":   round(strategic_wacc_delta * 100, 2) if strategic else 0.0,
+            "strategic_floor_applied":   strategic_floor_applied,
+            "strategic_live_amplified":  bool(strategic and strategic.get("live_policy_amplifier")),
+            # ── Policy news signals ──────────────────────────────────────
+            "policy_tailwind":           policy_tailwind,
+            "policy_tailwind_labels":    policy_tailwind_labels,
+            "policy_headwind":           policy_headwind,
+            "policy_headwind_labels":    policy_headwind_labels,
         }
 
         cleaned = clean(result)
