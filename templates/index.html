@@ -462,17 +462,50 @@
             <div class="chart-wrap"><canvas id="priceChart"></canvas></div>
           </div>
 
-          <!-- DCF projection chart -->
+          <!-- DCF projection chart + interactive year scrubber -->
           <div class="card">
             <div class="section-title-row">
-              <div class="section-title">Projected free cash flow · 10-year DCF</div>
+              <div class="section-title">10-year cash-flow projection</div>
               <div class="dcf-scenario-toggle" role="tablist" id="dcfScenarioToggle">
                 <button class="dcf-sc-btn" data-dcf-sc="bear" type="button">▾ Bear</button>
                 <button class="dcf-sc-btn active" data-dcf-sc="base" type="button">◆ Base</button>
                 <button class="dcf-sc-btn" data-dcf-sc="bull" type="button">▴ Bull</button>
               </div>
             </div>
-            <div class="chart-wrap"><canvas id="dcfChart"></canvas></div>
+
+            <!-- Selected-year highlight: huge numbers driven by the slider -->
+            <div class="dcf-year-card" id="dcfYearCard">
+              <div class="dcf-year-card__head">
+                <span class="dcf-year-card__label">Year <span id="dyYearN">1</span></span>
+                <span class="dcf-year-card__growth" id="dyGrowth">— growth</span>
+              </div>
+              <div class="dcf-year-card__values">
+                <div>
+                  <span class="dcf-year-card__small-label">Projected FCF</span>
+                  <span class="dcf-year-card__big numeric" id="dyFcf">—</span>
+                </div>
+                <div>
+                  <span class="dcf-year-card__small-label">Discounted (PV)</span>
+                  <span class="dcf-year-card__big numeric" id="dyPv">—</span>
+                </div>
+              </div>
+              <div class="dcf-year-card__discount">
+                <span id="dyDiscNote">—</span>
+              </div>
+            </div>
+
+            <!-- Slider -->
+            <div class="dcf-slider-wrap">
+              <input type="range" min="1" max="10" value="1" step="1"
+                     class="dcf-slider" id="dcfSlider" aria-label="Select projection year"/>
+              <div class="dcf-slider-ticks" id="dcfSliderTicks"></div>
+            </div>
+
+            <!-- Mini chart strip for visual context -->
+            <div class="chart-wrap chart-wrap--small">
+              <canvas id="dcfChart"></canvas>
+            </div>
+
             <div class="dcf-chart-footer" id="dcfChartFooter"></div>
           </div>
 

@@ -104,6 +104,8 @@ async function analyze(ticker, params = {}) {
   hideError();
   $("results").classList.add("hidden");
   $("btcHero").classList.add("hidden");
+  // Make sure hero search section is visible (in case we came from portfolio)
+  document.querySelector(".hero")?.classList.remove("hidden");
   const pfPage = $("portfolioPage");
   if (pfPage) pfPage.classList.add("hidden");
 
@@ -947,44 +949,35 @@ function renderPriceChart(history) {
 }
 
 // Compute a 10-year projection client-side for any scenario.
-// Uses base_fcf, scenario s1 + wacc, global s2/tg/yrs.
+// Uses base_fcf, scenario s1 + wacc, global s2/yrs.
+// Returns values in $B to match the server-shipped base shape.
 function projectScenario(d, scenario) {
   const sc = (d.scenarios || {})[scenario] || {};
-  const baseFcf = d.base_fcf || 0;
-  if (!baseFcf) return null;
+  const baseFcfRaw = d.base_fcf || 0;
+  if (!baseFcfRaw) return null;
 
   const yrs = d.projection_years || 10;
-  // Per-scenario s1 (in %, so divide by 100). Fall back to global s1.
-  const s1Pct  = sc.s1   != null ? sc.s1   : (d.stage1_growth || 0);
+  const s1Pct   = sc.s1   != null ? sc.s1   : (d.stage1_growth || 0);
   const waccPct = sc.wacc != null ? sc.wacc : (d.wacc || 9);
   const s1 = s1Pct / 100;
-  // s2 typically tapers ~55% of s1 across all scenarios (matches backend default)
   const s2Pct = d.stage2_growth != null ? d.stage2_growth : Math.max(s1Pct * 0.55, 2);
   const s2 = s2Pct / 100;
   const wacc = waccPct / 100;
 
   const stage1Years = Math.ceil(yrs / 2);
-
-  const labels = [];
-  const projected = [];
-  const discounted = [];
-  let fcf = baseFcf;
+  const labels = [], projected = [], discounted = [];
+  let fcf = baseFcfRaw;   // raw $ for math
   for (let y = 1; y <= yrs; y++) {
     const g = y <= stage1Years ? s1 : s2;
     fcf = fcf * (1 + g);
     const pv = fcf / Math.pow(1 + wacc, y);
     labels.push(`Y${y}`);
-    projected.push(fcf / 1e9);
+    projected.push(fcf / 1e9);    // convert to $B for display
     discounted.push(pv / 1e9);
   }
-  // Sums for footer
   const totalFcf = projected.reduce((a, b) => a + b, 0);
   const totalPv  = discounted.reduce((a, b) => a + b, 0);
-  return {
-    labels, projected, discounted,
-    s1Pct: s1Pct, waccPct: waccPct, s2Pct: s2Pct,
-    totalFcf, totalPv,
-  };
+  return { labels, projected, discounted, s1Pct, waccPct, s2Pct, totalFcf, totalPv };
 }
 
 let _DCF_CHART_SCENARIO = "base";
@@ -1001,10 +994,10 @@ function renderDcfChart(fcfData) {
   let labels, projected, discounted, footerLine;
 
   if (which === "base" && fcfData && fcfData.projected && fcfData.projected.values) {
-    // Use server's exact base data
+    // Backend already ships these in $B — do NOT divide again.
     labels     = fcfData.projected.labels || [];
-    projected  = (fcfData.projected.values || []).map(v => v / 1e9);
-    discounted = (fcfData.projected.pvs    || []).map(v => v / 1e9);
+    projected  = (fcfData.projected.values || []).slice();
+    discounted = (fcfData.projected.pvs    || []).slice();
     const tot = projected.reduce((a, b) => a + b, 0);
     const pv  = discounted.reduce((a, b) => a + b, 0);
     footerLine = `<span><strong>g₁</strong> ${fmt(_LAST_DATA.stage1_growth || 0, 1)}%</span>` +
@@ -1036,6 +1029,78 @@ function renderDcfChart(fcfData) {
 
   $("dcfChartFooter").innerHTML = footerLine;
 
+  // ── Wire up the year scrubber ─────────────────────────────────────────
+  const slider     = $("dcfSlider");
+  const ticksEl    = $("dcfSliderTicks");
+  const yearCard   = $("dcfYearCard");
+  const dyYear     = $("dyYearN");
+  const dyFcf      = $("dyFcf");
+  const dyPv       = $("dyPv");
+  const dyGrowth   = $("dyGrowth");
+  const dyDiscNote = $("dyDiscNote");
+
+  if (slider && yearCard) {
+    slider.max = labels.length;
+    if (parseInt(slider.value, 10) > labels.length) slider.value = "1";
+
+    // Apply scenario color class
+    yearCard.classList.remove("bear", "base", "bull");
+    yearCard.classList.add(which);
+    slider.classList.remove("bear", "base", "bull");
+    slider.classList.add(which);
+
+    // Build tick labels Y1..Y10
+    if (ticksEl && ticksEl.children.length !== labels.length) {
+      ticksEl.innerHTML = labels.map((l, i) =>
+        `<span data-tick="${i+1}">${escHtml(l)}</span>`).join("");
+    }
+
+    // Compute per-year growth from successive values (or use base growth)
+    const baseFcf = (_LAST_DATA?.base_fcf || 0) / 1e9;  // base in $B
+    function growthFor(idx) {
+      if (idx === 0) {
+        const g = baseFcf > 0 ? (projected[0] - baseFcf) / baseFcf : null;
+        return g;
+      }
+      const prev = projected[idx - 1];
+      return prev > 0 ? (projected[idx] - prev) / prev : null;
+    }
+
+    function update(yearIdx) {
+      const y = yearIdx;  // 1..N
+      const i = y - 1;
+      const fcf = projected[i];
+      const pv  = discounted[i];
+      const g   = growthFor(i);
+      const wacc = (which === "base" && fcfData?.projected)
+        ? (_LAST_DATA?.wacc || 0)
+        : ((_LAST_DATA?.scenarios?.[which]?.wacc) ?? (_LAST_DATA?.wacc || 0));
+      const discFactor = wacc > 0 ? Math.pow(1 + wacc / 100, y) : 1;
+
+      dyYear.textContent = y;
+      dyFcf.textContent  = `$${fmt(fcf, 2)}B`;
+      dyPv.textContent   = `$${fmt(pv,  2)}B`;
+      dyGrowth.textContent = g != null
+        ? `${(g >= 0 ? "+" : "")}${fmt(g * 100, 1)}% growth`
+        : "—";
+      dyDiscNote.textContent =
+        `Discount factor: 1 / (1 + ${fmt(wacc, 1)}%)^${y} = ${fmt(1 / discFactor, 4)} · ` +
+        `Year-${y} growth applied: ${g != null ? fmt(g * 100, 1) + "%" : "—"}`;
+
+      // Slider-fill % for the colored runnable track
+      const pct = ((y - 1) / Math.max(labels.length - 1, 1)) * 100;
+      slider.style.setProperty("--slider-pct", `${pct}%`);
+
+      // Highlight tick label
+      ticksEl?.querySelectorAll("span").forEach(s =>
+        s.classList.toggle("active", parseInt(s.dataset.tick, 10) === y));
+    }
+
+    // Initial render + bind input event (replaces any prior handler)
+    slider.oninput = (e) => update(parseInt(e.target.value, 10));
+    update(parseInt(slider.value, 10) || 1);
+  }
+
   dcfChartInstance = new Chart(ctx, {
     type: "bar",
     data: {
@@ -1063,7 +1128,10 @@ function renderDcfChart(fcfData) {
       },
       scales: {
         x: { ticks: { color: "#6b7382" }, grid: { display: false } },
-        y: { ticks: { color: "#6b7382", callback: v => `$${fmt(v, 0)}B` },
+        y: { ticks: { color: "#6b7382",
+                      callback: v => v >= 1000 ? `$${fmt(v/1000, 1)}T`
+                                              : v >= 1    ? `$${fmt(v, 0)}B`
+                                              : `$${fmt(v * 1000, 0)}M` },
              grid: { color: "rgba(255,255,255,0.04)" } }
       }
     }
@@ -1227,6 +1295,9 @@ function setupSearch() {
   function submit() {
     const t = input.value.trim().toUpperCase();
     if (!t) return;
+    // Always dismiss the autocomplete dropdown when submitting
+    dd.classList.add("hidden");
+    input.blur();   // clear focus so dropdown stays closed and mobile keyboard hides
     const params = {};
     const yrs = $("advYrs").value;
     const s1  = $("advS1").value;
@@ -1345,16 +1416,20 @@ function syncAddPortfolioButtonForCurrent() {
 let _PF_SORT = "added";   // ticker | mos | added
 
 function openPortfolioPage() {
-  // Hide other views
+  // Hide ALL other views — portfolio is its own dedicated page
   $("results").classList.add("hidden");
   $("btcHero").classList.add("hidden");
+  document.querySelector(".hero")?.classList.add("hidden");
+  $("loading")?.classList.add("hidden");
+  $("error")?.classList.add("hidden");
   $("portfolioPage").classList.remove("hidden");
   renderPortfolioPage();
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  window.scrollTo({ top: 0, behavior: "instant" });
 }
 function closePortfolioPage() {
   $("portfolioPage").classList.add("hidden");
-  // Restore the appropriate previous view, if any
+  // Restore the hero (search) and the last view, if any
+  document.querySelector(".hero")?.classList.remove("hidden");
   if (_LAST_DATA && isBTCTicker(_LAST_DATA.ticker)) {
     $("btcHero").classList.remove("hidden");
   } else if (_LAST_DATA) {
