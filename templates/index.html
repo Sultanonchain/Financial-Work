@@ -133,6 +133,82 @@
   </div>
 </section>
 
+<!-- ── TIER GLOSSARY MODAL ────────────────────────────────────────────── -->
+<div class="modal hidden" id="tierGlossaryModal" role="dialog" aria-modal="true" aria-labelledby="tierGlossaryTitle">
+  <div class="modal__backdrop" data-modal-close></div>
+  <div class="modal__panel">
+    <div class="modal__head">
+      <h2 class="modal__title" id="tierGlossaryTitle">What does each verdict mean?</h2>
+      <button class="modal__close" data-modal-close aria-label="Close">✕</button>
+    </div>
+    <div class="modal__body">
+      <p class="tg-intro">
+        VALUS classifies every stock into one of seven verdict tiers based on
+        how its price compares to the model's fair value (margin of safety).
+        Each tier tells you a different story about what the market is pricing in.
+      </p>
+      <div class="tg-list">
+        <div class="tg-row tier-positive">
+          <span class="tg-dot"></span>
+          <div class="tg-body">
+            <span class="tg-label">Priced for Distress</span>
+            <span class="tg-mos">MOS &gt; +50%</span>
+            <span class="tg-desc">Market is overly pessimistic. Trading well below fair value, often during macro fear or sector rotation. Meaningful upside if fundamentals stabilise.</span>
+          </div>
+        </div>
+        <div class="tg-row tier-positive">
+          <span class="tg-dot"></span>
+          <div class="tg-body">
+            <span class="tg-label">Priced for Deep Discount</span>
+            <span class="tg-mos">MOS +40% to +50%</span>
+            <span class="tg-desc">Significantly undervalued — strong buy signal if VALUS's growth assumptions hold. Often value-trap candidates worth a quality check.</span>
+          </div>
+        </div>
+        <div class="tg-row tier-positive">
+          <span class="tg-dot"></span>
+          <div class="tg-body">
+            <span class="tg-label">Priced for Discount</span>
+            <span class="tg-mos">MOS +15% to +40%</span>
+            <span class="tg-desc">Trading below fundamental value. Modest opportunity zone — model and analysts both see room above current price.</span>
+          </div>
+        </div>
+        <div class="tg-row tier-info">
+          <span class="tg-dot"></span>
+          <div class="tg-body">
+            <span class="tg-label">Priced for Fair Value</span>
+            <span class="tg-mos">MOS −10% to +15%</span>
+            <span class="tg-desc">Market and VALUS aligned. No clear edge — the price reflects fundamentals as the model sees them. Hold or wait for a better entry.</span>
+          </div>
+        </div>
+        <div class="tg-row tier-warning">
+          <span class="tg-dot"></span>
+          <div class="tg-body">
+            <span class="tg-label">Priced for Growth</span>
+            <span class="tg-mos">MOS −10% to −25%</span>
+            <span class="tg-desc">Market paying a growth premium — modestly overvalued by VALUS. Acceptable if you believe execution will deliver above-base growth.</span>
+          </div>
+        </div>
+        <div class="tg-row tier-warning">
+          <span class="tg-dot"></span>
+          <div class="tg-body">
+            <span class="tg-label">Priced for Excellence</span>
+            <span class="tg-mos">MOS −25% to −50%</span>
+            <span class="tg-desc">Market expects flawless execution. Premium pricing requires growth, margins, and capital discipline to all work — limited margin of error if any leg slips.</span>
+          </div>
+        </div>
+        <div class="tg-row tier-negative">
+          <span class="tg-dot"></span>
+          <div class="tg-body">
+            <span class="tg-label">Priced for Miracle</span>
+            <span class="tg-mos">MOS &lt; −50% OR implied growth &gt; sector ceiling × 1.2</span>
+            <span class="tg-desc">Market pricing in extraordinary outcomes that fewer than 1% of public companies achieve over a decade. Speculative — favored by momentum, not fundamentals.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ── BTC HODL HERO ─────────────────────────────────────────────────── -->
 <main class="btc-hero hidden" id="btcHero">
   <div class="container">
@@ -246,6 +322,7 @@
       <div class="tier-badge" id="vTierBadge">
         <span class="tier-badge__dot"></span>
         <span id="vTierLabel">—</span>
+        <button class="tier-info" id="tierInfoBtn" type="button" aria-label="What does this verdict mean?">ⓘ</button>
       </div>
 
       <div class="reasons" id="vReasons"></div>
@@ -348,8 +425,16 @@
 
           <!-- DCF projection chart -->
           <div class="card">
-            <div class="section-title">Projected free cash flow</div>
+            <div class="section-title-row">
+              <div class="section-title">Projected free cash flow · 10-year DCF</div>
+              <div class="dcf-scenario-toggle" role="tablist" id="dcfScenarioToggle">
+                <button class="dcf-sc-btn" data-dcf-sc="bear" type="button">▾ Bear</button>
+                <button class="dcf-sc-btn active" data-dcf-sc="base" type="button">◆ Base</button>
+                <button class="dcf-sc-btn" data-dcf-sc="bull" type="button">▴ Bull</button>
+              </div>
+            </div>
             <div class="chart-wrap"><canvas id="dcfChart"></canvas></div>
+            <div class="dcf-chart-footer" id="dcfChartFooter"></div>
           </div>
 
           <!-- Projection table -->

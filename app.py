@@ -1415,26 +1415,68 @@ def _build_verdict_summary(ticker, priced_for, implied_growth_pct, model_growth_
     color = priced_for.get("color", "blue")
     reasons = []
 
-    # Reason 1 — what the market is asking for vs what we forecast
-    if implied_growth_pct is not None and model_growth_pct is not None:
+    # Reason 1 — frame the price-vs-fundamentals story.  The CANONICAL signal
+    # is margin_of_safety (price vs IV); implied growth is an interesting
+    # secondary signal but can be noisy on leveraged or capex-heavy stocks
+    # where the reverse-DCF is non-monotonic.  When the two disagree, we
+    # trust MOS for the headline framing.
+    mos = margin_of_safety
+    has_growth = (implied_growth_pct is not None and model_growth_pct is not None
+                  and abs(model_growth_pct) > 0.5)
+    if has_growth and mos is not None:
         gap = implied_growth_pct - model_growth_pct
-        if abs(gap) >= 1.0:
-            direction = "above" if gap > 0 else "below"
+        if mos > 5:
+            # MODEL SAYS UNDERVALUED — explain market is being conservative
+            ig_txt = (f"contracting {abs(implied_growth_pct):.1f}%/yr"
+                      if implied_growth_pct < -1 else
+                      f"flat (~{max(implied_growth_pct,0):.1f}%/yr)" if implied_growth_pct < 5 else
+                      f"~{implied_growth_pct:.1f}%/yr")
             reasons.append(
-                f"To justify today's price of ${price:.2f}, the market needs "
-                f"~{implied_growth_pct:.1f}% revenue growth every year for 10 years — "
-                f"VALUS forecasts {model_growth_pct:.1f}% ({abs(gap):.1f}pp {direction})."
+                f"At ${price:.2f} the market is pricing in revenue growth of {ig_txt} "
+                f"for the next decade — VALUS forecasts {model_growth_pct:.1f}%/yr, "
+                f"so VALUS sees the stock as underpriced ({mos:+.0f}% upside)."
+            )
+        elif mos < -5:
+            # MODEL SAYS OVERVALUED — explain market is paying for more growth
+            # than VALUS expects (or for optionality the model can't price).
+            if implied_growth_pct > model_growth_pct + 1:
+                reasons.append(
+                    f"To justify ${price:.2f} the market is pricing in "
+                    f"~{implied_growth_pct:.1f}%/yr revenue growth for a decade — "
+                    f"VALUS forecasts {model_growth_pct:.1f}%, so VALUS sees this as "
+                    f"overpriced by {abs(mos):.0f}%."
+                )
+            else:
+                # Same/lower implied growth but still overvalued — capex, leverage,
+                # or shareholder-dilution math is doing the work.  Use MOS framing.
+                reasons.append(
+                    f"VALUS fair value of ${iv:.2f} sits {abs(mos):.0f}% below "
+                    f"today's price of ${price:.2f} — capital structure, capex "
+                    f"intensity, or share dilution explain more of the gap than growth."
+                )
+        else:
+            # Roughly fair value
+            reasons.append(
+                f"At ${price:.2f}, market and VALUS are broadly aligned — both expect "
+                f"~{model_growth_pct:.1f}% annual growth and the price reflects that."
+            )
+    elif iv and price and mos is not None:
+        # No reliable growth comparison — fall back to MOS-driven copy
+        if mos > 5:
+            reasons.append(
+                f"VALUS fair value of ${iv:.2f} sits {mos:.0f}% above today's "
+                f"price of ${price:.2f} — model sees the stock as underpriced."
+            )
+        elif mos < -5:
+            reasons.append(
+                f"VALUS fair value of ${iv:.2f} sits {abs(mos):.0f}% below today's "
+                f"price of ${price:.2f} — model sees the stock as overpriced."
             )
         else:
             reasons.append(
-                f"Market and VALUS broadly agree — both expect ~{model_growth_pct:.1f}% "
-                f"annual growth to justify today's price of ${price:.2f}."
+                f"VALUS fair value of ${iv:.2f} is broadly in line with today's "
+                f"price of ${price:.2f}."
             )
-    elif iv and price:
-        reasons.append(
-            f"VALUS fair value of ${iv:.2f} implies "
-            f"{margin_of_safety:+.1f}% vs today's price of ${price:.2f}."
-        )
 
     # Reason 2 — sector credibility check
     if sector_ceiling_pct and implied_growth_pct is not None:

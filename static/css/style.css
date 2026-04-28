@@ -912,6 +912,64 @@ button { font-family: inherit; cursor: pointer; }
   box-shadow: 0 0 8px currentColor;
 }
 
+.tier-info {
+  background: transparent;
+  border: none;
+  color: currentColor;
+  opacity: 0.55;
+  font-size: 14px;
+  margin-left: 4px;
+  padding: 0 2px;
+  cursor: pointer;
+  transition: opacity 150ms var(--ease-out), transform 150ms var(--ease-out);
+}
+.tier-info:hover { opacity: 1; transform: scale(1.1); }
+
+/* Tier glossary modal styles */
+.tg-intro {
+  margin: 0 0 var(--space-4);
+  color: var(--ink-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.tg-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.tg-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-elevated-2);
+  border: 1px solid rgba(255,255,255,0.04);
+  border-left: 3px solid var(--tier-accent, var(--accent));
+  border-radius: var(--radius-sm);
+}
+.tg-dot {
+  width: 8px; height: 8px;
+  background: var(--tier-accent, var(--accent));
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--tier-accent, var(--accent));
+  margin-top: 6px;
+}
+.tg-body { display: flex; flex-direction: column; gap: 4px; }
+.tg-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tier-accent, var(--accent));
+}
+.tg-mos {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+}
+.tg-desc {
+  font-size: 13px;
+  color: var(--ink-secondary);
+  line-height: 1.5;
+  margin-top: 2px;
+}
+
 /* Tier color variations */
 .tier-positive  { --tier-accent: var(--positive); --tier-soft: var(--positive-soft); --tier-strong: var(--positive-strong); --tier-glow: var(--positive-glow); }
 .tier-info      { --tier-accent: var(--info);     --tier-soft: var(--info-soft);     --tier-strong: rgba(96,165,250,0.55);  --tier-glow: var(--info-glow); }
@@ -1509,8 +1567,54 @@ table.dt tfoot td { font-weight: 600; color: var(--ink-primary); border-top: 1px
 .tab-btn:hover { color: var(--ink-secondary); }
 
 /* Charts (canvas + svg both supported) */
-.chart-wrap { position: relative; height: 240px; }
+.chart-wrap { position: relative; height: 280px; }
 .chart-wrap canvas, .chart-wrap svg { width: 100% !important; height: 100% !important; }
+
+.section-title-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-3); margin-bottom: var(--space-3);
+  flex-wrap: wrap;
+}
+.section-title-row .section-title { margin-bottom: 0; }
+
+/* Scenario toggle for the DCF chart card */
+.dcf-scenario-toggle {
+  display: inline-flex; gap: 2px;
+  padding: 3px;
+  background: var(--bg-deep);
+  border: 1px solid rgba(255,255,255,0.05);
+  border-radius: var(--radius-pill);
+}
+.dcf-sc-btn {
+  background: transparent; border: none;
+  color: var(--ink-muted);
+  padding: 5px 14px;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-weight: 600;
+  transition: all 200ms var(--ease-out);
+}
+.dcf-sc-btn:hover { color: var(--ink-secondary); }
+.dcf-sc-btn.active {
+  background: var(--bg-elevated-2);
+  color: var(--ink-primary);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset, 0 0 0 1px rgba(255,255,255,0.06);
+}
+.dcf-sc-btn[data-dcf-sc="bear"].active { color: var(--negative); }
+.dcf-sc-btn[data-dcf-sc="bull"].active { color: var(--positive); }
+
+.dcf-chart-footer {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid rgba(255,255,255,0.04);
+  display: flex; flex-wrap: wrap; gap: var(--space-4);
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--ink-muted);
+}
+.dcf-chart-footer span strong { color: var(--ink-primary); font-weight: 600; }
 
 /* ════════════════════════════════════════════════════════════════════════
    BTC HODL hero — special view for ₿ tickers

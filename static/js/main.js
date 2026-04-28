@@ -163,6 +163,27 @@ function renderResults(d) {
   _LAST_DATA = d;
   $("results").classList.remove("hidden");
 
+  // Reset scenario chart back to base for each new analysis
+  _DCF_CHART_SCENARIO = "base";
+  document.querySelectorAll("[data-dcf-sc]").forEach(b =>
+    b.classList.toggle("active", b.dataset.dcfSc === "base")
+  );
+
+  // If the drawer was open from a previous analysis, collapse it so the user
+  // sees the new fresh hero+verdict at the top instead of being stuck deep
+  // inside another stock's drilldown.  They can re-expand if they want.
+  const drawer  = $("drawer");
+  const trigger = $("drawerTrigger");
+  if (drawer && drawer.classList.contains("open")) {
+    drawer.classList.remove("open");
+    if (trigger) {
+      trigger.classList.remove("open");
+      trigger.setAttribute("aria-expanded", "false");
+      const txt = $("drawerTriggerTxt");
+      if (txt) txt.textContent = "View detailed analysis";
+    }
+  }
+
   renderHeroVerdict(d);
   renderMethodology(d);
   renderScenarios(d);
@@ -923,50 +944,138 @@ function renderPriceChart(history) {
   });
 }
 
+// Compute a 10-year projection client-side for any scenario.
+// Uses base_fcf, scenario s1 + wacc, global s2/tg/yrs.
+function projectScenario(d, scenario) {
+  const sc = (d.scenarios || {})[scenario] || {};
+  const baseFcf = d.base_fcf || 0;
+  if (!baseFcf) return null;
+
+  const yrs = d.projection_years || 10;
+  // Per-scenario s1 (in %, so divide by 100). Fall back to global s1.
+  const s1Pct  = sc.s1   != null ? sc.s1   : (d.stage1_growth || 0);
+  const waccPct = sc.wacc != null ? sc.wacc : (d.wacc || 9);
+  const s1 = s1Pct / 100;
+  // s2 typically tapers ~55% of s1 across all scenarios (matches backend default)
+  const s2Pct = d.stage2_growth != null ? d.stage2_growth : Math.max(s1Pct * 0.55, 2);
+  const s2 = s2Pct / 100;
+  const wacc = waccPct / 100;
+
+  const stage1Years = Math.ceil(yrs / 2);
+
+  const labels = [];
+  const projected = [];
+  const discounted = [];
+  let fcf = baseFcf;
+  for (let y = 1; y <= yrs; y++) {
+    const g = y <= stage1Years ? s1 : s2;
+    fcf = fcf * (1 + g);
+    const pv = fcf / Math.pow(1 + wacc, y);
+    labels.push(`Y${y}`);
+    projected.push(fcf / 1e9);
+    discounted.push(pv / 1e9);
+  }
+  // Sums for footer
+  const totalFcf = projected.reduce((a, b) => a + b, 0);
+  const totalPv  = discounted.reduce((a, b) => a + b, 0);
+  return {
+    labels, projected, discounted,
+    s1Pct: s1Pct, waccPct: waccPct, s2Pct: s2Pct,
+    totalFcf, totalPv,
+  };
+}
+
+let _DCF_CHART_SCENARIO = "base";
+
 function renderDcfChart(fcfData) {
+  // fcfData is the server-shipped { projected: { labels, values, pvs } } for base.
+  // We override with per-scenario client-computed data when toggled.
   const canvas = $("dcfChart");
-  if (!canvas || !fcfData) return;
+  if (!canvas || !_LAST_DATA) return;
   const ctx = canvas.getContext("2d");
   if (dcfChartInstance) dcfChartInstance.destroy();
 
-  // Backend returns either:
-  //   { projected: { labels, values, pvs } }   (current shape)
-  // or { years, projected, discounted }        (legacy)
-  let labels, projected, discounted;
-  if (fcfData.projected && typeof fcfData.projected === "object" && !Array.isArray(fcfData.projected)) {
+  const which = _DCF_CHART_SCENARIO;
+  let labels, projected, discounted, footerLine;
+
+  if (which === "base" && fcfData && fcfData.projected && fcfData.projected.values) {
+    // Use server's exact base data
     labels     = fcfData.projected.labels || [];
     projected  = (fcfData.projected.values || []).map(v => v / 1e9);
     discounted = (fcfData.projected.pvs    || []).map(v => v / 1e9);
+    const tot = projected.reduce((a, b) => a + b, 0);
+    const pv  = discounted.reduce((a, b) => a + b, 0);
+    footerLine = `<span><strong>g₁</strong> ${fmt(_LAST_DATA.stage1_growth || 0, 1)}%</span>` +
+                 `<span><strong>WACC</strong> ${fmt(_LAST_DATA.wacc || 0, 1)}%</span>` +
+                 `<span><strong>Total FCF (10y)</strong> $${fmt(tot, 1)}B</span>` +
+                 `<span><strong>Total PV</strong> $${fmt(pv, 1)}B</span>`;
   } else {
-    labels     = fcfData.years || [];
-    projected  = (fcfData.projected || []).map(v => v / 1e9);
-    discounted = (fcfData.discounted || []).map(v => v / 1e9);
+    // Compute client-side for bear or bull
+    const sim = projectScenario(_LAST_DATA, which);
+    if (!sim) return;
+    labels = sim.labels;
+    projected = sim.projected;
+    discounted = sim.discounted;
+    footerLine = `<span><strong>g₁</strong> ${fmt(sim.s1Pct, 1)}%</span>` +
+                 `<span><strong>WACC</strong> ${fmt(sim.waccPct, 1)}%</span>` +
+                 `<span><strong>Total FCF (10y)</strong> $${fmt(sim.totalFcf, 1)}B</span>` +
+                 `<span><strong>Total PV</strong> $${fmt(sim.totalPv, 1)}B</span>`;
   }
-  if (labels.length === 0 || projected.length === 0) return;
+
+  if (!labels || labels.length === 0 || projected.length === 0) return;
+
+  // Color theme per scenario
+  const themes = {
+    base: { proj: "#5eead4", projBg: "rgba(94,234,212,0.20)", disc: "#60a5fa", discBg: "rgba(96,165,250,0.20)" },
+    bull: { proj: "#34d399", projBg: "rgba(52,211,153,0.20)",  disc: "#5eead4", discBg: "rgba(94,234,212,0.20)" },
+    bear: { proj: "#f87171", projBg: "rgba(248,113,113,0.20)", disc: "#fbbf24", discBg: "rgba(251,191,36,0.20)" },
+  };
+  const t = themes[which];
+
+  $("dcfChartFooter").innerHTML = footerLine;
 
   dcfChartInstance = new Chart(ctx, {
     type: "bar",
     data: {
       labels,
       datasets: [
-        { label: "Projected FCF", data: projected, backgroundColor: "rgba(94,234,212,0.20)", borderColor: "#5eead4", borderWidth: 1, borderRadius: 4 },
-        { label: "Discounted FCF (PV)", data: discounted, backgroundColor: "rgba(96,165,250,0.20)", borderColor: "#60a5fa", borderWidth: 1, borderRadius: 4 },
+        { label: "Projected FCF",      data: projected,
+          backgroundColor: t.projBg, borderColor: t.proj,
+          borderWidth: 1, borderRadius: 4 },
+        { label: "Discounted FCF (PV)", data: discounted,
+          backgroundColor: t.discBg, borderColor: t.disc,
+          borderWidth: 1, borderRadius: 4 },
       ]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
+      animation: { duration: 600, easing: "easeOutQuart" },
       plugins: {
-        legend: { labels: { color: "#b6bdcb", font: { size: 11 } } },
+        legend: { labels: { color: "#b6bdcb", font: { size: 11 }, usePointStyle: true } },
         tooltip: {
-          backgroundColor: "#11151d", borderColor: "rgba(255,255,255,0.08)", borderWidth: 1,
+          backgroundColor: "#11151d", borderColor: "rgba(255,255,255,0.08)",
+          borderWidth: 1, padding: 12,
+          titleColor: "#f5f7fa", bodyColor: "#b6bdcb",
           callbacks: { label: c => `${c.dataset.label}: $${fmt(c.parsed.y, 2)}B` }
         }
       },
       scales: {
         x: { ticks: { color: "#6b7382" }, grid: { display: false } },
-        y: { ticks: { color: "#6b7382", callback: v => `$${fmt(v, 0)}B` }, grid: { color: "rgba(255,255,255,0.04)" } }
+        y: { ticks: { color: "#6b7382", callback: v => `$${fmt(v, 0)}B` },
+             grid: { color: "rgba(255,255,255,0.04)" } }
       }
     }
+  });
+
+  // Bind scenario toggle (idempotent — replaces existing handlers)
+  document.querySelectorAll("[data-dcf-sc]").forEach(btn => {
+    btn.onclick = () => {
+      _DCF_CHART_SCENARIO = btn.dataset.dcfSc;
+      document.querySelectorAll("[data-dcf-sc]").forEach(b =>
+        b.classList.toggle("active", b === btn)
+      );
+      renderDcfChart(_LAST_DATA?.fcf_chart);
+    };
   });
 }
 
@@ -1296,11 +1405,29 @@ function renderPortfolio() {
 function setupPortfolioModal() {
   const btn = $("portfolioBtn");
   if (btn) btn.onclick = openPortfolioModal;
-  document.querySelectorAll("[data-modal-close]").forEach(el => {
-    el.onclick = closePortfolioModal;
+}
+
+function setupTierGlossary() {
+  const tierBtn = $("tierInfoBtn");
+  const modal   = $("tierGlossaryModal");
+  if (tierBtn && modal) {
+    tierBtn.onclick = () => modal.classList.remove("hidden");
+  }
+}
+
+function closeAllModals() {
+  document.querySelectorAll(".modal").forEach(m => m.classList.add("hidden"));
+}
+
+function setupModalDismiss() {
+  // Universal close handler — works for any modal with [data-modal-close]
+  document.addEventListener("click", (e) => {
+    if (e.target.matches("[data-modal-close]")) {
+      closeAllModals();
+    }
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closePortfolioModal();
+    if (e.key === "Escape") closeAllModals();
   });
 }
 
@@ -1314,5 +1441,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupCopyButton();
   setupAddPortfolioButton();
   setupPortfolioModal();
+  setupTierGlossary();
+  setupModalDismiss();
   pfUpdateBadge();
 });
