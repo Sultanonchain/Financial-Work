@@ -2016,6 +2016,96 @@ table.dt tfoot td { font-weight: 600; color: var(--ink-primary); border-top: 1px
 }
 
 /* ════════════════════════════════════════════════════════════════════════
+   ETF / Index hero — special view for non-equity tickers
+   ════════════════════════════════════════════════════════════════════════ */
+
+.etf-hero { padding: var(--space-6) 0 var(--space-9); }
+.etf-hero.hidden { display: none; }
+.etf-card { padding: var(--space-7) var(--space-7) var(--space-6); }
+
+.etf-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-3); margin-bottom: var(--space-5);
+}
+.etf-name {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--ink-primary);
+  letter-spacing: -0.01em;
+}
+.etf-pill {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--info);
+  background: var(--info-soft);
+  border: 1px solid rgba(96,165,250,0.25);
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+}
+.etf-price-row {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: var(--space-5);
+  align-items: center;
+  margin-bottom: var(--space-5);
+}
+.etf-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-3);
+}
+.etf-stat { display: flex; flex-direction: column; gap: 4px; }
+.etf-stat__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.etf-stat__value {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink-primary);
+  font-feature-settings: "tnum" 1;
+}
+.etf-message {
+  margin-top: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  background: var(--info-soft);
+  border-left: 3px solid var(--info);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  font-size: 13px;
+  color: var(--ink-secondary);
+  line-height: 1.55;
+}
+
+@media (max-width: 768px) {
+  .etf-price-row { grid-template-columns: 1fr; }
+  .etf-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Low-confidence MOS warning chip — shown next to the MOS bar
+   when |MOS| > 100% (indicates DCF inputs likely mispriced) */
+.mos-confidence-chip {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--warning-soft);
+  border: 1px solid rgba(251, 191, 36, 0.30);
+  color: var(--warning);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  cursor: help;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
    BTC HODL hero — special view for ₿ tickers
    ════════════════════════════════════════════════════════════════════════ */
 

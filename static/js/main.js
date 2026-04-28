@@ -104,6 +104,7 @@ async function analyze(ticker, params = {}) {
   hideError();
   $("results").classList.add("hidden");
   $("btcHero").classList.add("hidden");
+  $("etfHero")?.classList.add("hidden");
   // Make sure hero search section is visible (in case we came from portfolio)
   document.querySelector(".hero")?.classList.remove("hidden");
   const pfPage = $("portfolioPage");
@@ -127,6 +128,8 @@ async function analyze(ticker, params = {}) {
     hideLoading();
     if (isBTC) {
       renderBTCHero(data);
+    } else if (data.is_etf) {
+      renderETFHero(data);
     } else {
       renderResults(data);
     }
@@ -197,6 +200,65 @@ function renderResults(d) {
 
   attachCardGlow();
   $("results").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   ETF / Index hero — special view for non-equity tickers
+   ════════════════════════════════════════════════════════════════════════ */
+
+let etfChartInstance = null;
+
+function renderETFHero(d) {
+  _LAST_DATA = d;
+  // Hide every other view and show only the ETF hero
+  $("results").classList.add("hidden");
+  $("btcHero").classList.add("hidden");
+  $("portfolioPage")?.classList.add("hidden");
+  $("etfHero").classList.remove("hidden");
+
+  $("etfName").textContent  = d.company_name || d.ticker;
+  $("etfClass").textContent = d.asset_class || "ETF";
+  $("etfPrice").textContent = d.current_price != null ? fmtPrice(d.current_price) : "—";
+  $("etfHigh").textContent  = d["52w_high"] != null ? fmtPrice(d["52w_high"]) : "—";
+  $("etfLow").textContent   = d["52w_low"]  != null ? fmtPrice(d["52w_low"])  : "—";
+  $("etfYtd").textContent   = d.ytd_return != null ? fmtPct(d.ytd_return * 100) : "—";
+  $("etfExpense").textContent = d.expense_ratio != null ? `${fmt(d.expense_ratio * 100, 2)}%` : "—";
+  $("etfMessage").textContent = d.etf_message || "";
+
+  // Render price chart (theme by YTD direction)
+  const canvas = $("etfChart");
+  if (canvas && d.price_history && d.price_history.length > 0) {
+    const ctx = canvas.getContext("2d");
+    if (etfChartInstance) etfChartInstance.destroy();
+    const hist = d.price_history;
+    const up = hist[hist.length - 1].close >= hist[0].close;
+    const color = up ? "#34d399" : "#f87171";
+    etfChartInstance = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: hist.map(h => h.date),
+        datasets: [{
+          data: hist.map(h => h.close),
+          borderColor: color, borderWidth: 2,
+          backgroundColor: up ? "rgba(52,211,153,0.10)" : "rgba(248,113,113,0.10)",
+          fill: true, tension: 0.25, pointRadius: 0, pointHoverRadius: 4
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: {
+          backgroundColor: "#11151d", borderColor: "rgba(255,255,255,0.08)", borderWidth: 1,
+          titleColor: "#f5f7fa", bodyColor: "#b6bdcb",
+          callbacks: { label: c => `$${fmt(c.parsed.y, 2)}` }
+        } },
+        scales: {
+          x: { ticks: { color: "#6b7382", maxTicksLimit: 6, autoSkip: true }, grid: { display: false } },
+          y: { ticks: { color: "#6b7382", callback: v => `$${fmt(v, 0)}` }, grid: { color: "rgba(255,255,255,0.04)" } }
+        }
+      }
+    });
+  }
+  $("etfHero").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -371,7 +433,14 @@ function renderHeroVerdict(d) {
   if (mos != null) {
     const fillEl = $("vMosFill");
     const pctEl  = $("vMosPct");
-    pctEl.textContent = fmtPct(mos);
+    // Append a "low confidence" chip when |MOS| > 100% (extreme outliers
+    // typically indicate a data quirk: stale price, share-class mismatch,
+    // forward-earnings spike, leverage non-monotonicity).
+    if (d.extreme_mos_flag) {
+      pctEl.innerHTML = `${fmtPct(mos)}<span class="mos-confidence-chip" title="MOS exceeds ±100% — DCF inputs may be mispriced. Treat as low-confidence and check the methodology.">Low Conf</span>`;
+    } else {
+      pctEl.textContent = fmtPct(mos);
+    }
     // MOS bar fills outward from center toward the side that wins
     const cap = Math.min(Math.abs(mos), 100);
     const widthPct = cap / 2;  // half of total bar

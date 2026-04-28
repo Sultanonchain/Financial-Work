@@ -2799,7 +2799,45 @@ def analyze():
         price       = safe(info.get("currentPrice") or info.get("regularMarketPrice"))
 
         if not price:
-            return jsonify({"error": f"No data for '{ticker}'. Check the symbol."}), 404
+            # Helpful suggestion for known renames / common mistakes
+            renames = {"SQ": "XYZ", "FB": "META", "TWTR": "X"}
+            hint = (f" Did you mean '{renames[ticker]}'?" if ticker in renames else "")
+            return jsonify({
+                "error": f"No data for '{ticker}'. Check the symbol.{hint}"
+            }), 404
+
+        # ── ETF / Index detection ─────────────────────────────────────────────
+        # ETFs and indexes don't have FCF/DCF — return a structured "ETF view"
+        # response with metadata + price history that the frontend can display
+        # nicely, instead of failing silently with a blank IV.
+        quote_type = (info.get("quoteType") or "").upper()
+        if quote_type in ("ETF", "MUTUALFUND", "INDEX"):
+            ph = []
+            try:
+                hist = stock.history(period="1y")
+                if not hist.empty:
+                    ph = [{"date": d.strftime("%Y-%m-%d"), "close": float(c)}
+                          for d, c in hist["Close"].dropna().items()]
+            except Exception:
+                pass
+            return jsonify({
+                "ticker":        ticker,
+                "is_etf":        True,
+                "company_name":  info.get("longName") or info.get("shortName") or ticker,
+                "current_price": round(float(price), 2),
+                "52w_high":      safe(info.get("fiftyTwoWeekHigh")),
+                "52w_low":       safe(info.get("fiftyTwoWeekLow")),
+                "market_cap":    safe(info.get("totalAssets") or info.get("marketCap")),
+                "ytd_return":    safe(info.get("ytdReturn")),
+                "expense_ratio": safe(info.get("annualReportExpenseRatio")),
+                "category":      info.get("category") or quote_type.title(),
+                "fund_family":   info.get("fundFamily"),
+                "asset_class":   "ETF" if quote_type == "ETF" else quote_type.title(),
+                "price_history": ph,
+                "etf_message":   ("DCF valuation does not apply to ETFs. ETFs hold a "
+                                  "basket of assets — to value an ETF, look at the "
+                                  "weighted intrinsic value of its underlying holdings."),
+            })
 
         cashflow      = stock.cashflow
         income_stmt   = stock.income_stmt
@@ -4249,6 +4287,12 @@ def analyze():
             "reality_reconciled":      reality_reconciled,
             "reality_pre_iv":          reality_pre_iv,
             "reality_reason":          reality_reason,
+            # ── Confidence flag for extreme MOS values ─────────────────────
+            # When |MOS| > 100% the DCF inputs are usually mispriced (forward
+            # earnings spike, leverage quirk, share-class issue, stale data).
+            # Flag so the UI can show a "low confidence" badge.
+            "extreme_mos_flag":  (margin_of_safety is not None
+                                  and abs(margin_of_safety) > 100),
             # ── "Priced For" Verdict + Verdict Summary ────────────────────
             "priced_for":              priced_for,
             "verdict_summary":         verdict_summary,
