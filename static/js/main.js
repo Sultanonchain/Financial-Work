@@ -2367,8 +2367,15 @@ async function loadLeaderboard(showSpinner = true) {
     const res = await fetch(`/api/leaderboard?sort=${encodeURIComponent(_LB_SORT)}`);
     const data = await res.json();
     const items = data.items || [];
-    // Skip re-render if nothing changed (preserves scroll position on polls)
-    const fp = JSON.stringify(items.map(e => [e.id, e.avg_mos, e.ticker_count]));
+    // Skip re-render if nothing changed (preserves scroll position on polls).
+    // Sort key must be part of the fingerprint — without it, switching from
+    // "Avg MOS" to "Most Recent" produces the same id+avg+count tuple in a
+    // different order, the early-return fires, but lbList was already
+    // cleared by the spinner branch above → user sees an empty leaderboard.
+    const fp = JSON.stringify({
+      sort: _LB_SORT,
+      items: items.map(e => [e.id, e.avg_mos, e.ticker_count]),
+    });
     if (fp === _LB_LAST_FINGERPRINT) return;
     _LB_LAST_FINGERPRINT = fp;
     renderLeaderboard(items);
