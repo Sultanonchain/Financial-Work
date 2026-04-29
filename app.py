@@ -5381,14 +5381,16 @@ def analyze():
                 and margin_of_safety < 0):
             forward_pe = safe(info.get("forwardPE"))
             mature_trigger = (forward_pe is not None and 0 < forward_pe < 20)
-            # Pre-revenue: negative or near-zero forward P/E + the strategic
-            # IV floor fired + analyst sees ≥ 5% upside.
+            # Pre-revenue: negative or extreme forward P/E (= no positive
+            # earnings yet) + analyst sees meaningful upside.  Independent
+            # of whether the IV floor mechanically fired — that's a
+            # different mechanism (downside protection on IV magnitude),
+            # not a signal of how the market is pricing the franchise.
             pre_rev_trigger = (
-                strategic_floor_applied
-                and (forward_pe is None or forward_pe <= 0 or forward_pe > 100)
+                (forward_pe is None or forward_pe <= 0 or forward_pe > 100)
                 and analyst_target_price
                 and price
-                and analyst_target_price > price * 1.05
+                and analyst_target_price > price * 1.10
             )
             if mature_trigger or pre_rev_trigger:
                 if mature_trigger:
