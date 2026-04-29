@@ -1992,18 +1992,22 @@ function setupCustomDCFSliders() {
   const sliders = ids.map($).filter(Boolean);
   if (sliders.length !== 4) return;
 
+  // While true, the sliders haven't been moved since the last reset/render —
+  // we mirror the model's actual base IV instead of running our simplified
+  // recompute (which can't replicate sector TV caps, normalized FCF base,
+  // mid-year discount, etc., so it diverges from the displayed Base case).
+  let pristine = true;
+
   const reset = () => {
     if (!_LAST_DATA) return;
     const d = _LAST_DATA;
-    // Prefer the exact base-scenario assumptions the model used so the
-    // "Your Fair Value" lines up with the displayed Base case before any
-    // user interaction. Fall back to top-level DCF inputs, then to defaults.
     const base = (d.scenarios && d.scenarios.base) || {};
     $("cdS1").value   = base.s1   ?? d.stage1_growth   ?? 10;
     $("cdS2").value   = d.stage2_growth   ?? 6;
     $("cdWacc").value = base.wacc ?? d.wacc            ?? 9;
     $("cdTg").value   = d.terminal_growth ?? 2.5;
     sliders.forEach(updateSliderFill);
+    pristine = true;
     update();
   };
 
@@ -2023,7 +2027,13 @@ function setupCustomDCFSliders() {
     const valusIv = d.intrinsic_value;
     $("cdValusIV").textContent = valusIv != null ? fmtPrice(valusIv) : "—";
 
-    const yourIv = recomputeCustomIV(d, s1, s2, wacc, tg);
+    // Pristine state: mirror the model's base IV so the user starts from the
+    // same number shown in the Base scenario card.
+    const baseIv = (d.scenarios && d.scenarios.base && d.scenarios.base.value) ?? valusIv;
+    const yourIv = pristine
+      ? baseIv
+      : recomputeCustomIV(d, s1, s2, wacc, tg);
+
     if (yourIv != null && isFinite(yourIv) && yourIv > 0) {
       $("cdYourIV").textContent = fmtPrice(yourIv);
       const deltaEl = $("cdYourDelta");
@@ -2041,14 +2051,12 @@ function setupCustomDCFSliders() {
     }
   };
 
-  // Bind input handlers
   sliders.forEach(s => {
-    s.oninput = () => { updateSliderFill(s); update(); };
+    s.oninput = () => { pristine = false; updateSliderFill(s); update(); };
   });
   const resetBtn = $("cdResetBtn");
   if (resetBtn) resetBtn.onclick = reset;
 
-  // Expose for renderResults to call after analysis
   window._cdReset = reset;
 }
 
