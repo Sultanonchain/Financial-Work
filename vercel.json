@@ -7,5 +7,8 @@
   "routes": [
     { "src": "/static/(.*)", "dest": "/static/$1" },
     { "src": "/(.*)",        "dest": "/app.py" }
+  ],
+  "crons": [
+    { "path": "/api/cron/refresh-heatmap", "schedule": "0 * * * *" }
   ]
 }

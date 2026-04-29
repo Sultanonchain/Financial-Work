@@ -897,6 +897,46 @@ button { font-family: inherit; cursor: pointer; }
   gap: var(--space-3);
 }
 
+/* ── Treemap mode (desktop only) ─────────────────────────────────────────
+   Cells sized by sqrt(market_cap) within each sector.  Visually shows
+   scale ($3T AAPL ≈ 4x area of $200B ARM) while preserving the VALUS
+   valuation tier coloring.  Mobile falls back to the uniform grid above
+   via media query at 640px. */
+.disc-grid--treemap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 12px);
+}
+.disc-sector {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 12px;
+  padding: 12px;
+}
+.disc-sector__head {
+  display: flex; align-items: baseline; gap: 10px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted, #888);
+}
+.disc-sector__name { font-weight: 600; color: var(--text-soft, #ccc); }
+.disc-sector__count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  opacity: 0.7;
+}
+.disc-sector__cells {
+  display: flex; flex-wrap: wrap; gap: 4px;
+}
+.disc-cell--tm {
+  /* Override the grid auto-fill row height; let treemap sizing breathe. */
+  height: auto;
+  padding: 12px 14px;
+}
+
 .disc-cell {
   position: relative;
   padding: var(--space-4);
@@ -2925,6 +2965,33 @@ a:focus-visible {
 .strategic-chip--down  { color: #ef4444; border-color: rgba(239,68,68,0.35); }
 .strategic-chip--info  { color: #60a5fa; border-color: rgba(96,165,250,0.35); }
 .strategic-chip--news  { font-style: italic; opacity: 0.85; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Heatmap freshness chips (live + cron) ─────────────────────────────── */
+.freshness-row {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  margin-top: 8px; font-size: 12px;
+}
+.freshness-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.10);
+  color: var(--text-soft, #aaa);
+  font-variant-numeric: tabular-nums;
+}
+.freshness-chip::before {
+  content: "●";
+  font-size: 9px;
+  color: #60a5fa;
+}
+.freshness-chip.freshness--good   { color: #22c55e; border-color: rgba(34,197,94,0.30); }
+.freshness-chip.freshness--good::before   { color: #22c55e; }
+.freshness-chip.freshness--warn   { color: #ca8a04; border-color: rgba(202,138,4,0.30); }
+.freshness-chip.freshness--warn::before   { color: #ca8a04; }
+.freshness-chip.freshness--stale  { color: #ef4444; border-color: rgba(239,68,68,0.30); }
+.freshness-chip.freshness--stale::before  { color: #ef4444; }
+.freshness-chip.freshness--unknown::before { color: #888; }
 
 /* Strategic indicator on Discover heatmap cells */
 .disc-cell__strategic {

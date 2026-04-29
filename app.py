@@ -118,6 +118,52 @@ _RISK_KEYWORDS = [
     "sec charges", "department of justice", "preliminary injunction",
 ]
 
+# ── Transformative catalysts ────────────────────────────────────────────────
+# These are events that signal a *durable* growth shift, not a one-time IV
+# bump.  When one fires, the model lifts Stage-1 growth in addition to the
+# usual IV multiplier — a "first commercial flight" reflects 2-3 years of
+# accelerating revenue, not just a sentiment pop.
+#
+# Coverage by industry (curated to the events that have actually moved
+# stocks 20%+ over the past 24 months):
+_CATALYST_TRANSFORMATIVE = [
+    # eVTOL / Urban Air Mobility — JOBY, ACHR, EVTL
+    "first commercial flight", "first commercial ride", "first paid passenger",
+    "first paid flight", "first paid ride", "part 135 certification",
+    "type certificate", "air taxi launch", "urban air mobility launch",
+    "passenger flights begin", "commercial operations begin",
+    "first commercial passenger", "first passenger flight",
+    "commercial passenger flight", "begins air taxi", "passenger air taxi",
+    "commercial service launch", "begins commercial service",
+    "completes first passenger", "completes first commercial",
+    # Semiconductors — MU, INTC, TSMC, ARM
+    "tape-out", "tape out", "first silicon", "yield ramp",
+    "hbm4 sampling", "hbm3e sampling", "cxl ga", "ga release",
+    "high-volume production", "production ramp",
+    # Autos / EV / Robotics — TSLA, GM, F, RIVN
+    "deliveries record", "delivery record", "production milestone",
+    "factory online", "factory commissioned", "robotaxi launch",
+    "robotaxi expansion", "fsd unsupervised", "optimus production",
+    # Energy — CEG, VST, NEE, OXY
+    "first power", "grid connection", "facility commissioned",
+    "ppa signed", "hyperscaler ppa", "datacenter ppa",
+    "reactor restart", "haleu delivery", "small modular reactor",
+    # Monopoly / sole-supplier signals
+    "only us producer", "sole us producer", "sole supplier",
+    "exclusive supplier", "no us competitor", "only domestic supplier",
+    "trusted foundry designation",
+    # Biotech / Pharma — LLY, VRTX, REGN, MRNA
+    "bla filing", "bla accepted", "bla approval", "phase 3 success",
+    "phase 3 met primary", "fda priority review", "breakthrough therapy",
+    "label expansion", "first patient dosed",
+    # Defense — LMT, RTX, NOC, GD, HII
+    "sole-source contract", "indefinite delivery indefinite quantity",
+    "idiq award", "production go-ahead", "milestone c approval",
+    # AI infra / Cloud — NVDA, MSFT, GOOGL, AMZN
+    "blackwell shipping", "blackwell ga", "rubin shipping",
+    "sovereign ai contract", "gigawatt deal",
+]
+
 # ── Policy / sovereign-capital signal ───────────────────────────────────────
 # These keywords detect *policy-driven* tailwinds and headwinds that pure
 # DCF can't see: CHIPS Act grants, DPA Title III orders, DOE loan guarantees,
@@ -277,6 +323,197 @@ def _fetch_edgar_8k(ticker: str) -> list:
         return []
 
 
+# ── Heuristic headline scorer ───────────────────────────────────────────────
+# Replaces the old binary "is_strong / is_mod / is_risk" matching with a
+# numeric score in [-1.0, +1.0].  Uses sector context, co-occurrence, and
+# negation detection so the model "decides on its own" instead of just
+# pattern-matching.  Outputs feed momentum_premium, growth_catalyst_lift_pp,
+# and wacc_risk_add as smooth functions of the aggregated score.
+_NEGATION_TOKENS = (
+    "no longer", "not approved", "denied", "rejected", "fails to",
+    "failed to", "missed", "misses", "delayed", "postponed",
+    "halted", "withdrawn", "suspended", "cancelled", "canceled",
+)
+
+# ── Optional Claude API headline interpreter ────────────────────────────────
+# When ANTHROPIC_API_KEY is set, ambiguous headlines (heuristic score in the
+# narrow band [-0.2, +0.2]) are sent to Claude Haiku for structured JSON
+# interpretation.  Adds ~1-2s + a few cents/day; falls back to heuristic
+# gracefully if the call fails or the key is missing.
+_CLAUDE_INTERP_CACHE = {}        # {(ticker, title_hash): (ts, payload)}
+_CLAUDE_INTERP_CACHE_TTL = 3600  # 1 hour — same as the catalyst cache
+
+def _claude_interpret_headline(ticker, sector, title, summary):
+    """
+    Returns dict { score: float, durability: str, confidence: str, reason: str }
+    or None if disabled / failed.  Cheap-cached so repeated tickers don't
+    double-bill.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return None
+    cache_key = (ticker, hash((title or "")[:200]))
+    cached = _CLAUDE_INTERP_CACHE.get(cache_key)
+    if cached and (time.time() - cached[0]) < _CLAUDE_INTERP_CACHE_TTL:
+        return cached[1]
+
+    try:
+        prompt = (
+            "You are a buyside equity analyst.  Score the impact of this "
+            "headline on the company's intrinsic value.\n\n"
+            f"Ticker: {ticker}\nSector: {sector or '?'}\n"
+            f"Headline: {title}\n"
+            f"Summary: {(summary or '')[:400]}\n\n"
+            "Return ONLY a single-line JSON object with keys:\n"
+            "  score: -1.0 to +1.0 (negative = bearish, positive = bullish, 0 = neutral)\n"
+            "  durability: one of \"oneTime\", \"stage1\", \"terminal\"\n"
+            "  confidence: one of \"low\", \"med\", \"high\"\n"
+            "  reason: under 60 characters\n"
+            "If the headline is generic press-release filler or unrelated, "
+            "return score=0 and confidence=low."
+        )
+        body = {
+            "model":      "claude-haiku-4-5-20251001",
+            "max_tokens": 150,
+            "messages":   [{"role": "user", "content": prompt}],
+        }
+        resp = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key":         api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type":      "application/json",
+            },
+            json=body, timeout=8,
+        )
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        # Pull the text content out of the messages response shape
+        txt = ""
+        for block in data.get("content", []):
+            if block.get("type") == "text":
+                txt += block.get("text", "")
+        # Find the JSON object in the response (Claude sometimes wraps it)
+        import json as _json_loads
+        m = re.search(r"\{[^{}]*\}", txt)
+        if not m:
+            return None
+        parsed = _json_loads.loads(m.group(0))
+        # Normalize + clamp
+        result = {
+            "score":      max(-1.0, min(1.0, float(parsed.get("score", 0.0)))),
+            "durability": str(parsed.get("durability", "oneTime")),
+            "confidence": str(parsed.get("confidence", "low")),
+            "reason":     str(parsed.get("reason", ""))[:60],
+        }
+        _CLAUDE_INTERP_CACHE[cache_key] = (time.time(), result)
+        return result
+    except Exception:
+        return None
+
+
+def _score_headline(title: str, summary: str, ticker: str, sector: str, industry: str):
+    """
+    Returns dict { score, durability, is_transformative, matched }.
+    score:        [-1.0, +1.0] aggregate signal
+    durability:   "oneTime" | "stage1" | "terminal"
+    matched:      list of which keyword bucket(s) hit
+    """
+    text = ((title or "") + " " + (summary or "")).lower()
+    s_lower = (sector or "").lower()
+    i_lower = (industry or "").lower()
+
+    is_transformative = any(kw in text for kw in _CATALYST_TRANSFORMATIVE)
+    is_strong         = any(kw in text for kw in _CATALYST_STRONG)
+    is_moderate       = any(kw in text for kw in _CATALYST_MODERATE)
+    is_risk           = any(kw in text for kw in _RISK_KEYWORDS)
+    is_policy_tw      = any(kw in text for kw in _POLICY_TAILWIND_KEYWORDS)
+    is_policy_hw      = any(kw in text for kw in _POLICY_HEADWIND_KEYWORDS)
+
+    # Base score by strongest match
+    score = 0.0
+    matched = []
+    if is_transformative: score = max(score, 0.6); matched.append("transformative")
+    if is_strong:         score = max(score, 0.4); matched.append("strong")
+    if is_moderate:       score = max(score, 0.2); matched.append("moderate")
+    if is_policy_tw:      score = max(score, 0.35); matched.append("policy_tw")
+    if is_risk:           score = min(score - 0.4, score); matched.append("risk")
+    if is_policy_hw:      score = min(score - 0.3, score); matched.append("policy_hw")
+
+    # Sector context modulation: a "first commercial ride" headline on JOBY
+    # (eVTOL) is high-signal; the same headline on AAPL is generic noise.
+    sector_match_bonus = 1.0
+    if is_transformative:
+        # eVTOL keywords on industrial/aerospace sectors get amplified
+        if any(kw in text for kw in ["air taxi", "evtol", "part 135", "passenger flight"]):
+            sector_match_bonus = 1.5 if ("aerospace" in i_lower or "air" in i_lower) else 0.6
+        # Semi keywords on tech sectors
+        elif any(kw in text for kw in ["tape-out", "hbm", "first silicon", "yield ramp"]):
+            sector_match_bonus = 1.5 if ("semiconductor" in i_lower or "electronic" in i_lower) else 0.5
+        # Biotech keywords on healthcare sectors
+        elif any(kw in text for kw in ["bla filing", "phase 3", "fda priority", "breakthrough therapy"]):
+            sector_match_bonus = 1.5 if ("biotech" in i_lower or "drug" in i_lower or "pharma" in i_lower) else 0.6
+        # Energy keywords on energy sectors
+        elif any(kw in text for kw in ["ppa signed", "datacenter ppa", "reactor restart", "haleu"]):
+            sector_match_bonus = 1.5 if ("energy" in s_lower or "utilities" in s_lower) else 0.7
+
+    # Co-occurrence bonuses
+    if "billion" in text and ("contract" in text or "deal" in text):
+        sector_match_bonus *= 1.2
+    if is_risk and any(kw in text for kw in ["doj", "department of justice", "antitrust"]):
+        score -= 0.15  # criminal/antitrust is heavier than civil
+
+    score *= sector_match_bonus
+
+    # Negation: flip sign if a negation token appears alongside a positive match
+    if any(neg in text for neg in _NEGATION_TOKENS):
+        if score > 0:
+            score = -abs(score) * 0.6
+            matched.append("negated")
+
+    # Clamp to [-1, +1]
+    score = max(-1.0, min(1.0, score))
+
+    # Durability: transformatives drive Stage-1 growth (2-3 yr lift), strong
+    # catalysts drive a one-time IV multiplier, policy tailwinds can drive
+    # terminal (longer-duration) shifts.
+    if is_transformative and score > 0:
+        durability = "stage1"
+    elif is_policy_tw and score > 0.3:
+        durability = "terminal"
+    else:
+        durability = "oneTime"
+
+    # ── Optional Claude API tie-breaker for ambiguous scores ────────────
+    # When the heuristic lands in the ambiguous band [-0.2, +0.2] AND no
+    # keyword bucket fired, ask Claude to interpret the headline directly.
+    # This is the "model decides on its own" path — turns generic headlines
+    # into structured signal instead of dropping them on the floor.
+    claude_used = False
+    claude_reason = None
+    if -0.2 <= score <= 0.2 and not matched:
+        ai = _claude_interpret_headline(ticker, sector, title, summary)
+        if ai is not None:
+            score = ai["score"]
+            if ai.get("durability") in ("stage1", "terminal", "oneTime"):
+                durability = ai["durability"]
+            if score > 0.4 and durability == "stage1":
+                is_transformative = True
+            claude_used = True
+            claude_reason = ai.get("reason")
+            matched.append("claude")
+
+    return {
+        "score":             round(score, 3),
+        "durability":        durability if not (is_transformative and score > 0) else "stage1",
+        "is_transformative": is_transformative,
+        "matched":           matched,
+        "claude_used":       claude_used,
+        "claude_reason":     claude_reason,
+    }
+
+
 def get_catalyst_insights(ticker: str, info: dict, stock) -> dict:
     """
     Discovery Layer: scan recent news (yfinance) + SEC 8-K filings for catalysts and risks.
@@ -305,6 +542,14 @@ def get_catalyst_insights(ticker: str, info: dict, stock) -> dict:
     # the UI can present "Policy Tailwind" as its own chip.
     policy_tailwind_labels = []
     policy_headwind_labels = []
+    # New-style outputs from the heuristic scorer.  Per-headline scores feed
+    # into a Stage-1 growth lift (transformative durability) on top of the
+    # existing IV multiplier.  Age decay weights newer headlines heavier.
+    news_interpretation     = []
+    growth_catalyst_lift_pp = 0.0
+    transformative_labels   = []
+    sector_for_score   = (info or {}).get("sector", "")
+    industry_for_score = (info or {}).get("industry", "")
     seven_days_ago    = now - 7 * 86400
 
     # ── 1. yfinance news ─────────────────────────────────────────────────────
@@ -351,8 +596,34 @@ def get_catalyst_insights(ticker: str, info: dict, stock) -> dict:
             if is_policy_hw and len(policy_headwind_labels) < 3:
                 policy_headwind_labels.append(raw_title[:80])
 
+            # ── Heuristic scorer + age-weighted growth lift ─────────────
+            # Each headline produces a smooth [-1, +1] score.  Age decay
+            # weights a 1-day-old headline at full strength, a 6-day-old
+            # at ~14%.  Transformative catalysts (durability=stage1) feed
+            # growth_catalyst_lift_pp, capped at +3pp.
+            pub_ts = item.get("providerPublishTime", 0)
+            age_days = max(0.0, (now - pub_ts) / 86400.0) if pub_ts else 7.0
+            age_weight = max(0.0, 1.0 - age_days / 7.0)
+            interp = _score_headline(raw_title, raw_snippet, ticker,
+                                     sector_for_score, industry_for_score)
+            news_interpretation.append({
+                "title":     raw_title[:120],
+                "score":     interp["score"],
+                "weighted":  round(interp["score"] * age_weight, 3),
+                "durability": interp["durability"],
+                "age_days":  round(age_days, 1),
+                "matched":   interp["matched"],
+                "claude_used":   interp.get("claude_used", False),
+                "claude_reason": interp.get("claude_reason"),
+            })
+            if interp["is_transformative"] and interp["score"] > 0:
+                lift = 3.0 * (interp["score"]) * age_weight   # max +3pp
+                if lift > growth_catalyst_lift_pp:
+                    growth_catalyst_lift_pp = lift
+                    if len(transformative_labels) < 3:
+                        transformative_labels.append(raw_title[:80])
+
             if len(insights) < 3:
-                pub_ts   = item.get("providerPublishTime", 0)
                 date_str = datetime.fromtimestamp(pub_ts).strftime("%b %d") if pub_ts else ""
                 headline = raw_title[:100]
                 insights.append(f"{date_str}: {headline}" if date_str else headline)
@@ -390,6 +661,28 @@ def get_catalyst_insights(ticker: str, info: dict, stock) -> dict:
             if is_policy_hw and len(policy_headwind_labels) < 3:
                 policy_headwind_labels.append(f"SEC 8-K: {f['title'][:70]}")
 
+            # SEC 8-K headlines also feed the heuristic scorer.  We don't
+            # have a publish timestamp here, so age_weight defaults to 1.0
+            # (8-Ks are by definition recent and material).
+            interp_8k = _score_headline(f["title"], f["summary"], ticker,
+                                        sector_for_score, industry_for_score)
+            news_interpretation.append({
+                "title":      f"SEC 8-K: {f['title'][:100]}",
+                "score":      interp_8k["score"],
+                "weighted":   interp_8k["score"],
+                "durability": interp_8k["durability"],
+                "age_days":   None,
+                "matched":    interp_8k["matched"],
+                "claude_used":   interp_8k.get("claude_used", False),
+                "claude_reason": interp_8k.get("claude_reason"),
+            })
+            if interp_8k["is_transformative"] and interp_8k["score"] > 0:
+                lift = 3.0 * interp_8k["score"]
+                if lift > growth_catalyst_lift_pp:
+                    growth_catalyst_lift_pp = lift
+                    if len(transformative_labels) < 3:
+                        transformative_labels.append(f"SEC 8-K: {f['title'][:70]}")
+
             # Include filing as insight bullet if room remains
             if len(insights) < 3 and f["date"] and f["title"]:
                 insights.append(f"SEC 8-K ({f['date']}): {f['title'][:90]}")
@@ -407,6 +700,13 @@ def get_catalyst_insights(ticker: str, info: dict, stock) -> dict:
                 f"({n_analysts} analysts)"
             )
 
+    # Cap the growth lift at +3pp.  Stage-1 ceiling guard later in the
+    # pipeline (effective_max_s1) provides the second line of defense.
+    growth_catalyst_lift_pp = max(0.0, min(growth_catalyst_lift_pp, 3.0))
+    # Sort interpretations by absolute weighted score so the top signal
+    # surfaces first in the UI.
+    news_interpretation.sort(key=lambda x: -abs(x.get("weighted", 0.0)))
+
     result = {
         "insights":              insights[:3],
         "momentum_premium":      round(momentum_premium, 3),
@@ -421,6 +721,12 @@ def get_catalyst_insights(ticker: str, info: dict, stock) -> dict:
         "policy_tailwind_labels":  policy_tailwind_labels[:3],
         "policy_headwind":         bool(policy_headwind_labels),
         "policy_headwind_labels":  policy_headwind_labels[:3],
+        # New: model-decides-on-its-own outputs.  The IV pipeline reads
+        # growth_catalyst_lift_pp at the Stage-1 assignment; the UI
+        # surfaces news_interpretation as per-headline score chips.
+        "growth_catalyst_lift_pp": round(growth_catalyst_lift_pp, 2),
+        "transformative_labels":   transformative_labels,
+        "news_interpretation":     news_interpretation[:8],
     }
     _catalyst_cache[ticker] = {"ts": now, "data": result}
     return result
@@ -702,6 +1008,99 @@ def calc_multiples_val(info, sector, industry, fx_rate, ebitda_ttm=None, moat_pr
             return round(eq_val / shares, 2), f"EV/EBITDA ({ev_ebitda_mult:.0f}x sector median{premium_tag})"
 
     return None, None
+
+
+# ── Sanity envelope clamp (used by every IV-producing path) ────────────────
+# Promotes the previous one-sided post-DCF clamp into a true bounded envelope:
+# floor at 5% of price (or $0.01), ceiling at 6× price OR 2.5× analyst target,
+# whichever is higher.  Catches both the "19,000% MOS" upper-tail nonsense and
+# the "IV = 0.01 on a healthy stock" lower-tail nonsense — a single function
+# every IV-generating path goes through, eliminating bypass routes.
+def _clamp_iv(iv, price, analyst_target=None):
+    """
+    Returns clamped IV, or None if inputs are unusable.
+    Caller should rescale scenarios in lockstep using the returned ratio.
+    """
+    if iv is None or price is None or price <= 0:
+        return iv
+    floor = max(price * 0.05, 0.01)
+    ceil_base = price * 6.0
+    if analyst_target and analyst_target > 0:
+        ceil_base = max(ceil_base, analyst_target * 2.5)
+    return max(min(iv, ceil_base), floor)
+
+
+# ── Emergency IV Cascade ────────────────────────────────────────────────────
+# Last-resort valuation when every primary path (DCF, multiples, sultan-split)
+# has failed.  The cascade tries four progressively-weaker but always-defensible
+# methods; only returns None if nothing usable exists, in which case the
+# response will fall back to price itself + a "data unavailable" note.
+#
+# Methods (highest preference first):
+#   1. Analyst Target — when analyst consensus exists, use it.  Defensible
+#      because it represents real coverage opinion even if our model can't run.
+#   2. Cash-Only Distress Proxy — (cash - debt) / shares.  For deeply broken
+#      companies this is a liquidation-style anchor.
+#   3. Distressed P/B — 0.5× book value per share.  For banks and negative-
+#      equity names where book is the most stable available signal.
+#   4. P/Revenue — 1.0× sector-median EV/Revenue × TTM revenue / shares.
+#      Last resort for REITs / ADRs / BDCs where FCF and earnings both fail.
+def _emergency_iv(info, fx_rate, sector, industry, analyst_target_price=None):
+    """
+    Returns (iv, label, confidence) — confidence always "low".
+    iv is clamped only at the call site via _clamp_iv (we don't know price here).
+    Returns (None, None, None) if absolutely no signal can be produced.
+    """
+    shares = safe(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"), 0) or 0
+
+    # 1) Analyst target — most defensible last-resort
+    if analyst_target_price and analyst_target_price > 0:
+        return float(analyst_target_price), "Analyst Target (last-resort)", "low"
+
+    # 2) Cash-only distress proxy — useful when book is impaired
+    cash = (safe(info.get("totalCash"), 0) or 0) * fx_rate
+    debt = (safe(info.get("totalDebt"), 0) or 0) * fx_rate
+    if shares > 0:
+        cash_only = (cash - debt) / shares
+        if cash_only > 0.01:
+            return round(cash_only, 2), "Cash-Only (distress proxy)", "low"
+
+    # 3) Distressed P/B — for banks / neg-equity names
+    book_per_share = safe(info.get("bookValue"))
+    if book_per_share and book_per_share > 0:
+        # 0.4× for banks (more conservative), 0.5× for everything else
+        s_lower = (sector or "").lower()
+        i_lower = (industry or "").lower()
+        is_bank = ("bank" in i_lower or "financial" in s_lower or "insurance" in i_lower)
+        mult = 0.4 if is_bank else 0.5
+        return round(book_per_share * mult, 2), "Distressed P/B", "low"
+
+    # 4) Price/Revenue floor — sector median EV/Revenue × TTM revenue / shares
+    revenue_ttm = safe(info.get("totalRevenue"))
+    if revenue_ttm and revenue_ttm > 0 and shares > 0:
+        rev_usd = revenue_ttm * fx_rate
+        # Crude sector EV/Revenue median table.  Conservative — these are
+        # floors, not targets.  Tech ~3x, Energy ~1x, Banks N/A.
+        s_lower = (sector or "").lower()
+        if "technology" in s_lower or "communication" in s_lower:
+            ev_rev = 3.0
+        elif "consumer" in s_lower or "retail" in s_lower:
+            ev_rev = 1.5
+        elif "healthcare" in s_lower:
+            ev_rev = 2.5
+        elif "energy" in s_lower or "utilities" in s_lower:
+            ev_rev = 1.0
+        elif "financial" in s_lower or "real estate" in s_lower:
+            ev_rev = 1.5
+        else:
+            ev_rev = 1.5
+        ev_implied = rev_usd * ev_rev
+        net_debt = debt - cash
+        eq_val   = ev_implied - net_debt
+        if eq_val > 0:
+            return round(eq_val / shares, 2), f"P/Revenue (sector ~{ev_rev:.1f}x median)", "low"
+
+    return None, None, None
 
 
 def _bear_floor_iv(info, sector, industry, fx_rate, ebitda_ttm=None):
@@ -1324,6 +1723,15 @@ STRATEGIC_ASSETS = {
     "MP":   ("critical_material", "Mountain Pass — only operating US rare-earth mine and processor · DPA Title III funded."),
     "LEU":  ("critical_material", "Sole US uranium enrichment producer · DOE HALEU contracts for next-gen reactors."),
     "BWXT": ("critical_material", "Sole supplier of US Navy nuclear reactors and components."),
+
+    # ── Tier 5: Urban Air Mobility (Pre-revenue / emerging franchises) ────
+    # Smaller WACC delta + larger ceiling lift reflects the speculative
+    # nature — these are franchise bets, not mature cash flows.  IV floor
+    # is lower (0.75) because pure DCF on pre-revenue eVTOL is meaningless;
+    # the model leans on analyst targets + transformative catalysts.
+    "JOBY": ("urban_air_mobility", "First eVTOL operator with FAA Part 135 air-carrier certificate · Toyota and Delta backing · NYC commercial launch · airworthiness criteria finalized."),
+    "ACHR": ("urban_air_mobility", "Stellantis manufacturing partnership · United Airlines order book · UAE deployment underway · Type Cert progress on schedule."),
+    "RKLB": ("urban_air_mobility", "Sole-source US small-launch alternative to SpaceX · DoD STP-S29 mission · Neutron rocket development · expanding government revenue mix."),
 }
 
 # Tier-level effects.  Strategic premium is meaningful but bounded — these
@@ -1336,6 +1744,10 @@ _STRATEGIC_TIER_DELTAS = {
     "defense_prime":      (-0.005, 0.02, 0.90, "Defense Prime"),
     "energy_sovereignty": (-0.0075, 0.03, 0.88, "Energy Sovereignty"),
     "critical_material":  (-0.010, 0.05, 0.85, "Critical Materials"),
+    # UAM is speculative — smaller WACC delta but higher ceiling lift
+    # (these are pre-revenue franchises where growth is the whole thesis).
+    # IV floor is lower because pure DCF on pre-revenue eVTOL is meaningless.
+    "urban_air_mobility": (-0.0050, 0.08, 0.75, "Urban Air Mobility"),
 }
 
 
@@ -3086,6 +3498,58 @@ def history():
         return jsonify({"error": "Couldn't load price history. Try again."}), 500
 
 
+# ── Live quote endpoint (fast tier — price ticks only) ─────────────────────
+# Lightweight companion to /api/analyze.  Uses yfinance fast_info["lastPrice"]
+# which is dramatically cheaper than a full info dict pull (no DCF, no news,
+# no balance sheet).  Designed for 30s polling on the heatmap and analyze
+# view so investor demos look alive.  Multi-ticker via comma-separated query
+# string; parallelized with the same ThreadPoolExecutor pattern as discover.
+_QUOTE_CACHE = {}        # {ticker: (timestamp, payload)}
+_QUOTE_CACHE_TTL_S = 30  # short TTL — this is a live-tick endpoint
+
+@app.route("/api/quote")
+def quote():
+    raw = request.args.get("tickers") or request.args.get("ticker") or ""
+    tickers = [t.strip().upper() for t in raw.split(",") if t.strip()]
+    if not tickers:
+        return jsonify({"error": "tickers required"}), 400
+    # Cap to a sane batch size to keep latency bounded
+    tickers = tickers[:120]
+    now = time.time()
+
+    def _fetch(t):
+        cached = _QUOTE_CACHE.get(t)
+        if cached and (now - cached[0]) < _QUOTE_CACHE_TTL_S:
+            return t, cached[1]
+        try:
+            fi = yf.Ticker(t).fast_info
+            price      = float(fi.get("lastPrice") or fi.get("last_price") or 0) or None
+            prev_close = float(fi.get("previousClose") or fi.get("previous_close") or 0) or None
+            change_pct = None
+            if price and prev_close and prev_close > 0:
+                change_pct = round((price - prev_close) / prev_close * 100, 2)
+            payload = {
+                "price":            round(price, 4) if price else None,
+                "prev_close":       round(prev_close, 4) if prev_close else None,
+                "daily_change_pct": change_pct,
+                "ts":               int(now),
+            }
+            _QUOTE_CACHE[t] = (now, payload)
+            return t, payload
+        except Exception:
+            return t, None
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        results = dict(pool.map(_fetch, tickers))
+
+    return jsonify({
+        "quotes":       {t: p for t, p in results.items() if p is not None},
+        "missed":       [t for t, p in results.items() if p is None],
+        "generated_at": int(now),
+    })
+
+
 @app.route("/api/statements")
 def statements():
     ticker = request.args.get("ticker", "").strip().upper()
@@ -3169,6 +3633,8 @@ DISCOVERY_TICKERS = [
     "AMT", "PLD", "EQIX", "NEE", "DUK", "CEG", "VST",
     # Critical Materials & Nuclear
     "MP", "LEU", "BWXT",
+    # Urban Air Mobility — speculative franchise bets
+    "JOBY", "ACHR", "RKLB",
 ]
 
 @app.route("/api/discover")
@@ -3226,6 +3692,13 @@ def discover():
                 "strategic_label": d.get("strategic_label"),
                 "policy_tailwind": bool(d.get("policy_tailwind")),
                 "policy_headwind": bool(d.get("policy_headwind")),
+                # Treemap-relevant: cell sizing (sqrt of mcap) + secondary
+                # daily-move signal.  Both already computed inside analyze.
+                "market_cap":        d.get("market_cap"),
+                "prev_close":        d.get("previous_close"),
+                "daily_change_pct":  d.get("daily_change_pct"),
+                "iv_confidence":     d.get("iv_confidence"),
+                "iv_source_label":   d.get("iv_source_label"),
             }
         except Exception:
             return None
@@ -3240,6 +3713,69 @@ def discover():
         "count": len(out),
         "universe_size": len(DISCOVERY_TICKERS),
         "generated_at": int(now),
+    })
+
+
+# ── Hourly cron: full DCF + news refresh of the discovery universe ─────────
+# Vercel Cron Job hits this every hour to keep _ANALYZE_CACHE warm with
+# fresh DCF + news + strategic-asset evaluation across all 100+ heatmap
+# tickers.  Without this, Vercel's stateless serverless instances would
+# always start cold; this endpoint IS the freshness guarantee for the
+# heatmap when no users are actively browsing.
+#
+# Auth: protected by CRON_SECRET env var.  Vercel injects the secret into
+# the cron request as `Authorization: Bearer <CRON_SECRET>`.  Returns 401
+# if missing — prevents random callers from triggering a 25s lambda.
+@app.route("/api/cron/refresh-heatmap")
+def cron_refresh_heatmap():
+    expected = os.environ.get("CRON_SECRET")
+    if expected:
+        auth = request.headers.get("Authorization", "")
+        if not (auth == f"Bearer {expected}" or
+                request.args.get("secret") == expected):
+            return jsonify({"error": "unauthorized"}), 401
+
+    started = time.time()
+    refreshed = 0
+    failed = []
+
+    def _force_refresh(t):
+        try:
+            ck = _analyze_cache_key(t, {})
+            # Evict any existing cache entry — the cron IS the freshness
+            # guarantee, so we don't trust stale values.
+            _ANALYZE_CACHE.pop(ck, None)
+            with app.test_request_context(f"/api/analyze?ticker={t}"):
+                resp = analyze()
+            if isinstance(resp, tuple):
+                resp = resp[0]
+            d = resp.get_json() if hasattr(resp, "get_json") else None
+            if d and not d.get("error"):
+                return t, True
+            return t, False
+        except Exception:
+            return t, False
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        results = list(pool.map(_force_refresh, DISCOVERY_TICKERS))
+
+    for t, ok in results:
+        if ok:
+            refreshed += 1
+        else:
+            failed.append(t)
+
+    duration_ms = int((time.time() - started) * 1000)
+    app.logger.info(
+        "cron refresh-heatmap: %d/%d ok in %dms",
+        refreshed, len(DISCOVERY_TICKERS), duration_ms
+    )
+    return jsonify({
+        "refreshed":   refreshed,
+        "universe":    len(DISCOVERY_TICKERS),
+        "failed":      failed,
+        "duration_ms": duration_ms,
     })
 
 
@@ -3526,6 +4062,11 @@ def analyze():
         policy_tailwind_labels  = catalyst.get("policy_tailwind_labels", [])
         policy_headwind         = catalyst.get("policy_headwind", False)
         policy_headwind_labels  = catalyst.get("policy_headwind_labels", [])
+        # Transformative-catalyst growth lift — Stage-1 growth bump (in pp,
+        # 0.0–3.0) when a durable industry-specific milestone fires.
+        growth_catalyst_lift_pp = catalyst.get("growth_catalyst_lift_pp", 0.0)
+        transformative_labels   = catalyst.get("transformative_labels", [])
+        news_interpretation     = catalyst.get("news_interpretation", [])
         momentum_applied        = False   # set True when premium is baked into IV
 
         # ── Strategic Asset Classifier ───────────────────────────────────────
@@ -3731,6 +4272,9 @@ def analyze():
         st_robotaxi_s2_applied   = False  # set inside DCF block for structural transformer
         strategic_wacc_delta     = 0.0    # set inside DCF block for strategic asset
         strategic_floor_applied  = False  # set after DCF when strategic floor lifts IV
+        # IV provenance — overwritten as the pipeline progresses to higher-fidelity methods.
+        iv_source_label          = "DCF"  # default; downgraded to "Multiples", "Sultan Split", or emergency labels
+        iv_confidence            = "high" # downgraded to "medium" / "low" by lower-fidelity paths
         net_debt         = ((safe(info.get("totalDebt"), 0) or 0) - (safe(info.get("totalCash"), 0) or 0)) * fx_rate
         # FIN 415 defaults — overridden inside DCF block when data is available
         fin415_used         = False
@@ -3800,6 +4344,21 @@ def analyze():
             else:
                 s1, growth_source = get_forward_growth(stock, info, fcf_series)
                 s1 = min(s1, effective_max_s1)
+                # Transformative-catalyst Stage-1 lift: when a durable
+                # industry-specific milestone fired in the news scan
+                # (eVTOL Part 135, semi tape-out, biotech BLA approval,
+                # etc.), the model lifts Stage-1 growth in addition to
+                # the IV multiplier — reflects 2-3 years of accelerating
+                # revenue, not just a sentiment pop.  Capped at the
+                # sector ceiling so it never produces nonsensical growth.
+                if growth_catalyst_lift_pp > 0:
+                    _s1_pre = s1
+                    s1 = min(s1 + growth_catalyst_lift_pp / 100.0,
+                             effective_max_s1)
+                    if s1 > _s1_pre:
+                        growth_source = (growth_source or "") + (
+                            f" · +{growth_catalyst_lift_pp:.1f}pp transformative-catalyst lift"
+                        )
 
             if s2_ov:
                 _s2_raw = float(s2_ov) / 100 if float(s2_ov) > 1 else float(s2_ov)
@@ -4219,17 +4778,28 @@ def analyze():
             }
             intrinsic_value = round(iv_weighted, 2) if iv_weighted else intrinsic_value
 
-            # Negative equity value: net debt exceeds DCF enterprise value
+            # Negative equity value: net debt exceeds DCF enterprise value.
+            # Don't blank the card — fall through to emergency_iv so the user
+            # gets a defensible distress-anchored IV (analyst target, distressed
+            # P/B, or cash-only proxy) instead of an empty verdict.
             if equity_value is not None and equity_value < 0:
                 dcf_warning = (
                     f"Net debt (${abs(net_debt)/1e9:.1f}B) exceeds DCF enterprise value "
-                    f"(${enterprise_value/1e9:.1f}B) — equity value is technically negative. "
-                    "This means the company's debt load overwhelms the modelled cash flows. "
-                    "Use EV/EBITDA or forward earnings multiples instead of DCF for this security."
+                    f"(${enterprise_value/1e9:.1f}B) — DCF equity value is negative. "
+                    "Showing distress-anchored valuation instead."
                 )
-                intrinsic_value  = None
-                margin_of_safety = None
-                scenarios        = None
+                _e_iv, _e_lbl, _e_conf = _emergency_iv(
+                    info, fx_rate, sector, industry, analyst_target_price)
+                if _e_iv is not None:
+                    intrinsic_value     = _e_iv
+                    iv_source_label     = _e_lbl
+                    iv_confidence       = _e_conf
+                    margin_of_safety    = round((intrinsic_value - price) / price * 100, 1) if price else None
+                    scenarios           = None  # rebuilt by Synthetic Scenarios later
+                else:
+                    intrinsic_value  = None
+                    margin_of_safety = None
+                    scenarios        = None
 
         # ── Sector-Specific Valuation ─────────────────────────────────────────
         # Runs after DCF so we can blend (biotech) or override (banking) as needed.
@@ -4481,6 +5051,10 @@ def analyze():
                 multiples_mos = round((multiples_val - price) / price * 100, 1)
             else:
                 multiples_mos = None
+            if _mult_v is not None:
+                # Multiples is now the primary signal — downgrade confidence
+                iv_source_label = f"Multiples ({_mult_m})" if _mult_m else "Multiples"
+                iv_confidence   = "medium"
         else:
             # ── Low-confidence blend: DCF + Multiples ─────────────────────────
             # When model reliability is low AND multiples are available, blend the
@@ -4495,6 +5069,8 @@ def analyze():
                     f"Low-Confidence Blend: DCF (${_pre_blend_iv:.2f}) 50% + "
                     f"Multiples (${_mult_v:.2f}) 50%"
                 )
+                iv_source_label = "DCF + Multiples (50/50)"
+                iv_confidence   = "medium"
                 if price:
                     margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
                 multiples_mos = round((_mult_v - price) / price * 100, 1) if price else None
@@ -4523,6 +5099,27 @@ def analyze():
                 multiples_reason = (
                     (multiples_reason + " · " if multiples_reason else "")
                     + f"Sultan Split: 90% multiples (${_pre_mv:.2f}) + 10% analyst (${_at_m:.2f})"
+                )
+
+        # ── Emergency IV Cascade ─────────────────────────────────────────────
+        # Last resort: when DCF, multiples, and Sultan Split have all failed,
+        # try the four-tier cascade (analyst target → cash-only → distressed
+        # P/B → sector EV/Revenue).  Guarantees a defensible IV exists for
+        # every analyzed ticker that has a price — pre-revenue biotech, deep
+        # distress, ADRs with no FCF, etc.  Confidence is "low" by design.
+        if intrinsic_value is None:
+            _e_iv, _e_lbl, _e_conf = _emergency_iv(
+                info, fx_rate, sector, industry, analyst_target_price)
+            if _e_iv is not None:
+                intrinsic_value  = _e_iv
+                iv_source_label  = _e_lbl
+                iv_confidence    = _e_conf
+                if price:
+                    margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
+                # Add a note so the UI surfaces what just happened
+                multiples_reason = (
+                    (multiples_reason + " · " if multiples_reason else "")
+                    + f"Emergency cascade: {_e_lbl}"
                 )
 
         # ── Universal Scenario Synthesis ──────────────────────────────────────
@@ -4601,18 +5198,14 @@ def analyze():
                     scenarios["weighted_upside"] = round((scenarios["weighted"] - price) / price * 100, 1) if price else None
 
         # ── IV Sanity Clamp ───────────────────────────────────────────────────
-        # After all premium stacking (moat / cash-rich / momentum / debt) the
-        # IV can drift into nonsense territory for fragile-input names — small
-        # ADRs, tickers with one-period FCF history, share-class quirks.  Cap
-        # IV between 0.05× and 6× current price.  Anything beyond that is
-        # almost certainly a data artefact, not a real valuation insight, and
-        # showing it to investors as a "Priced for Discount" stock with a
-        # 19,000% upside number is the bug we're fixing here.
+        # Single chokepoint every IV-producing path goes through.  Floor at
+        # 5% of price (or $0.01); ceiling at max(6× price, 2.5× analyst target).
+        # Catches nonsense in both directions: 19,000% MOS upper-tail bugs
+        # AND $0.01 IVs from a broken multiples calc on the lower-tail.
+        # Applied AFTER emergency_iv too — it's the universal sanity envelope.
         if intrinsic_value is not None and price and price > 0:
             _iv_pre_clamp = intrinsic_value
-            _iv_ceiling   = price * 6.0
-            _iv_floor     = price * 0.05
-            intrinsic_value = max(min(intrinsic_value, _iv_ceiling), _iv_floor)
+            intrinsic_value = _clamp_iv(intrinsic_value, price, analyst_target_price)
             if intrinsic_value != _iv_pre_clamp:
                 margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
                 if scenarios:
@@ -4971,6 +5564,13 @@ def analyze():
             "peg_ratio":     f2(peg),
             "eps":           f2(info.get("trailingEps")),
             "market_cap":    f2(mcap),
+            "previous_close": f2(info.get("regularMarketPreviousClose") or info.get("previousClose")),
+            "daily_change_pct": (
+                round((price - (info.get("regularMarketPreviousClose") or info.get("previousClose") or price)) /
+                      (info.get("regularMarketPreviousClose") or info.get("previousClose") or price) * 100, 2)
+                if price and (info.get("regularMarketPreviousClose") or info.get("previousClose"))
+                else None
+            ),
             "volume":        safe(info.get("volume")),
             "avg_volume":    safe(info.get("averageVolume")),
             "dividend_yield": dividend_yield,
@@ -5131,6 +5731,13 @@ def analyze():
             "policy_tailwind_labels":    policy_tailwind_labels,
             "policy_headwind":           policy_headwind,
             "policy_headwind_labels":    policy_headwind_labels,
+            # ── IV provenance + confidence (never-zero guarantee) ─────────
+            "iv_source_label":           iv_source_label,
+            "iv_confidence":             iv_confidence,
+            # ── Autonomous news interpretation ────────────────────────────
+            "growth_catalyst_lift_pp":   round(growth_catalyst_lift_pp, 2),
+            "transformative_labels":     transformative_labels,
+            "news_interpretation":       news_interpretation,
         }
 
         cleaned = clean(result)

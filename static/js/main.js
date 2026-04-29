@@ -176,9 +176,20 @@ function hideError() { $("error").classList.add("hidden"); }
 
 let _LAST_DATA = null;
 
+// Polling handle for live-tick on the analyze view (single ticker).
+let _ANALYZE_TICK_TIMER = null;
+
 function renderResults(d) {
   _LAST_DATA = d;
   $("results").classList.remove("hidden");
+
+  // Live-tick the analyze view: poll /api/quote every 30s for the displayed
+  // ticker and patch price + MOS in place.  IV is stable until the next
+  // hourly cron refresh, so client-side recompute is cheap and accurate.
+  if (_ANALYZE_TICK_TIMER) clearInterval(_ANALYZE_TICK_TIMER);
+  if (d && d.ticker) {
+    _ANALYZE_TICK_TIMER = setInterval(() => refreshAnalyzeTick(d.ticker), 30000);
+  }
 
   // Reset scenario chart back to base for each new analysis
   _DCF_CHART_SCENARIO = "base";
@@ -453,6 +464,15 @@ function renderHeroVerdict(d) {
                   : (raw != null && raw < -99) ? "−99%"
                   : fmtPct(mos);
       pctEl.innerHTML = `${label}<span class="mos-confidence-chip" title="MOS clamped — raw model output exceeds ±100%. Inputs may be mispriced (forward-earnings spike, share-class mismatch, stale data). Treat as low-confidence.">Low Conf</span>`;
+    } else if (d.iv_confidence === "low" || d.iv_confidence === "medium") {
+      // Surface emergency / multiples-only IV provenance — investors should
+      // know when the model is leaning on analyst targets / cash-only / P/B
+      // rather than full DCF.
+      const conf = d.iv_confidence === "low" ? "Low Conf" : "Medium";
+      const tip  = d.iv_source_label
+        ? `Source: ${d.iv_source_label}. DCF was unavailable or low-confidence — IV anchored to a fallback method.`
+        : "IV from a fallback method (multiples, analyst target, distressed P/B, etc.).";
+      pctEl.innerHTML = `${fmtPct(mos)}<span class="mos-confidence-chip" title="${tip.replace(/"/g, "&quot;")}">${conf}</span>`;
     } else {
       pctEl.textContent = fmtPct(mos);
     }
@@ -2405,6 +2425,12 @@ function tierColor(tier) {
   return map[bucket] || map.neutral;
 }
 
+// Live-refresh interval handles for the heatmap.  Set in openDiscoverPage,
+// cleared in closeDiscoverPage so polling stops when the user leaves.
+let _DISC_PRICE_TIMER = null;        // 30s fast-tier price ticks
+let _DISC_DEEP_TIMER  = null;        // 60min deep-tier full /api/discover refresh
+let _DISC_PRICES_LAST_UPDATE = 0;   // for the "Prices: Xs ago" badge
+
 async function openDiscoverPage() {
   hideAllViews();
   $("discoverPage").classList.remove("hidden");
@@ -2414,11 +2440,22 @@ async function openDiscoverPage() {
   } else {
     renderDiscover();
   }
+  // Fast tier: poll /api/quote every 30s while the heatmap is open.
+  if (_DISC_PRICE_TIMER) clearInterval(_DISC_PRICE_TIMER);
+  _DISC_PRICE_TIMER = setInterval(refreshDiscoverPrices, 30000);
+  // Deep tier: full /api/discover re-fetch every hour to pick up the
+  // hourly cron's fresh DCF + news evaluation.
+  if (_DISC_DEEP_TIMER) clearInterval(_DISC_DEEP_TIMER);
+  _DISC_DEEP_TIMER = setInterval(loadDiscover, 60 * 60 * 1000);
+  // Update the freshness badge once a second so "Prices: Xs ago" ticks.
+  startFreshnessTicker();
 }
 
 function closeDiscoverPage() {
   $("discoverPage").classList.add("hidden");
   document.querySelector(".hero")?.classList.remove("hidden");
+  if (_DISC_PRICE_TIMER) { clearInterval(_DISC_PRICE_TIMER); _DISC_PRICE_TIMER = null; }
+  if (_DISC_DEEP_TIMER)  { clearInterval(_DISC_DEEP_TIMER);  _DISC_DEEP_TIMER  = null; }
 }
 
 async function loadDiscover() {
@@ -2481,7 +2518,10 @@ function renderDiscover(failed = false) {
     if (ageS < 3600) return `${Math.round(ageS/60)}m ago`;
     return `${Math.round(ageS/3600)}h ago`;
   }
-  grid.innerHTML = items.map(it => {
+
+  // Renders a single ticker cell.  Reused by both the treemap and the
+  // mobile-grid fallback so the cell content + interactions are identical.
+  function renderCell(it, sizeMode = "grid", sizeBasis = null) {
     const c = tierColor(it.tier);
     const mos = it.mos != null ? fmtPct(it.mos) : "—";
     const cap = it.mos != null ? Math.min(Math.abs(it.mos), 100) : 50;
@@ -2494,9 +2534,15 @@ function renderDiscover(failed = false) {
       : it.policy_headwind
       ? `<span class="disc-cell__policy disc-cell__policy--down" title="Policy headwind in recent news">⬊ POLICY</span>`
       : "";
+    // sizeMode === "treemap": cell flex-basis is proportional to sqrt(mcap)
+    // so a $3T name is ~4× the area of a $200B name; linear scaling crushes
+    // small caps to single pixels.  Min-width ensures readability at all sizes.
+    const sizeStyle = (sizeMode === "treemap" && sizeBasis != null)
+      ? `flex:${sizeBasis} 1 ${Math.max(120, sizeBasis * 30)}px;min-width:120px;min-height:${Math.max(86, Math.min(180, 60 + sizeBasis * 8))}px;`
+      : "";
     return `
-      <div class="disc-cell" data-disc-ticker="${escHtml(it.ticker)}"
-           style="--tier-accent:${c.accent};--tier-strong:${c.strong};--tier-glow:${c.glow};">
+      <div class="disc-cell ${sizeMode === "treemap" ? "disc-cell--tm" : ""}" data-disc-ticker="${escHtml(it.ticker)}"
+           style="--tier-accent:${c.accent};--tier-strong:${c.strong};--tier-glow:${c.glow};${sizeStyle}">
         ${stratIcon}
         ${policyChip}
         ${age ? `<span class="disc-cell__age" title="Cached snapshot">${escHtml(age)}</span>` : ""}
@@ -2509,7 +2555,48 @@ function renderDiscover(failed = false) {
         <div class="disc-cell__bar"><div class="disc-cell__bar-fill" style="width:${cap}%"></div></div>
       </div>
     `;
-  }).join("");
+  }
+
+  // Treemap mode: group by sector, size cells by sqrt(market_cap).  Falls
+  // back to the uniform grid when (a) viewport is narrow (<640px), or
+  // (b) market_cap data isn't available on the items.
+  const isMobile = window.matchMedia("(max-width: 640px)").matches;
+  const haveMcap = items.some(it => it.market_cap != null && it.market_cap > 0);
+  const useTreemap = haveMcap && !isMobile && _DISC_SORT !== "ticker";
+
+  if (useTreemap) {
+    // Group by sector while preserving sort order within each group.
+    const bySector = new Map();
+    for (const it of items) {
+      const sec = it.sector || "Other";
+      if (!bySector.has(sec)) bySector.set(sec, []);
+      bySector.get(sec).push(it);
+    }
+    // Order sectors by total mcap descending so the biggest groups go top.
+    const sectorList = [...bySector.entries()]
+      .map(([sec, arr]) => [sec, arr, arr.reduce((s, it) => s + (it.market_cap || 0), 0)])
+      .sort((a, b) => b[2] - a[2]);
+    grid.classList.add("disc-grid--treemap");
+    grid.innerHTML = sectorList.map(([sec, arr]) => {
+      // Compute flex bases as sqrt(mcap), normalized so cells are comparable
+      // across sectors (a $3T Tech and $3T Healthcare should look similar).
+      const cells = arr.map(it => {
+        const basis = it.market_cap ? Math.sqrt(it.market_cap / 1e9) : 1.0;
+        return renderCell(it, "treemap", Math.max(0.5, basis));
+      }).join("");
+      return `
+        <div class="disc-sector">
+          <div class="disc-sector__head">
+            <span class="disc-sector__name">${escHtml(sec)}</span>
+            <span class="disc-sector__count">${arr.length}</span>
+          </div>
+          <div class="disc-sector__cells">${cells}</div>
+        </div>`;
+    }).join("");
+  } else {
+    grid.classList.remove("disc-grid--treemap");
+    grid.innerHTML = items.map(it => renderCell(it, "grid")).join("");
+  }
 
   grid.querySelectorAll(".disc-cell").forEach(cell => {
     cell.onclick = () => {
@@ -2519,6 +2606,116 @@ function renderDiscover(failed = false) {
       analyze(t);
     };
   });
+}
+
+// Fast-tier refresh: hits /api/quote, recomputes MOS client-side using the
+// stable IV from _DISC_DATA, patches each cell's price + MOS in place
+// without a relayout (treemap sizing stays anchored to mcap, not MOS).
+async function refreshDiscoverPrices() {
+  if (_DISC_DATA.length === 0) return;
+  const tickers = _DISC_DATA.map(it => it.ticker).filter(Boolean);
+  if (tickers.length === 0) return;
+  try {
+    const res = await fetch(`/api/quote?tickers=${encodeURIComponent(tickers.join(","))}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const quotes = data.quotes || {};
+    let touched = 0;
+    for (const it of _DISC_DATA) {
+      const q = quotes[it.ticker];
+      if (!q || q.price == null) continue;
+      it.price = q.price;
+      it.daily_change_pct = q.daily_change_pct;
+      if (it.iv != null && q.price > 0) {
+        it.mos = Math.max(Math.min((it.iv - q.price) / q.price * 100, 200), -99);
+      }
+      touched++;
+      // Patch the visible cell in place — no full re-render.
+      const cell = document.querySelector(`.disc-cell[data-disc-ticker="${it.ticker}"]`);
+      if (cell) {
+        const mosEl = cell.querySelector(".disc-cell__mos");
+        if (mosEl && it.mos != null) mosEl.textContent = fmtPct(it.mos);
+        const fill = cell.querySelector(".disc-cell__bar-fill");
+        if (fill && it.mos != null) fill.style.width = `${Math.min(Math.abs(it.mos), 100)}%`;
+      }
+    }
+    if (touched > 0) {
+      _DISC_PRICES_LAST_UPDATE = Date.now();
+      updateFreshnessBadge();
+    }
+  } catch { /* swallow — next tick will retry */ }
+}
+
+// Live-tick on the analyze view.  Hits /api/quote for the single displayed
+// ticker, recomputes MOS using the cached IV, and patches the hero card
+// (price, MOS%, MOS bar) without re-running the full DCF.
+async function refreshAnalyzeTick(ticker) {
+  if (!ticker || !_LAST_DATA) return;
+  try {
+    const res = await fetch(`/api/quote?ticker=${encodeURIComponent(ticker)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const q = (data.quotes || {})[ticker];
+    if (!q || q.price == null) return;
+    const iv = _LAST_DATA.intrinsic_value;
+    if (iv == null) return;
+    const newMos = Math.max(Math.min((iv - q.price) / q.price * 100, 200), -99);
+    _LAST_DATA.current_price = q.price;
+    _LAST_DATA.margin_of_safety = newMos;
+    // Patch the visible header in place.  No animateNumber call — the
+    // periodic update should be subtle, not draw the eye every tick.
+    const priceEl = document.getElementById("vPrice");
+    if (priceEl) priceEl.textContent = fmtPrice(q.price);
+    const pctEl = document.getElementById("vMosPct");
+    if (pctEl && !_LAST_DATA.extreme_mos_flag) pctEl.textContent = fmtPct(newMos);
+    const fillEl = document.getElementById("vMosFill");
+    if (fillEl) {
+      const cap = Math.min(Math.abs(newMos), 100);
+      fillEl.style.width = `${cap / 2}%`;
+      if (newMos >= 0) {
+        fillEl.style.left = "50%"; fillEl.style.right = "auto";
+        fillEl.classList.add("positive"); fillEl.classList.remove("negative");
+      } else {
+        fillEl.style.right = "50%"; fillEl.style.left = "auto";
+        fillEl.classList.add("negative"); fillEl.classList.remove("positive");
+      }
+    }
+  } catch { /* silent — next tick retries */ }
+}
+
+// Updates "Prices: Xs ago" + "Model: Xm ago" badge text.  Called by
+// startFreshnessTicker every second and after each quote refresh.
+function updateFreshnessBadge() {
+  const badge = document.getElementById("discFreshness");
+  if (!badge) return;
+  const priceAge = _DISC_PRICES_LAST_UPDATE
+    ? Math.round((Date.now() - _DISC_PRICES_LAST_UPDATE) / 1000)
+    : null;
+  const modelAgeS = _DISC_DATA.length
+    ? Math.min(...(_DISC_DATA.map(it => it.age_seconds).filter(a => a != null)))
+    : null;
+  const fmtAge = (s) => {
+    if (s == null || isNaN(s)) return "—";
+    if (s < 60) return `${s}s ago`;
+    if (s < 3600) return `${Math.round(s / 60)}m ago`;
+    return `${Math.round(s / 3600)}h ago`;
+  };
+  // Color the model freshness chip green/amber/red based on the cron health.
+  const modelCls = modelAgeS == null ? "freshness--unknown"
+                 : modelAgeS < 30 * 60 ? "freshness--good"
+                 : modelAgeS < 90 * 60 ? "freshness--warn"
+                 : "freshness--stale";
+  badge.innerHTML = `
+    <span class="freshness-chip">Prices: ${fmtAge(priceAge)}</span>
+    <span class="freshness-chip ${modelCls}">Model: ${fmtAge(modelAgeS)}</span>
+  `;
+}
+
+let _FRESHNESS_TICKER = null;
+function startFreshnessTicker() {
+  if (_FRESHNESS_TICKER) clearInterval(_FRESHNESS_TICKER);
+  _FRESHNESS_TICKER = setInterval(updateFreshnessBadge, 1000);
+  updateFreshnessBadge();
 }
 
 function setupDiscover() {
@@ -2668,6 +2865,11 @@ function hideAllViews() {
                                                    // leaderboard + discover
                                                    // to stack visually
   $("loading")?.classList.add("hidden");
+  // Stop any live polling tied to the analyze hero — it's no longer visible.
+  if (typeof _ANALYZE_TICK_TIMER !== "undefined" && _ANALYZE_TICK_TIMER) {
+    clearInterval(_ANALYZE_TICK_TIMER);
+    _ANALYZE_TICK_TIMER = null;
+  }
   $("error")?.classList.add("hidden");
   document.querySelector(".hero")?.classList.add("hidden");
 }
