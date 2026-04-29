@@ -2162,10 +2162,12 @@ def _build_verdict_summary(ticker, priced_for, implied_growth_pct, model_growth_
     has_growth = (implied_growth_pct is not None and model_growth_pct is not None
                   and abs(model_growth_pct) > 0.5)
     if has_growth and mos is not None:
-        gap = implied_growth_pct - model_growth_pct
+        gap_pp = implied_growth_pct - model_growth_pct
         if mos > 5:
-            # MODEL SAYS UNDERVALUED — explain market is being conservative.
-            # Avoid quoting a literal 0.0% — read as if the company is dying.
+            # MODEL SAYS UNDERVALUED — market is being conservative.
+            # Two separate facts: (1) growth-rate gap, (2) price gap.  We
+            # state them as distinct sentences so the reader doesn't try
+            # to derive 2 from 1 with arithmetic that doesn't add up.
             if implied_growth_pct < -1:
                 ig_txt = f"contracting {abs(implied_growth_pct):.1f}%/yr"
             elif implied_growth_pct < 2:
@@ -2175,19 +2177,22 @@ def _build_verdict_summary(ticker, priced_for, implied_growth_pct, model_growth_
             else:
                 ig_txt = f"~{implied_growth_pct:.1f}%/yr"
             reasons.append(
-                f"At ${price:.2f} the market is pricing in revenue growth of {ig_txt} "
-                f"for the next decade — VALUS forecasts {model_growth_pct:.1f}%/yr, "
-                f"so VALUS sees the stock as underpriced ({mos:+.0f}% upside)."
+                f"The market is pricing in revenue growth of {ig_txt} for the "
+                f"next decade; VALUS forecasts {model_growth_pct:.1f}%/yr "
+                f"(~{abs(gap_pp):.0f}pp higher).  With that growth assumption, "
+                f"VALUS fair value of ${iv:.2f} sits {abs(mos):.0f}% above today's "
+                f"${price:.2f} — undervalued."
             )
         elif mos < -5:
-            # MODEL SAYS OVERVALUED — explain market is paying for more growth
-            # than VALUS expects (or for optionality the model can't price).
+            # MODEL SAYS OVERVALUED — market paying for more growth than VALUS
+            # expects, or optionality the model can't price.
             if implied_growth_pct > model_growth_pct + 1:
                 reasons.append(
-                    f"To justify ${price:.2f} the market is pricing in "
-                    f"~{implied_growth_pct:.1f}%/yr revenue growth for a decade — "
-                    f"VALUS forecasts {model_growth_pct:.1f}%, so VALUS sees this as "
-                    f"overpriced by {abs(mos):.0f}%."
+                    f"The market is pricing in ~{implied_growth_pct:.1f}%/yr "
+                    f"revenue growth for a decade; VALUS forecasts "
+                    f"{model_growth_pct:.1f}%/yr (~{abs(gap_pp):.0f}pp gap).  With "
+                    f"VALUS's lower growth assumption, fair value of ${iv:.2f} sits "
+                    f"{abs(mos):.0f}% below today's ${price:.2f} — overvalued."
                 )
             else:
                 # Same/lower implied growth but still overvalued — capex, leverage,
