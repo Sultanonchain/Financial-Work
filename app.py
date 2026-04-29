@@ -323,6 +323,66 @@ def _fetch_edgar_8k(ticker: str) -> list:
         return []
 
 
+# ── Google News RSS — third news source ──────────────────────────────────────
+# yfinance.news has been broken since Yahoo deprecated their news format
+# months ago (returns empty lists for most tickers).  EDGAR 8-K Atom feed
+# returns generic "8-K - Current report" titles with summaries too brief
+# to keyword-match.  Google News RSS is the cheap, reliable third source:
+# free, no API key, returns recent articles with rich titles and
+# descriptions that actually contain the keywords our scorer looks for.
+def _fetch_google_news(ticker: str, company_name: str = "") -> list:
+    """
+    Fetch up to 10 recent news headlines from Google News RSS.
+    Returns list of {title, summary, ts} dicts (ts is unix epoch seconds).
+    Silently returns [] on any error so the catalyst scanner degrades gracefully.
+    """
+    try:
+        # Build a query that combines ticker + company name when available;
+        # ticker-only queries return too many false positives (e.g. "MU" =
+        # University of Missouri news).
+        q_parts = [ticker]
+        if company_name:
+            # Strip common corporate suffixes that just add noise
+            cname = re.sub(r"\b(Inc|Corp|Corporation|Co|Ltd|Plc|Limited|N\.V\.|S\.A\.)\.?$",
+                           "", company_name).strip()
+            if cname and cname.lower() != ticker.lower():
+                q_parts.append(f'"{cname}"')
+        q = " stock OR ".join(q_parts) + " stock"
+        url = (
+            "https://news.google.com/rss/search"
+            f"?q={requests.utils.quote(q)}"
+            "&hl=en-US&gl=US&ceid=US:en"
+        )
+        resp = requests.get(
+            url, timeout=6,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; VALUS Research tool)"}
+        )
+        if resp.status_code != 200:
+            return []
+        # Google News RSS is standard RSS 2.0
+        root = ET.fromstring(resp.text)
+        items = []
+        # Channel > item path
+        for item in root.findall(".//item")[:10]:
+            title  = (item.findtext("title")       or "").strip()
+            desc   = (item.findtext("description") or "").strip()
+            pubdate = (item.findtext("pubDate")    or "").strip()
+            # Strip HTML from description (often contains nested anchor tags)
+            desc_clean = re.sub(r"<[^>]+>", " ", desc).strip()[:400]
+            # Parse pubDate — RFC 822 format like "Tue, 28 Apr 2026 14:32:00 GMT"
+            ts = 0
+            try:
+                from email.utils import parsedate_to_datetime
+                ts = int(parsedate_to_datetime(pubdate).timestamp())
+            except Exception:
+                ts = 0
+            if title:
+                items.append({"title": title, "summary": desc_clean, "ts": ts})
+        return items
+    except Exception:
+        return []
+
+
 # ── Heuristic headline scorer ───────────────────────────────────────────────
 # Replaces the old binary "is_strong / is_mod / is_risk" matching with a
 # numeric score in [-1.0, +1.0].  Uses sector context, co-occurrence, and
@@ -552,14 +612,36 @@ def get_catalyst_insights(ticker: str, info: dict, stock) -> dict:
     industry_for_score = (info or {}).get("industry", "")
     seven_days_ago    = now - 7 * 86400
 
-    # ── 1. yfinance news ─────────────────────────────────────────────────────
+    # ── 1. yfinance news + Google News RSS (combined) ────────────────────────
+    # yfinance.news is mostly empty since Yahoo deprecated their format;
+    # Google News RSS is the reliable backstop with rich titles + summaries.
+    # Both feed the same scanner loop below; we dedupe on lowercase title.
     try:
-        news_items = getattr(stock, "news", None) or []
-        recent = sorted(
-            [n for n in news_items if n.get("providerPublishTime", 0) > seven_days_ago],
-            key=lambda x: x.get("providerPublishTime", 0), reverse=True
-        )
-        for item in recent[:10]:
+        yf_news = getattr(stock, "news", None) or []
+        # Normalize yfinance shape → {title, summary, ts}
+        yf_normalized = []
+        for n in yf_news:
+            ts = n.get("providerPublishTime", 0) or 0
+            if ts > seven_days_ago:
+                yf_normalized.append({
+                    "title":   n.get("title",   "") or "",
+                    "summary": n.get("summary", "") or "",
+                    "ts":      ts,
+                })
+        # Pull Google News, then merge.  Company-name-aware query reduces
+        # false positives (ticker MU vs University of Missouri news, etc).
+        gnews = _fetch_google_news(ticker, (info or {}).get("longName") or (info or {}).get("shortName") or "")
+        gnews_recent = [n for n in gnews if n.get("ts", 0) > seven_days_ago or n.get("ts", 0) == 0]
+        # Dedupe on the first 60 chars of the lowercase title
+        seen = set()
+        merged = []
+        for n in (yf_normalized + gnews_recent):
+            key = (n.get("title") or "").lower()[:60]
+            if key and key not in seen:
+                seen.add(key)
+                merged.append(n)
+        recent = sorted(merged, key=lambda x: x.get("ts", 0), reverse=True)
+        for item in recent[:12]:
             raw_title   = item.get("title",   "") or ""
             raw_snippet = item.get("summary", "") or ""
             text = (raw_title + " " + raw_snippet).lower()
@@ -601,7 +683,7 @@ def get_catalyst_insights(ticker: str, info: dict, stock) -> dict:
             # weights a 1-day-old headline at full strength, a 6-day-old
             # at ~14%.  Transformative catalysts (durability=stage1) feed
             # growth_catalyst_lift_pp, capped at +3pp.
-            pub_ts = item.get("providerPublishTime", 0)
+            pub_ts = item.get("ts", 0) or item.get("providerPublishTime", 0)
             age_days = max(0.0, (now - pub_ts) / 86400.0) if pub_ts else 7.0
             age_weight = max(0.0, 1.0 - age_days / 7.0)
             interp = _score_headline(raw_title, raw_snippet, ticker,
@@ -5282,22 +5364,51 @@ def analyze():
         )
 
         # Strategic Discount override — when a strategic asset prints a
-        # negative MOS but trades at a low forward multiple, the standard
-        # "Priced for Growth/Excellence/Miracle" tier mislabels it.  Promote
-        # to a "Strategic Discount" tier (green) with explicit narrative.
+        # negative MOS but the market signal says "discount, not warning,"
+        # the standard "Priced for Growth/Excellence/Miracle" tier mislabels
+        # it.  Promote to a "Strategic Discount" tier (green) with narrative.
+        #
+        # Two trigger paths:
+        #   1. Mature strategic names (MU, INTC, LMT) — low forward P/E
+        #      relative to peers signals the market is discounting a
+        #      sovereign-backstopped franchise.
+        #   2. Pre-revenue strategic names (JOBY, ACHR, RKLB) — forward P/E
+        #      is negative or missing because there's no positive earnings
+        #      yet; the franchise thesis is the whole story.  Trigger when
+        #      the strategic floor was applied AND analyst target sits
+        #      meaningfully above current price (sell-side already sees it).
         if (strategic and priced_for and margin_of_safety is not None
                 and margin_of_safety < 0):
             forward_pe = safe(info.get("forwardPE"))
-            if forward_pe is not None and 0 < forward_pe < 20:
+            mature_trigger = (forward_pe is not None and 0 < forward_pe < 20)
+            # Pre-revenue: negative or near-zero forward P/E + the strategic
+            # IV floor fired + analyst sees ≥ 5% upside.
+            pre_rev_trigger = (
+                strategic_floor_applied
+                and (forward_pe is None or forward_pe <= 0 or forward_pe > 100)
+                and analyst_target_price
+                and price
+                and analyst_target_price > price * 1.05
+            )
+            if mature_trigger or pre_rev_trigger:
+                if mature_trigger:
+                    narrative = (
+                        f"Forward P/E {forward_pe:.1f} on a {strategic['strategic_label']} asset — "
+                        "market discounting a sovereign-backstopped franchise.  Pure DCF underestimates "
+                        "value here; treat as opportunity, not value trap."
+                    )
+                else:
+                    pct = ((analyst_target_price - price) / price * 100)
+                    narrative = (
+                        f"Pre-revenue {strategic['strategic_label']} franchise — pure DCF undervalues "
+                        f"these names because earnings haven't materialised yet.  Analyst consensus "
+                        f"sees {pct:+.0f}% upside; sovereign-backstop thesis intact."
+                    )
                 priced_for = {
                     "tier":       "strategic_discount",
                     "label":      "Strategic Discount",
                     "color":      "green",
-                    "narrative": (
-                        f"Forward P/E {forward_pe:.1f} on a {strategic['strategic_label']} asset — "
-                        "market discounting a sovereign-backstopped franchise.  Pure DCF underestimates "
-                        "value here; treat as opportunity, not value trap."
-                    ),
+                    "narrative":  narrative,
                 }
         is_mag7 = _is_mag7(ticker)
 
