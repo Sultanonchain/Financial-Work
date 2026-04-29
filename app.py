@@ -3729,11 +3729,14 @@ def discover():
 @app.route("/api/cron/refresh-heatmap")
 def cron_refresh_heatmap():
     expected = os.environ.get("CRON_SECRET")
-    if expected:
-        auth = request.headers.get("Authorization", "")
-        if not (auth == f"Bearer {expected}" or
-                request.args.get("secret") == expected):
-            return jsonify({"error": "unauthorized"}), 401
+    # Fail closed: if the secret isn't configured, refuse to run.
+    # Otherwise anyone could trigger a 25s lambda re-fetching 100+ tickers.
+    if not expected:
+        return jsonify({"error": "CRON_SECRET not configured on server"}), 500
+    auth = request.headers.get("Authorization", "")
+    if not (auth == f"Bearer {expected}" or
+            request.args.get("secret") == expected):
+        return jsonify({"error": "unauthorized"}), 401
 
     started = time.time()
     refreshed = 0
@@ -5167,7 +5170,11 @@ def analyze():
                                (safe(info.get("marketCap"), 0) or 0) * fx_rate,
                                base_fcf=base_fcf,
                                sector=sector, industry=industry)
-        if _cr_prem > 0 and intrinsic_value is not None:
+        # Skip polish layers when IV came from the emergency cascade (analyst
+        # target / cash-only / distressed P/B).  Multiplying a distressed
+        # anchor by a cash-rich premium defeats the whole "low confidence"
+        # signal and inflates the IV with no model basis.
+        if _cr_prem > 0 and intrinsic_value is not None and iv_confidence != "low":
             intrinsic_value = round(intrinsic_value * (1 + _cr_prem), 2)
             margin_of_safety = round((intrinsic_value - price) / price * 100, 1) if price else None
             if scenarios:
@@ -5183,7 +5190,7 @@ def analyze():
 
         # ── Debt + Momentum Classifier ─────────────────────────────────────────
         debt_momentum = _debt_momentum_classifier(info, balance_sheet, fcf_series, price_history)
-        if debt_momentum.get("premium_pct", 0) > 0 and intrinsic_value is not None:
+        if debt_momentum.get("premium_pct", 0) > 0 and intrinsic_value is not None and iv_confidence != "low":
             _factor = (1 + debt_momentum["premium_pct"])
             intrinsic_value = round(intrinsic_value * _factor, 2)
             margin_of_safety = round((intrinsic_value - price) / price * 100, 1) if price else None
@@ -5732,7 +5739,10 @@ def analyze():
             "policy_headwind":           policy_headwind,
             "policy_headwind_labels":    policy_headwind_labels,
             # ── IV provenance + confidence (never-zero guarantee) ─────────
-            "iv_source_label":           iv_source_label,
+            # Sector-specific blends (biotech, banking, etc.) set
+            # sector_val_label rather than iv_source_label; surface that as
+            # the source when it's the dominant signal.
+            "iv_source_label":           sector_val_label or iv_source_label,
             "iv_confidence":             iv_confidence,
             # ── Autonomous news interpretation ────────────────────────────
             "growth_catalyst_lift_pp":   round(growth_catalyst_lift_pp, 2),

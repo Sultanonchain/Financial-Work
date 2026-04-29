@@ -2456,6 +2456,7 @@ function closeDiscoverPage() {
   document.querySelector(".hero")?.classList.remove("hidden");
   if (_DISC_PRICE_TIMER) { clearInterval(_DISC_PRICE_TIMER); _DISC_PRICE_TIMER = null; }
   if (_DISC_DEEP_TIMER)  { clearInterval(_DISC_DEEP_TIMER);  _DISC_DEEP_TIMER  = null; }
+  if (_FRESHNESS_TICKER) { clearInterval(_FRESHNESS_TICKER); _FRESHNESS_TICKER = null; }
 }
 
 async function loadDiscover() {
@@ -2651,6 +2652,9 @@ async function refreshDiscoverPrices() {
 // (price, MOS%, MOS bar) without re-running the full DCF.
 async function refreshAnalyzeTick(ticker) {
   if (!ticker || !_LAST_DATA) return;
+  // ETF / BTC hero cards have a different rendering path and no IV;
+  // skip the live tick so we don't blank their hero or re-render incorrectly.
+  if (_LAST_DATA.is_etf || _LAST_DATA.is_btc) return;
   try {
     const res = await fetch(`/api/quote?ticker=${encodeURIComponent(ticker)}`);
     if (!res.ok) return;
