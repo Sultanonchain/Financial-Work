@@ -542,6 +542,15 @@ function renderHeroVerdict(d) {
   ).join("");
   $("vReasons").innerHTML = reasonsHtml;
 
+  // ── News block — visible chip + expandable list of catalyst headlines.
+  // Renders for *every* ticker with catalysts (not just strategic ones)
+  // so investors see the news that's affecting valuation.  Color-coded:
+  //   green  = positive catalyst, no material risk
+  //   amber  = both positive AND risk present
+  //   red    = material risk only
+  //   neutral = generic news, no scoring signal
+  renderNewsBlock(d);
+
   // Verdict line
   $("vVerdict").textContent = vs.verdict || pf.narrative || "";
 
@@ -556,6 +565,63 @@ function renderHeroVerdict(d) {
     btn.onclick = () => activateScenario(btn.dataset.sc);
   });
   activateScenarioVisual("base");
+}
+
+// Renders the news chip + expandable list on the verdict card.  Called
+// from renderHeroVerdict.  Hides itself gracefully when no catalysts exist.
+function renderNewsBlock(d) {
+  const block = document.getElementById("vNewsBlock");
+  const chip  = document.getElementById("vNewsChip");
+  const cnt   = document.getElementById("vNewsCount");
+  const list  = document.getElementById("vNewsList");
+  if (!block || !chip || !cnt || !list) return;
+
+  const insights = d.catalyst_insights || [];
+  const interp   = d.news_interpretation || [];
+  const transformative = new Set((d.transformative_labels || []).map(s => (s || "").toLowerCase().slice(0, 50)));
+
+  if (insights.length === 0 && interp.length === 0) {
+    block.classList.add("hidden");
+    return;
+  }
+  block.classList.remove("hidden");
+
+  // Chip color tier
+  chip.classList.remove("news-chip--up", "news-chip--down", "news-chip--mixed");
+  if (d.has_positive_catalyst && d.has_material_risk) chip.classList.add("news-chip--mixed");
+  else if (d.has_positive_catalyst) chip.classList.add("news-chip--up");
+  else if (d.has_material_risk)     chip.classList.add("news-chip--down");
+
+  // Choose the dataset to render: prefer scored news_interpretation when
+  // available (richer per-headline detail), fall back to catalyst_insights
+  // when interp is empty (e.g. analyst-fallback path).
+  const rows = (interp.length > 0 ? interp : insights.map(s => ({ title: s }))).slice(0, 6);
+  cnt.textContent = `${rows.length} catalyst${rows.length === 1 ? "" : "s"} in past 7 days`;
+
+  list.innerHTML = rows.map(row => {
+    const title = (row.title || "").toString();
+    const score = row.score;
+    const dur   = row.durability;
+    const isTransform = transformative.has(title.toLowerCase().slice(0, 50));
+    let scoreChip = "";
+    if (score != null && Math.abs(score) > 0.05) {
+      const sign = score > 0 ? "+" : "";
+      const cls  = score > 0 ? "news-row__score--up" : "news-row__score--down";
+      scoreChip = `<span class="news-row__score ${cls}">${sign}${score.toFixed(1)}${dur ? ` · ${escHtml(dur)}` : ""}</span>`;
+    }
+    const marker = isTransform ? `<span class="news-row__marker" title="Transformative catalyst — bumped Stage-1 growth">🚀</span>` : "";
+    const ageStr = (row.age_days != null && !isNaN(row.age_days))
+      ? `<span class="news-row__age">${Math.round(row.age_days)}d ago</span>`
+      : "";
+    return `<div class="news-row">${marker}<span class="news-row__title">${escHtml(title)}</span>${ageStr}${scoreChip}</div>`;
+  }).join("");
+
+  // Toggle expanded state
+  chip.onclick = () => {
+    const open = list.classList.toggle("hidden") === false;
+    chip.setAttribute("aria-expanded", String(open));
+    chip.classList.toggle("news-chip--open", open);
+  };
 }
 
 // Sector-aware bear / bull case reasons.  Returns a 3-item array of
@@ -1581,6 +1647,7 @@ function openPortfolioPage() {
   $("pfShareBtn").style.display = "";
   $("pfAllocationCard").style.display = "";
   renderPortfolioPage();
+  setViewHash("portfolio");
   window.scrollTo({ top: 0, behavior: "instant" });
 }
 function closePortfolioPage() {
@@ -1592,6 +1659,7 @@ function closePortfolioPage() {
   } else if (_LAST_DATA) {
     $("results").classList.remove("hidden");
   }
+  setViewHash("");
 }
 
 const SECTOR_PALETTE = [
@@ -2254,6 +2322,7 @@ let _LB_POLL_TIMER = null;
 async function openLeaderboardPage() {
   hideAllViews();
   $("leaderboardPage").classList.remove("hidden");
+  setViewHash("leaderboard");
   window.scrollTo({ top: 0, behavior: "instant" });
   // Reset seen-IDs and fingerprint so first render shows everything
   _LB_SEEN_IDS = new Set();
@@ -2278,6 +2347,7 @@ function closeLeaderboardPage() {
     clearInterval(_LB_POLL_TIMER);
     _LB_POLL_TIMER = null;
   }
+  setViewHash("");
 }
 
 let _LB_LAST_FINGERPRINT = "";
@@ -2434,6 +2504,7 @@ let _DISC_PRICES_LAST_UPDATE = 0;   // for the "Prices: Xs ago" badge
 async function openDiscoverPage() {
   hideAllViews();
   $("discoverPage").classList.remove("hidden");
+  setViewHash("discover");
   window.scrollTo({ top: 0, behavior: "instant" });
   if (_DISC_DATA.length === 0) {
     await loadDiscover();
@@ -2457,22 +2528,80 @@ function closeDiscoverPage() {
   if (_DISC_PRICE_TIMER) { clearInterval(_DISC_PRICE_TIMER); _DISC_PRICE_TIMER = null; }
   if (_DISC_DEEP_TIMER)  { clearInterval(_DISC_DEEP_TIMER);  _DISC_DEEP_TIMER  = null; }
   if (_FRESHNESS_TICKER) { clearInterval(_FRESHNESS_TICKER); _FRESHNESS_TICKER = null; }
+  setViewHash("");
 }
 
-async function loadDiscover() {
-  $("discLoading").classList.remove("hidden");
-  $("discGrid").innerHTML = "";
+// Static mirror of DISCOVERY_TICKERS in app.py used to seed skeleton cells
+// while /api/discover is in flight.  Order roughly matches the backend list
+// so the skeleton layout matches the post-load layout closely enough that
+// cells don't visibly jump.  Out-of-sync drift is harmless — the swap is
+// based on per-cell ticker keys, not position.
+const _DISCOVERY_TICKERS_HINT = [
+  "AAPL","MSFT","GOOGL","GOOG","AMZN","META","NVDA","TSLA",
+  "ORCL","CRM","ADBE","AMD","INTC","AVGO","QCOM","TXN",
+  "MU","ARM","NOW","SNOW","PLTR","PANW","CRWD",
+  "ADI","MCHP","ON","AMAT","KLAC","LRCX",
+  "JPM","BAC","WFC","GS","MS","BRK-B","V","MA","AXP",
+  "SCHW","BLK","SPGI","COIN","HOOD",
+  "JNJ","UNH","LLY","PFE","ABBV","MRK","TMO","ABT","DHR",
+  "ISRG","VRTX","REGN",
+  "WMT","HD","MCD","NKE","KO","PEP","SBUX","COST","TGT",
+  "LULU","CMG","ABNB","BKNG",
+  "F","GM","UBER",
+  "XOM","CVX","COP","OXY","FCX","LIN",
+  "CAT","BA","GE","UNP","RTX","HON","LMT","DE",
+  "NOC","GD","LHX","HII",
+  "DIS","NFLX","CMCSA","T","VZ","TMUS","SPOT",
+  "AMT","PLD","EQIX","NEE","DUK","CEG","VST",
+  "MP","LEU","BWXT",
+  "JOBY","ACHR","RKLB",
+];
+
+// Renders ~109 placeholder skeleton cells the moment Discover opens, so the
+// user sees scaffolding instantly instead of a blank screen.  Cells fill
+// in as /api/discover returns; layout doesn't reflow because skeletons
+// share the same structure as real cells.
+function renderDiscoverSkeleton() {
+  const grid = $("discGrid");
+  if (!grid) return;
+  grid.classList.remove("disc-grid--treemap");
+  // Build minimum-viable cells that take the same shape as the real ones.
+  grid.innerHTML = _DISCOVERY_TICKERS_HINT.map(t => `
+    <div class="disc-cell disc-cell--skeleton" data-disc-ticker="${escHtml(t)}">
+      <span class="disc-cell__shimmer"></span>
+      <div class="disc-cell__head">
+        <span class="disc-cell__ticker">${escHtml(t)}</span>
+        <span class="disc-cell__mos">—</span>
+      </div>
+      <div class="disc-cell__name">&nbsp;</div>
+      <div class="disc-cell__tier">&nbsp;</div>
+      <div class="disc-cell__bar"><div class="disc-cell__bar-fill" style="width:0%"></div></div>
+    </div>
+  `).join("");
+}
+
+async function loadDiscover(opts = {}) {
+  const { fresh = false } = opts;
+  // Show skeleton scaffolding immediately if the grid is empty.  When the
+  // user reopens Discover with cached data, we skip skeleton and let the
+  // existing cells stay visible until the new fetch swaps in.
+  if (_DISC_DATA.length === 0) {
+    renderDiscoverSkeleton();
+  }
+  $("discLoading").classList.add("hidden");   // skeleton replaces the spinner
   let failed = false;
   try {
-    const res = await fetch("/api/discover");
+    const url = fresh ? "/api/discover?fresh=true" : "/api/discover";
+    const res = await fetch(url);
     if (!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
     _DISC_DATA = data.items || [];
   } catch {
-    _DISC_DATA = [];
+    if (_DISC_DATA.length === 0) {
+      _DISC_DATA = [];
+    }
     failed = true;
   }
-  $("discLoading").classList.add("hidden");
   renderDiscover(failed);
 }
 
@@ -2728,7 +2857,7 @@ function setupDiscover() {
   const back = $("discBackBtn");
   if (back) back.onclick = closeDiscoverPage;
   const refresh = $("discRefreshBtn");
-  if (refresh) refresh.onclick = loadDiscover;
+  if (refresh) refresh.onclick = () => loadDiscover({ fresh: true });
   document.querySelectorAll("[data-disc-tier]").forEach(b => {
     b.onclick = () => {
       _DISC_TIER_FILTER = b.dataset.discTier;
@@ -2884,14 +3013,19 @@ function hideAllViews() {
 //   /?p=AAPL,MSFT     → open shared (read-only) portfolio view
 function readURLParams() {
   const params = new URLSearchParams(window.location.search);
+  // Hash drives view routing (#discover, #portfolio, #leaderboard) so it
+  // survives browser refresh without conflicting with the existing ?t=
+  // and ?p= ticker/shared-portfolio query params.
+  const hash = (window.location.hash || "").replace(/^#/, "").toLowerCase();
   return {
     ticker:    (params.get("t") || params.get("ticker") || "").trim().toUpperCase(),
     portfolio: (params.get("p") || params.get("portfolio") || "").trim().toUpperCase(),
+    view:      ["discover", "portfolio", "leaderboard"].includes(hash) ? hash : "",
   };
 }
 
 async function bootFromURL() {
-  const { ticker, portfolio } = readURLParams();
+  const { ticker, portfolio, view } = readURLParams();
   if (portfolio) {
     const tickers = portfolio.split(",").map(t => t.trim()).filter(Boolean);
     if (tickers.length > 0) {
@@ -2902,7 +3036,27 @@ async function bootFromURL() {
   if (ticker) {
     $("tickerInput").value = ticker;
     analyze(ticker);
+    return;
   }
+  // No ticker / no shared portfolio — restore the hash-encoded view so
+  // browser refresh on Discover/Portfolio/Leaderboard stays put instead of
+  // bouncing back to the search hero.
+  if (view === "discover")        { openDiscoverPage();    return; }
+  if (view === "portfolio")       { openPortfolioPage();   return; }
+  if (view === "leaderboard")     { openLeaderboardPage(); return; }
+
+  // No active view, no ticker — pre-warm the Discover cache in the
+  // background so when the user clicks Discover, data is already there.
+  // Non-blocking; failures swallowed (the explicit click will retry).
+  setTimeout(() => { try { loadDiscover(); } catch (e) {} }, 800);
+}
+
+// Hash-driven view routing.  Set when a non-search view opens, cleared on
+// close.  Doesn't touch query params (?t= / ?p= continue to coexist).
+function setViewHash(name) {
+  const url = new URL(window.location.href);
+  url.hash = name || "";
+  window.history.replaceState({}, "", url);
 }
 
 // Update the URL bar when analyzing (without page reload)
@@ -2911,6 +3065,7 @@ function pushTickerToURL(ticker) {
   const url = new URL(window.location.href);
   url.searchParams.set("t", ticker);
   url.searchParams.delete("p");
+  url.hash = "";   // analyzing a ticker exits any view
   window.history.replaceState({}, "", url);
 }
 
@@ -2933,4 +3088,18 @@ document.addEventListener("DOMContentLoaded", () => {
   // Fetch identity in parallel with bootFromURL — non-blocking
   refreshMe();
   bootFromURL();
+  // Browser back/forward should navigate between views.  Only react to
+  // hash changes that didn't come from our own setViewHash() (those use
+  // replaceState, which doesn't fire popstate).
+  window.addEventListener("popstate", () => {
+    const { ticker, portfolio, view } = readURLParams();
+    if (ticker || portfolio) { bootFromURL(); return; }
+    // Hash-only navigation — close everything and re-route to the view.
+    closeDiscoverPage();
+    closePortfolioPage();
+    closeLeaderboardPage();
+    if (view === "discover")    openDiscoverPage();
+    else if (view === "portfolio")  openPortfolioPage();
+    else if (view === "leaderboard") openLeaderboardPage();
+  });
 });

@@ -2966,6 +2966,96 @@ a:focus-visible {
 .strategic-chip--info  { color: #60a5fa; border-color: rgba(96,165,250,0.35); }
 .strategic-chip--news  { font-style: italic; opacity: 0.85; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* ── News block on the verdict card ─────────────────────────────────────
+   Visible to every analyzed ticker (not just strategic).  Click the chip
+   to expand the headline list.  Color tiers reflect catalyst direction. */
+.news-block {
+  margin: 14px 0 10px;
+}
+.news-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.10);
+  color: var(--text-soft, #ccc);
+  font-size: 12px; font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  font-family: inherit;
+}
+.news-chip:hover { background: rgba(255,255,255,0.08); }
+.news-chip__icon { font-size: 14px; line-height: 1; }
+.news-chip__count { font-weight: 600; }
+.news-chip__hint { opacity: 0.6; font-size: 11px; margin-left: 4px; }
+.news-chip__caret { font-size: 9px; opacity: 0.7; transition: transform 0.2s; }
+.news-chip--open .news-chip__caret { transform: rotate(-180deg); }
+.news-chip--up   { color: #22c55e; border-color: rgba(34,197,94,0.40); background: rgba(34,197,94,0.08); }
+.news-chip--down { color: #ef4444; border-color: rgba(239,68,68,0.40); background: rgba(239,68,68,0.08); }
+.news-chip--mixed{ color: #ca8a04; border-color: rgba(202,138,4,0.40); background: rgba(202,138,4,0.08); }
+
+.news-list {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.025);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.news-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-soft, #ccc);
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.news-row:last-child { border-bottom: 0; }
+.news-row__marker { font-size: 14px; line-height: 1; }
+.news-row__title  { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.news-row__age    {
+  font-size: 11px; opacity: 0.6; flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.news-row__score  {
+  font-size: 11px; font-weight: 600; flex-shrink: 0;
+  padding: 2px 6px; border-radius: 4px;
+  background: rgba(255,255,255,0.06);
+  font-variant-numeric: tabular-nums;
+}
+.news-row__score--up   { color: #22c55e; background: rgba(34,197,94,0.12); }
+.news-row__score--down { color: #ef4444; background: rgba(239,68,68,0.12); }
+
+/* ── Heatmap skeleton cells (cold-load scaffolding) ────────────────────── */
+.disc-cell--skeleton {
+  position: relative;
+  overflow: hidden;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.05);
+  pointer-events: none;
+  --tier-accent: rgba(255,255,255,0.10);
+  --tier-strong: rgba(255,255,255,0.05);
+  --tier-glow:   rgba(255,255,255,0.04);
+}
+.disc-cell--skeleton .disc-cell__ticker { opacity: 0.55; }
+.disc-cell--skeleton .disc-cell__mos    { opacity: 0.25; }
+.disc-cell--skeleton .disc-cell__name,
+.disc-cell--skeleton .disc-cell__tier   { background: rgba(255,255,255,0.04); border-radius: 4px; height: 11px; margin: 4px 0; }
+.disc-cell__shimmer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg,
+    transparent 30%,
+    rgba(255,255,255,0.06) 50%,
+    transparent 70%);
+  background-size: 200% 100%;
+  animation: discShimmer 1.6s linear infinite;
+  pointer-events: none;
+}
+@keyframes discShimmer {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
 /* ── Heatmap freshness chips (live + cron) ─────────────────────────────── */
 .freshness-row {
   display: flex; gap: 8px; flex-wrap: wrap;

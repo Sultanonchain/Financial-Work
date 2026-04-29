@@ -36,6 +36,10 @@
         <span class="header-btn__label">Portfolio</span>
         <span class="header-btn__count" id="portfolioCount" hidden>0</span>
       </button>
+      <a class="header-btn" href="/docs" aria-label="How VALUS works — documentation">
+        <span class="header-btn__icon">?</span>
+        <span class="header-btn__label">Docs</span>
+      </a>
       <!-- Auth control: shows "Sign in" pill when signed out, avatar when signed in -->
       <div class="auth-control" id="authControl">
         <button class="header-btn" id="signInBtn" type="button" aria-label="Sign in">
@@ -634,6 +638,20 @@
       </div>
 
       <div class="reasons" id="vReasons"></div>
+
+      <!-- News block — visible on every analyze view when catalysts are
+           present (not just strategic tickers).  Shows a chip and an
+           expandable list of headlines from yfinance, EDGAR 8-K, and
+           Google News, scored by the heuristic + Claude tie-breaker. -->
+      <div class="news-block hidden" id="vNewsBlock">
+        <button class="news-chip" id="vNewsChip" type="button" aria-expanded="false">
+          <span class="news-chip__icon" aria-hidden="true">📰</span>
+          <span class="news-chip__count" id="vNewsCount">—</span>
+          <span class="news-chip__hint">click to expand</span>
+          <span class="news-chip__caret" aria-hidden="true">▾</span>
+        </button>
+        <div class="news-list hidden" id="vNewsList"></div>
+      </div>
 
       <div class="verdict-line" id="vVerdict">—</div>
 

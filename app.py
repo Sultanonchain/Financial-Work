@@ -3443,6 +3443,17 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/docs")
+def docs():
+    """
+    Public-facing explainer for VALUS — what DCF / FCF / MOS / WACC mean,
+    how to read the verdict tiers, and how the strategic-asset + news
+    layers shape the IV.  No JS dependencies; deliberately readable on
+    any device with no auth required.
+    """
+    return render_template("docs.html")
+
+
 # ════════════════════════════════════════════════════════════════════════
 # Auth — Google OAuth (optional, gracefully disabled if env vars missing)
 # ════════════════════════════════════════════════════════════════════════
@@ -3727,12 +3738,13 @@ def discover():
     so the UI can show freshness ("Updated 4m ago") and users understand
     that values may slightly differ from a real-time analyze call.
 
-    Concurrency: yfinance calls are I/O-bound on Yahoo's API, so a
-    ThreadPoolExecutor reduces a cold-cache cold-start from ~150s
-    (sequential) to ~10-20s (10 concurrent threads).  Cached tickers
-    return from the in-process cache effectively for free.
+    Stale-while-revalidate: by default any cache entry counts (even past
+    the 15-min TTL) so the heatmap returns sub-second once the daily cron
+    has warmed the cache.  Pass `?fresh=true` (used by the manual ↻ Refresh
+    button) to force a re-fetch of expired entries.
     """
     now = time.time()
+    force_fresh = request.args.get("fresh", "").lower() in ("1", "true", "yes")
 
     def _fetch_one(t):
         try:
@@ -3742,9 +3754,12 @@ def discover():
             cached_at_age = None
             if entry is not None:
                 ts, payload = entry
-                if now - ts < _ANALYZE_CACHE_TTL_S:
+                age = now - ts
+                # Stale-while-revalidate: serve any cached entry by default;
+                # only refetch if expired AND caller passed ?fresh=true.
+                if age < _ANALYZE_CACHE_TTL_S or not force_fresh:
                     d = payload
-                    cached_at_age = int(now - ts)
+                    cached_at_age = int(age)
 
             if d is None:
                 with app.test_request_context(f"/api/analyze?ticker={t}"):
