@@ -1995,9 +1995,13 @@ function setupCustomDCFSliders() {
   const reset = () => {
     if (!_LAST_DATA) return;
     const d = _LAST_DATA;
-    $("cdS1").value   = d.stage1_growth   ?? 10;
+    // Prefer the exact base-scenario assumptions the model used so the
+    // "Your Fair Value" lines up with the displayed Base case before any
+    // user interaction. Fall back to top-level DCF inputs, then to defaults.
+    const base = (d.scenarios && d.scenarios.base) || {};
+    $("cdS1").value   = base.s1   ?? d.stage1_growth   ?? 10;
     $("cdS2").value   = d.stage2_growth   ?? 6;
-    $("cdWacc").value = d.wacc            ?? 9;
+    $("cdWacc").value = base.wacc ?? d.wacc            ?? 9;
     $("cdTg").value   = d.terminal_growth ?? 2.5;
     sliders.forEach(updateSliderFill);
     update();
