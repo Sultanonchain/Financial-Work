@@ -2188,8 +2188,13 @@ function setupAuthControl() {
   if (signInBtn) signInBtn.onclick = () => showSignInModal("default");
   if (googleBtn) googleBtn.onclick = () => {
     if (!_AUTH_CONFIGURED) return;
-    // Preserve the current URL so we land back here after Google round-trip
-    const next = encodeURIComponent(window.location.pathname + window.location.search);
+    // Preserve the current URL — including the hash — so the user lands
+    // back on the same page after the Google round-trip.  Without the
+    // hash, signing in from the Leaderboard or Discover page would dump
+    // the user on the search hero.
+    const next = encodeURIComponent(
+      window.location.pathname + window.location.search + window.location.hash
+    );
     window.location.href = `/auth/login?next=${next}`;
   };
   if (avatar && menu) {
@@ -2455,13 +2460,33 @@ function renderLeaderboard(items) {
 }
 
 function setupLeaderboard() {
+  // Header Leaderboard button removed; the entry point is now the
+  // 🏆 Leaderboard → button on the Portfolio page.  Keep null-safe wiring
+  // in case the header button gets restored later.
   const btn = $("leaderboardBtn");
   if (btn) btn.onclick = openLeaderboardPage;
-  $("lbBackBtn")?.addEventListener("click", closeLeaderboardPage);
+  $("pfViewLeaderboardBtn")?.addEventListener("click", openLeaderboardPage);
+  // Leaderboard "Back" returns to the Portfolio page (not the search hero)
+  // so the user lands where they entered.
+  $("lbBackBtn")?.addEventListener("click", () => {
+    closeLeaderboardPage();
+    openPortfolioPage();
+  });
   $("lbRefreshBtn")?.addEventListener("click", loadLeaderboard);
+  // Restore the persisted sort (sessionStorage) so refresh keeps the user's
+  // current filter — defaults to avg_mos otherwise.
+  try {
+    const saved = sessionStorage.getItem("valus.lb.sort");
+    if (saved && ["avg_mos", "recent", "size"].includes(saved)) {
+      _LB_SORT = saved;
+      document.querySelectorAll("[data-lb-sort]").forEach(x =>
+        x.classList.toggle("active", x.dataset.lbSort === saved));
+    }
+  } catch (e) {}
   document.querySelectorAll("[data-lb-sort]").forEach(b => {
     b.onclick = () => {
       _LB_SORT = b.dataset.lbSort;
+      try { sessionStorage.setItem("valus.lb.sort", _LB_SORT); } catch (e) {}
       document.querySelectorAll("[data-lb-sort]").forEach(x =>
         x.classList.toggle("active", x === b));
       loadLeaderboard();

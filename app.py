@@ -3523,7 +3523,18 @@ def auth_callback():
         # Sanity: only redirect to relative paths to prevent open-redirect
         if not next_url.startswith("/") or next_url.startswith("//"):
             next_url = "/"
-        return redirect(next_url + ("&" if "?" in next_url else "?") + "auth_ok=1")
+        # Insert auth_ok=1 into the query string, NOT into the URL fragment.
+        # If the user was on /#leaderboard when they signed in, naive
+        # concatenation would produce "/#leaderboard?auth_ok=1" which the
+        # browser treats as part of the fragment and breaks our hash-routing.
+        if "#" in next_url:
+            base, frag = next_url.split("#", 1)
+            sep = "&" if "?" in base else "?"
+            redirect_to = f"{base}{sep}auth_ok=1#{frag}"
+        else:
+            sep = "&" if "?" in next_url else "?"
+            redirect_to = f"{next_url}{sep}auth_ok=1"
+        return redirect(redirect_to)
     except Exception as e:
         print(f"[valus] OAuth callback failed: {e}")
         return redirect("/?auth_error=callback_failed")
@@ -3633,7 +3644,7 @@ def quote():
             return t, None
 
     from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=10) as pool:
+    with ThreadPoolExecutor(max_workers=16) as pool:
         results = dict(pool.map(_fetch, tickers))
 
     return jsonify({
@@ -3801,7 +3812,11 @@ def discover():
             return None
 
     from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=10) as pool:
+    # Bumped from 10 → 16 workers.  yfinance is I/O-bound (HTTP calls),
+    # not CPU-bound, so the GIL doesn't matter — more concurrency
+    # directly cuts cold-cache latency.  Yahoo's rate limits tolerate
+    # this fine for our single-burst workload.
+    with ThreadPoolExecutor(max_workers=16) as pool:
         results = list(pool.map(_fetch_one, DISCOVERY_TICKERS))
 
     out = [r for r in results if r is not None]
@@ -3857,7 +3872,7 @@ def cron_refresh_heatmap():
             return t, False
 
     from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=10) as pool:
+    with ThreadPoolExecutor(max_workers=16) as pool:
         results = list(pool.map(_force_refresh, DISCOVERY_TICKERS))
 
     for t, ok in results:

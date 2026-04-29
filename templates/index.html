@@ -27,20 +27,15 @@
         <span class="header-btn__icon">⌖</span>
         <span class="header-btn__label">Discover</span>
       </button>
-      <button class="header-btn" id="leaderboardBtn" type="button" aria-label="Leaderboard">
-        <span class="header-btn__icon">🏆</span>
-        <span class="header-btn__label">Leaderboard</span>
-      </button>
       <button class="header-btn" id="portfolioBtn" type="button" aria-label="Open portfolio">
         <span class="header-btn__icon">★</span>
         <span class="header-btn__label">Portfolio</span>
         <span class="header-btn__count" id="portfolioCount" hidden>0</span>
       </button>
-      <a class="header-btn" href="/docs" aria-label="How VALUS works — documentation">
-        <span class="header-btn__icon">?</span>
-        <span class="header-btn__label">Docs</span>
-      </a>
-      <!-- Auth control: shows "Sign in" pill when signed out, avatar when signed in -->
+      <span class="disclaimer-pill" title="VALUS is an educational research tool. Not investment advice.">⚠ Not financial advice</span>
+      <!-- Auth control sits at the far right when signed in: a circular
+           avatar to the right of the disclaimer pill.  When signed out,
+           shows a "Sign in" button in the same slot. -->
       <div class="auth-control" id="authControl">
         <button class="header-btn" id="signInBtn" type="button" aria-label="Sign in">
           <span class="header-btn__icon">↪</span>
@@ -55,7 +50,6 @@
           <button class="auth-menu__btn" id="authSignOutBtn" type="button">Sign out</button>
         </div>
       </div>
-      <span class="disclaimer-pill">⚠ Not Financial Advice</span>
     </div>
   </div>
 </header>
@@ -73,6 +67,7 @@
         <button class="copy-btn starred" id="pfPublishBtn" type="button">🏆 Publish</button>
         <button class="copy-btn" id="pfShareBtn" type="button">↗ Share</button>
         <button class="copy-btn" id="pfRefreshBtn" type="button">↻ Refresh</button>
+        <button class="copy-btn" id="pfViewLeaderboardBtn" type="button" title="See top portfolios from other users">🏆 Leaderboard →</button>
       </div>
     </div>
     <div class="pf-shared-banner hidden" id="pfSharedBanner">
@@ -890,7 +885,7 @@
 <!-- ── FOOTER ─────────────────────────────────────────────────────────── -->
 <footer class="site-footer">
   <div class="container">
-    <span>VALUS · Educational research tool · Data via Yahoo Finance · Not investment advice</span>
+    <span>VALUS · Educational research tool · Data via Yahoo Finance · Not investment advice · <a href="/docs" style="color: inherit; text-decoration: underline; opacity: 0.8;">How it works</a></span>
   </div>
 </footer>
 

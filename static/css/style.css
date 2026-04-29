@@ -224,15 +224,18 @@ button { font-family: inherit; cursor: pointer; }
 
 .disclaimer-pill {
   font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.06em;
+  font-size: 10px;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--warning);
-  background: var(--warning-soft);
-  padding: 6px 10px;
+  color: rgba(251, 191, 36, 0.75);
+  background: transparent;
+  padding: 4px 8px;
   border-radius: var(--radius-pill);
-  border: 1px solid rgba(251, 191, 36, 0.22);
+  border: 1px solid rgba(251, 191, 36, 0.20);
+  white-space: nowrap;
+  opacity: 0.85;
 }
+.disclaimer-pill:hover { opacity: 1; }
 
 .header-actions {
   display: flex; align-items: center; gap: var(--space-3);
