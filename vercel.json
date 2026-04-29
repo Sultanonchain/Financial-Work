@@ -9,6 +9,6 @@
     { "src": "/(.*)",        "dest": "/app.py" }
   ],
   "crons": [
-    { "path": "/api/cron/refresh-heatmap", "schedule": "0 * * * *" }
+    { "path": "/api/cron/refresh-heatmap", "schedule": "0 9 * * *" }
   ]
 }
