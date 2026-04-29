@@ -2533,13 +2533,51 @@ let _DISC_PRICE_TIMER = null;        // 30s fast-tier price ticks
 let _DISC_DEEP_TIMER  = null;        // 60min deep-tier full /api/discover refresh
 let _DISC_PRICES_LAST_UPDATE = 0;   // for the "Prices: Xs ago" badge
 
+// localStorage cache for the Discover heatmap snapshot.  Renders previous
+// snapshot instantly on repeat visits — bypasses the Vercel cold-lambda
+// problem where every fresh function instance starts with an empty
+// _ANALYZE_CACHE and has to refetch all 109 tickers from yfinance.
+//
+// TTL is generous (6h) because: (a) backend stale-while-revalidate will
+// swap in fresh values within seconds of the page load anyway, and
+// (b) DCF outputs don't move much hour-to-hour — only price (which is
+// updated by the 30s /api/quote polling on top of this).
+const _DISC_LS_KEY = "valus.discover.snapshot.v1";
+const _DISC_LS_TTL_MS = 6 * 60 * 60 * 1000;
+
+function loadDiscoverFromLocalStorage() {
+  try {
+    const raw = localStorage.getItem(_DISC_LS_KEY);
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    if (!obj || !obj.ts || !Array.isArray(obj.items)) return null;
+    if (Date.now() - obj.ts > _DISC_LS_TTL_MS) return null;
+    return obj.items;
+  } catch (e) { return null; }
+}
+
+function saveDiscoverToLocalStorage(items) {
+  try {
+    localStorage.setItem(_DISC_LS_KEY, JSON.stringify({ ts: Date.now(), items }));
+  } catch (e) { /* quota exceeded — non-fatal */ }
+}
+
 async function openDiscoverPage() {
   hideAllViews();
   $("discoverPage").classList.remove("hidden");
   setViewHash("discover");
   window.scrollTo({ top: 0, behavior: "instant" });
+  // Try localStorage first — instant render of last snapshot if any.
+  // Subsequent loadDiscover() will swap in fresh data when it returns.
   if (_DISC_DATA.length === 0) {
-    await loadDiscover();
+    const cached = loadDiscoverFromLocalStorage();
+    if (cached && cached.length > 0) {
+      _DISC_DATA = cached;
+      renderDiscover();   // sub-50ms render, no skeleton flash
+    }
+    // Kick off the network fetch regardless — it'll repaint when fresh
+    // data arrives.  No await here so the UI doesn't block.
+    loadDiscover();
   } else {
     renderDiscover();
   }
@@ -2628,6 +2666,9 @@ async function loadDiscover(opts = {}) {
     if (!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
     _DISC_DATA = data.items || [];
+    // Persist the latest snapshot so the next page open renders instantly
+    // even if Vercel spins up a fresh cold lambda.
+    if (_DISC_DATA.length > 0) saveDiscoverToLocalStorage(_DISC_DATA);
   } catch {
     if (_DISC_DATA.length === 0) {
       _DISC_DATA = [];
