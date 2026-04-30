@@ -3534,6 +3534,112 @@ _PEER_INFO_CACHE = {}            # {peer_ticker: (timestamp, info_subset)}
 _PEER_INFO_CACHE_TTL = 6 * 3600  # 6h
 
 
+# ── Low-Confidence Diagnostics ──────────────────────────────────────────────
+# When |MoS| > 100% the IV is almost always being skewed by a data artefact
+# rather than a genuine market mispricing. We probe the three most common
+# culprits and surface a plain-English warning to the user.
+
+# Hardcoded share-class pairs known to cause Yahoo data misalignment between
+# share count, price, and market cap. Format: ticker → sibling.
+_SHARE_CLASS_PAIRS = {
+    "BRK.A": "BRK.B", "BRK-A": "BRK-B",
+    "BRK.B": "BRK.A", "BRK-B": "BRK-A",
+    "GOOG":  "GOOGL", "GOOGL": "GOOG",
+    "BF.A":  "BF.B",  "BF-A":  "BF-B",
+    "BF.B":  "BF.A",  "BF-B":  "BF-A",
+    "LEN.B": "LEN",   "LEN-B": "LEN",
+    "FOX":   "FOXA",  "FOXA":  "FOX",
+    "NWS":   "NWSA",  "NWSA":  "NWS",
+    "DISCA": "DISCK", "DISCK": "DISCA",
+    "RDS.A": "RDS.B", "RDS.B": "RDS.A",
+    "UA":    "UAA",   "UAA":   "UA",
+}
+
+
+def _diagnose_low_confidence(info, ticker, mos, intrinsic_value, price):
+    """
+    Triage the three most common causes of an extreme |MoS| > 100% reading.
+    Returns list of {"factor": str, "message": str} (possibly empty).
+    """
+    flags = []
+    if mos is None or abs(mos) <= 100:
+        return flags
+
+    # 1) Share-class mismatch — the named ticker has a sibling class that
+    # often diverges in Yahoo's share-count / market-cap data.
+    t_norm = (ticker or "").upper().replace("-", ".")
+    sibling = _SHARE_CLASS_PAIRS.get(t_norm) or _SHARE_CLASS_PAIRS.get(t_norm.replace(".", "-"))
+    if sibling:
+        flags.append({
+            "factor": "share_class_mismatch",
+            "message": (
+                f"{ticker} has a sibling share class ({sibling}). Yahoo's share-count "
+                f"and price feeds for multi-class stocks frequently misalign — "
+                f"the IV may be using one class's shares against the other's price. "
+                f"Cross-check on the sibling ticker before relying on this number."
+            ),
+        })
+
+    # 2) Forward-earnings spike — analyst +1y EPS growth above 50% almost
+    # always means a base-rate-warped forecast (post-pandemic recovery, AI
+    # revenue ramp). The Stage-1 cap will already trim it, but the signal
+    # is usually unreliable on its own and skews the IV.
+    earnings_growth = safe(info.get("earningsGrowth"))
+    forward_eps     = safe(info.get("forwardEps"))
+    trailing_eps    = safe(info.get("trailingEps"))
+    if earnings_growth is not None and earnings_growth > 0.50:
+        flags.append({
+            "factor": "forward_earnings_spike",
+            "message": (
+                f"Analysts are forecasting {earnings_growth*100:.0f}% earnings growth, "
+                f"which inflates Stage-1 growth assumptions. The IV may be over-reactive "
+                f"to a temporary base-rate distortion."
+            ),
+        })
+    elif (forward_eps is not None and trailing_eps is not None and
+          trailing_eps > 0 and forward_eps / trailing_eps > 1.50):
+        flags.append({
+            "factor": "forward_earnings_spike",
+            "message": (
+                f"Forward EPS (${forward_eps:.2f}) is {forward_eps/trailing_eps:.1f}× "
+                f"trailing EPS (${trailing_eps:.2f}). The forward number may be a "
+                f"non-recurring spike that distorts IV."
+            ),
+        })
+
+    # 3) Stale price — currentPrice diverging materially from previousClose,
+    # or the regular session marker being stuck on a past close, suggests
+    # a quote feed problem rather than a real mispricing.
+    cur_price = safe(info.get("currentPrice"))
+    prev_close = safe(info.get("regularMarketPreviousClose")) or safe(info.get("previousClose"))
+    if cur_price and prev_close and prev_close > 0:
+        gap = abs(cur_price - prev_close) / prev_close
+        if gap > 0.25:   # >25% intraday gap is almost always a data artefact
+            flags.append({
+                "factor": "stale_price_data",
+                "message": (
+                    f"Current price (${cur_price:.2f}) gaps {gap*100:.0f}% from "
+                    f"previous close (${prev_close:.2f}). This usually indicates "
+                    f"a stale quote, a halt/resumption, or a corporate action — "
+                    f"not a real price move. IV may not reflect the live market."
+                ),
+            })
+    market_state = info.get("marketState")
+    if market_state in ("CLOSED", "PREPRE", "POSTPOST") and cur_price and intrinsic_value:
+        # Closed-market quote is fine, but the spread could be old enough to
+        # matter if it's been a long weekend / holiday — flag conservatively.
+        if abs(mos) > 150:
+            flags.append({
+                "factor": "stale_price_data",
+                "message": (
+                    f"Quote feed shows market {market_state.lower()}; price may be hours "
+                    f"or days old. With a ±{abs(mos):.0f}% gap, the IV is best treated "
+                    f"as directional only until the next live tick."
+                ),
+            })
+    return flags
+
+
 def _company_age_years(info, stock=None):
     """
     Years since IPO. Tries (in order): firstTradeDateEpochUtc (seconds),
@@ -5277,6 +5383,32 @@ def analyze():
                 wacc = min(wacc + catalyst_wacc_risk, 0.20)
                 wacc_data["wacc"] = wacc
 
+            # ── Speculative / High-Growth WACC band (auto-calibration) ───────
+            # For pre-profit names — comparables-flagged growth-over-profit
+            # companies, very young high-growth IPOs, and deeply-negative
+            # operating margins — capital-structure WACC understates the
+            # true cost of equity (these stocks behave like venture-stage
+            # bets, not Russell 1000 index components). Force WACC into a
+            # 20–25% band so the DCF reflects the actual risk premium that
+            # institutional investors charge for these profiles.
+            wacc_speculative_applied = False
+            try:
+                _op_m  = safe(info.get("operatingMargins"))
+                _rev_g = safe(info.get("revenueGrowth"))
+                _age   = _company_age_years(info, stock)
+                _is_speculative = (
+                    comparables_model.get("used") or
+                    (_op_m is not None and _op_m < -0.05) or
+                    (_age is not None and _age < 3 and _rev_g and _rev_g > 0.30)
+                )
+                if _is_speculative:
+                    _wacc_pre = wacc
+                    wacc = max(min(wacc, 0.25), 0.20)
+                    wacc_data["wacc"] = wacc
+                    wacc_speculative_applied = (abs(wacc - _wacc_pre) > 1e-6)
+            except Exception:
+                pass
+
             # Enforce minimum WACC − TGR spread to prevent Gordon Growth Model blow-up
             # (small denominator creates astronomical terminal values)
             min_spread = ind_params["wacc_spread"]
@@ -6453,6 +6585,17 @@ def analyze():
                                   if margin_of_safety is not None else None),
             "margin_of_safety_raw": (round(margin_of_safety, 1)
                                      if margin_of_safety is not None else None),
+            # Low-confidence diagnostics — populated when |MoS| > 100% to
+            # explain *why* the IV may not be trustworthy (share-class
+            # mismatch, forward-earnings spike, stale price feed).
+            "low_confidence_diagnostics": _diagnose_low_confidence(
+                info, ticker, margin_of_safety, intrinsic_value, price
+            ),
+            # Whether the speculative 20-25% WACC band was applied to this
+            # name (set True only when the auto-calibration shifted WACC).
+            "wacc_speculative_applied": (
+                wacc_speculative_applied if 'wacc_speculative_applied' in dir() else False
+            ),
             "enterprise_value":  enterprise_value,
             "equity_value":      equity_value,
             "pv_terminal":       pv_terminal,

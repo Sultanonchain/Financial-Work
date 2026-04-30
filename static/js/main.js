@@ -1062,6 +1062,30 @@ function renderNotes(d) {
 
   // Pull all the auxiliary info into note items
   if (d.dcf_warning) items.push({ type: "warn", text: d.dcf_warning });
+
+  // Low-confidence diagnostics — only fire when |MoS| > 100% and the
+  // backend identified a likely data-artefact culprit. Each entry maps
+  // to a plain-English explanation so the user knows whether to trust
+  // the IV or treat it as directional only.
+  if (d.low_confidence_diagnostics && d.low_confidence_diagnostics.length) {
+    const labelMap = {
+      share_class_mismatch:    "Share-Class Mismatch",
+      forward_earnings_spike:  "Forward-Earnings Spike",
+      stale_price_data:        "Stale Price Data",
+    };
+    for (const flag of d.low_confidence_diagnostics) {
+      items.push({
+        type: "risk",
+        text: `<strong>Low-confidence: ${escHtml(labelMap[flag.factor] || flag.factor)}</strong> — ${escHtml(flag.message)}`,
+      });
+    }
+  }
+  if (d.wacc_speculative_applied) {
+    items.push({
+      type: "info",
+      text: `<strong>Speculative WACC band</strong> — auto-calibrated to 20–25% because this name is pre-profit / early-stage. Capital-structure WACC understates true cost of equity for this profile.`,
+    });
+  }
   if (d.expectation_gap) {
     const eg = d.expectation_gap;
     items.push({ type: "info",
