@@ -3368,6 +3368,250 @@ def compute_blended_growth(stock, info, fcf_series, income_stmt,
     }
 
 
+# ── Comparables-Based Profitability Model ────────────────────────────────────
+# For early-stage / volatile-margin companies (e.g. Cava, Toast, Reddit) the
+# DCF base FCF is misleading because the company is choosing growth over
+# profit. This model picks 2–3 mature peers (e.g. Cava → Chipotle), pulls
+# their operating margins, assigns a probability the target reaches those
+# margins, and produces a probability-weighted base FCF.
+#
+# Curated peer map. Auto-discovery from sector+industry is unreliable
+# (yfinance peer lists are noisy and often include unrelated names), so
+# we curate the obvious analogues and gracefully no-op for everything else.
+COMPARABLES_MAP = {
+    # Restaurants — fast-casual / QSR
+    "CAVA":  ["CMG", "SHAK", "QSR"],
+    "SG":    ["CMG", "SHAK"],          # Sweetgreen
+    "WING":  ["CMG", "DPZ"],
+    # Software / consumer fintech
+    "TOST":  ["SQ", "FI"],             # Toast → Block, Fiserv
+    "AFRM":  ["PYPL", "V"],
+    "HOOD":  ["SCHW", "IBKR"],
+    # Consumer / social
+    "RDDT":  ["META", "PINS", "SNAP"],
+    "PINS":  ["META", "SNAP"],
+    "SNAP":  ["META", "PINS"],
+    "RBLX":  ["EA", "TTWO"],
+    # Mobility / delivery
+    "UBER":  ["EXPE", "BKNG"],
+    "LYFT":  ["UBER"],
+    "DASH":  ["UBER"],
+    # E-commerce / consumer
+    "CHWY":  ["AMZN", "WMT"],
+    "WBD":   ["DIS", "NFLX"],
+    # EV / energy
+    "RIVN":  ["TSLA", "F"],
+    "LCID":  ["TSLA", "F"],
+    # Crypto-adjacent
+    "COIN":  ["SCHW", "ICE"],
+    # Health-tech / life sciences platforms
+    "HIMS":  ["CVS"],
+    "TDOC":  ["UNH", "CVS"],
+}
+
+_PEER_INFO_CACHE = {}            # {peer_ticker: (timestamp, info_subset)}
+_PEER_INFO_CACHE_TTL = 6 * 3600  # 6h
+
+
+def _company_age_years(info):
+    """Years since IPO from yfinance firstTradeDateEpochUtc. None when missing."""
+    if not info:
+        return None
+    epoch = info.get("firstTradeDateEpochUtc") or info.get("firstTradeDate")
+    if not epoch:
+        return None
+    try:
+        return max(0.0, (time.time() - float(epoch)) / (365.25 * 86400))
+    except Exception:
+        return None
+
+
+def _get_peer_operating_margin(peer_ticker):
+    """
+    Operating margin (EBIT/Revenue) for a peer. Cached 6h. Returns float or
+    None when unavailable. Uses info["operatingMargins"] which yfinance
+    populates from the trailing-twelve-months income statement.
+    """
+    if not peer_ticker:
+        return None
+    t = peer_ticker.upper().strip()
+    cached = _PEER_INFO_CACHE.get(t)
+    if cached and (time.time() - cached[0]) < _PEER_INFO_CACHE_TTL:
+        return cached[1]
+    margin = None
+    try:
+        peer_info = yf.Ticker(t).info or {}
+        m = peer_info.get("operatingMargins")
+        if m is not None and -0.5 < float(m) < 0.6:
+            margin = float(m)
+    except Exception:
+        margin = None
+    _PEER_INFO_CACHE[t] = (time.time(), margin)
+    return margin
+
+
+def _attainment_probability(age_years, rev_growth, current_op_margin,
+                             peer_op_margin):
+    """
+    Probability the target company reaches the peer-average operating margin.
+    Heuristic — calibrated for fast-growing companies that haven't yet
+    optimised for profit. Returns float in [0.25, 0.85].
+
+    Inputs (any may be None):
+      age_years        — years since IPO
+      rev_growth       — TTM revenue growth (decimal, e.g. 0.32)
+      current_op_margin — TTM operating margin
+      peer_op_margin   — peer-average operating margin (target)
+    """
+    p = 0.55  # base rate
+
+    # Growth signal: dominant category leaders (>30% growth) more likely to
+    # achieve scale economics; moderate growth (>15%) is also a positive.
+    if rev_growth is not None:
+        if rev_growth > 0.30:
+            p += 0.10
+        elif rev_growth > 0.15:
+            p += 0.05
+        elif rev_growth < 0.05:
+            p -= 0.10
+
+    # Current margin trajectory: already-positive margin is the strongest
+    # leading indicator that the unit economics scale.
+    if current_op_margin is not None:
+        if current_op_margin > 0:
+            p += 0.10
+        if current_op_margin < -0.05:
+            p -= 0.10
+
+    # Maturity: very young companies (< 5y) have wider outcome distributions.
+    if age_years is not None:
+        if age_years < 3:
+            p -= 0.10
+        elif age_years < 5:
+            p -= 0.05
+        elif age_years > 8:
+            p += 0.05
+
+    # Margin gap: if the current margin is already close to peers, attainment
+    # is essentially priced in; if the gap is huge, skepticism.
+    if current_op_margin is not None and peer_op_margin is not None:
+        gap = peer_op_margin - current_op_margin
+        if gap < 0.02:
+            p += 0.10
+        elif gap > 0.20:
+            p -= 0.10
+
+    return max(0.25, min(0.85, p))
+
+
+def compute_comparables_model(stock, info, ticker, base_fcf, tax_rate, fx_rate):
+    """
+    Probability-weighted FCF for early-stage / volatile-margin companies.
+
+    Returns dict (always — caller checks `used`):
+      {
+        "used":              bool,
+        "reason":            str,        # why triggered or skipped
+        "peers":             [tickers],
+        "peer_margins":      {ticker: margin},
+        "peer_avg_margin":   float,
+        "current_margin":    float | None,
+        "age_years":         float | None,
+        "p_attain":          float,
+        "current_base_fcf":  float,
+        "peer_implied_fcf":  float,
+        "weighted_base_fcf": float,
+      }
+    """
+    out = {
+        "used":              False,
+        "reason":            "",
+        "peers":             [],
+        "peer_margins":      {},
+        "peer_avg_margin":   None,
+        "current_margin":    None,
+        "age_years":         None,
+        "p_attain":          None,
+        "current_base_fcf":  base_fcf,
+        "peer_implied_fcf":  None,
+        "weighted_base_fcf": base_fcf,
+    }
+
+    if not ticker:
+        out["reason"] = "no ticker"
+        return out
+
+    age   = _company_age_years(info)
+    op_m  = safe(info.get("operatingMargins"))
+    rev_g = safe(info.get("revenueGrowth"))
+    out["age_years"]      = age
+    out["current_margin"] = op_m
+
+    # Trigger conditions: < 10y old, OR currently choosing growth over profit
+    # (negative/low operating margin combined with strong revenue growth).
+    young     = age is not None and age < 10
+    grow_over_profit = (
+        op_m is not None and rev_g is not None and
+        op_m < 0.05 and rev_g > 0.15
+    )
+    if not (young or grow_over_profit):
+        out["reason"] = "mature with positive margins — comparables not needed"
+        return out
+
+    peers = COMPARABLES_MAP.get(ticker.upper())
+    if not peers:
+        out["reason"] = f"no curated comparables map entry for {ticker}"
+        return out
+
+    margins = {}
+    for p in peers:
+        m = _get_peer_operating_margin(p)
+        if m is not None:
+            margins[p] = m
+
+    if len(margins) < 1:
+        out["reason"] = "could not fetch peer margins"
+        out["peers"] = peers
+        return out
+
+    avg_margin = sum(margins.values()) / len(margins)
+    out["peers"]            = peers
+    out["peer_margins"]     = margins
+    out["peer_avg_margin"]  = avg_margin
+
+    p_attain = _attainment_probability(age, rev_g, op_m, avg_margin)
+    out["p_attain"] = p_attain
+
+    # Peer-implied FCF: revenue × peer-avg EBIT margin × (1 − tax).
+    rev_ttm = safe(info.get("totalRevenue"))
+    if not rev_ttm or rev_ttm <= 0:
+        out["reason"] = "missing revenue — cannot compute peer-implied FCF"
+        return out
+    rev_ttm = float(rev_ttm) * fx_rate
+    peer_implied_fcf = rev_ttm * avg_margin * (1 - tax_rate)
+    out["peer_implied_fcf"] = peer_implied_fcf
+
+    # Probability-weighted base FCF: weighted between today's reality and the
+    # peer-implied steady-state. Floors current FCF at 0 so a temporarily
+    # negative print doesn't make the weighted base fall below the
+    # peer-implied path. Only applies if peer-implied is materially higher.
+    current_floor = max(base_fcf or 0, 0.0)
+    weighted = p_attain * peer_implied_fcf + (1 - p_attain) * current_floor
+
+    if weighted <= (base_fcf or 0):
+        out["reason"] = "peer-implied FCF below current — model would lower IV, skipping"
+        return out
+
+    out["used"]              = True
+    out["reason"]            = (
+        f"{ticker} flagged as {'<10y old' if young else 'growth-over-profit'}; "
+        f"peers={list(margins.keys())} avg margin={avg_margin*100:.1f}% · "
+        f"P(attain)={p_attain*100:.0f}%"
+    )
+    out["weighted_base_fcf"] = weighted
+    return out
+
+
 def get_forward_growth(stock, info, fcf_series):
     """
     Best available forward FCF/earnings growth for Stage 1.
@@ -4504,6 +4748,23 @@ def analyze():
             base_fcf = base_fcf * fx_rate
         fcf_series = [v * fx_rate for v in fcf_series]
         dcf_available = base_fcf is not None and base_fcf > 0
+
+        # ── Comparables-based profitability model (early-stage names) ────────
+        # Tax rate is computed below; do a cheap pre-compute here so the
+        # comparables model can use it. Same formula as calc_tax_rate's
+        # default fallback when income_stmt-derived rate isn't available yet.
+        _tax_for_comps = 0.21
+        try:
+            _tax_for_comps = calc_tax_rate(info, income_stmt)
+        except Exception:
+            pass
+        comparables_model = compute_comparables_model(
+            stock, info, ticker, base_fcf, _tax_for_comps, fx_rate
+        )
+        if comparables_model.get("used"):
+            base_fcf = comparables_model["weighted_base_fcf"]
+            fcf_source = (fcf_source or "") + " · comparables-weighted"
+            dcf_available = base_fcf is not None and base_fcf > 0
 
         # ── Fintech industry flag (used later for FCF normalization) ─────────
         _vm_check = _get_valuation_method(sector, industry)
@@ -6081,6 +6342,26 @@ def analyze():
                     for k, v in (blended.get("components") or {}).items()
                 },
             } if blended else None),
+            "comparables_model": ({
+                "used":               comparables_model.get("used"),
+                "reason":             comparables_model.get("reason"),
+                "peers":              comparables_model.get("peers"),
+                "peer_margins": {
+                    k: round(v * 100, 2) for k, v in
+                    (comparables_model.get("peer_margins") or {}).items()
+                },
+                "peer_avg_margin":    round(comparables_model["peer_avg_margin"] * 100, 2)
+                    if comparables_model.get("peer_avg_margin") is not None else None,
+                "current_margin":     round(comparables_model["current_margin"] * 100, 2)
+                    if comparables_model.get("current_margin") is not None else None,
+                "age_years":          round(comparables_model["age_years"], 1)
+                    if comparables_model.get("age_years") is not None else None,
+                "p_attain":           round(comparables_model["p_attain"] * 100, 1)
+                    if comparables_model.get("p_attain") is not None else None,
+                "current_base_fcf":   comparables_model.get("current_base_fcf"),
+                "peer_implied_fcf":   comparables_model.get("peer_implied_fcf"),
+                "weighted_base_fcf":  comparables_model.get("weighted_base_fcf"),
+            } if 'comparables_model' in dir() and comparables_model else None),
             "projection_years": yrs,
             "base_fcf":       base_fcf,
             "historical_fcf": fcf_series[:5],
