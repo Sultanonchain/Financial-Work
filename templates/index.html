@@ -778,6 +778,55 @@
             </div>
           </div>
 
+          <!-- Comparables-based profitability model (early-stage names) -->
+          <div class="card cmp-card hidden" id="comparablesCard">
+            <div class="section-title-row">
+              <div class="section-title">Comparables-based fair value</div>
+              <span class="cmp-card__pill" id="cmpProb">—</span>
+            </div>
+            <div class="cmp-card__sub" id="cmpReason">—</div>
+
+            <div class="cmp-grid">
+              <div class="cmp-stat">
+                <span class="cmp-stat__label">Company age</span>
+                <span class="cmp-stat__value numeric" id="cmpAge">—</span>
+              </div>
+              <div class="cmp-stat">
+                <span class="cmp-stat__label">Current op. margin</span>
+                <span class="cmp-stat__value numeric" id="cmpCurMargin">—</span>
+              </div>
+              <div class="cmp-stat">
+                <span class="cmp-stat__label">Peer avg op. margin</span>
+                <span class="cmp-stat__value numeric" id="cmpPeerAvg">—</span>
+              </div>
+              <div class="cmp-stat">
+                <span class="cmp-stat__label">P(attainment)</span>
+                <span class="cmp-stat__value numeric" id="cmpPAttain">—</span>
+              </div>
+            </div>
+
+            <div class="cmp-section-label">Peers</div>
+            <div class="cmp-peers" id="cmpPeers"></div>
+
+            <div class="cmp-section-label">Probability-weighted base FCF</div>
+            <div class="cmp-fcf-row">
+              <div class="cmp-fcf">
+                <span class="cmp-fcf__label">Today</span>
+                <span class="cmp-fcf__value numeric" id="cmpFcfNow">—</span>
+              </div>
+              <div class="cmp-fcf__arrow">→</div>
+              <div class="cmp-fcf">
+                <span class="cmp-fcf__label">Peer-implied</span>
+                <span class="cmp-fcf__value numeric" id="cmpFcfPeer">—</span>
+              </div>
+              <div class="cmp-fcf__arrow">⇒</div>
+              <div class="cmp-fcf cmp-fcf--weighted">
+                <span class="cmp-fcf__label">Weighted (used in DCF)</span>
+                <span class="cmp-fcf__value numeric" id="cmpFcfWeighted">—</span>
+              </div>
+            </div>
+          </div>
+
           <!-- DCF projection chart + interactive year scrubber -->
           <div class="card">
             <div class="section-title-row">

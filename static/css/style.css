@@ -1007,6 +1007,127 @@ button { font-family: inherit; cursor: pointer; }
   .disc-grid { grid-template-columns: repeat(2, 1fr); gap: var(--space-2); }
 }
 
+/* ── Comparables-based profitability card ─────────────────────────────── */
+.cmp-card.hidden { display: none; }
+.cmp-card__pill {
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: rgba(67, 217, 173, 0.10);
+  color: var(--positive, #43d9ad);
+  border: 1px solid rgba(67, 217, 173, 0.25);
+}
+.cmp-card__sub {
+  font-size: 12px;
+  color: var(--ink-muted, #888);
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+.cmp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.cmp-stat {
+  background: rgba(255,255,255,0.025);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.cmp-stat__label {
+  font-size: 10px; letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted, #888);
+}
+.cmp-stat__value { font-size: 18px; font-weight: 700; color: var(--ink-primary); }
+
+.cmp-section-label {
+  font-size: 10px; letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted, #888);
+  margin: 14px 0 8px;
+}
+.cmp-peers {
+  display: flex; flex-wrap: wrap; gap: 8px;
+}
+.cmp-peer {
+  display: inline-flex; align-items: baseline; gap: 8px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--radius-pill);
+  padding: 6px 12px;
+  font-size: 12px;
+}
+.cmp-peer__ticker {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--ink-primary);
+  letter-spacing: 0.04em;
+}
+.cmp-peer__margin {
+  font-family: var(--font-mono);
+  color: var(--positive, #43d9ad);
+  font-feature-settings: "tnum" 1;
+}
+
+.cmp-fcf-row {
+  display: flex; align-items: center; gap: 10px;
+  flex-wrap: wrap;
+}
+.cmp-fcf {
+  flex: 1 1 140px;
+  background: rgba(255,255,255,0.025);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.cmp-fcf--weighted {
+  border-color: rgba(67, 217, 173, 0.35);
+  background: rgba(67, 217, 173, 0.05);
+}
+.cmp-fcf__label {
+  font-size: 10px; letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted, #888);
+}
+.cmp-fcf--weighted .cmp-fcf__label { color: var(--positive, #43d9ad); }
+.cmp-fcf__value { font-size: 16px; font-weight: 700; color: var(--ink-primary); }
+.cmp-fcf__arrow {
+  color: var(--ink-muted, #666);
+  font-size: 14px;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 540px) {
+  .cmp-fcf-row { flex-direction: column; align-items: stretch; }
+  .cmp-fcf__arrow { display: none; }
+}
+
+/* ── Finviz-style Discover heatmap ─────────────────────────────────────── */
+.disc-grid--treemap .disc-sector { padding: 8px 10px 10px; }
+.disc-grid--treemap .disc-sector__head { margin-bottom: 6px; }
+.disc-grid--treemap .disc-sector__cells { gap: 3px; }
+.disc-cell--tm {
+  padding: 6px 8px !important;
+  border-left-width: 2px;
+  border-radius: 6px;
+  gap: 2px !important;
+}
+.disc-cell--tm .disc-cell__name,
+.disc-cell--tm .disc-cell__tier,
+.disc-cell--tm .disc-cell__bar { display: none; }
+.disc-cell--tm .disc-cell__head { margin-bottom: 0; }
+.disc-cell--tm .disc-cell__ticker { font-size: 12px; }
+.disc-cell--tm .disc-cell__mos { font-size: 12px; }
+.disc-cell--tm .disc-cell__age,
+.disc-cell--tm .disc-cell__strategic,
+.disc-cell--tm .disc-cell__policy { display: none; }
+
 /* "Updated Xm ago" timestamp on discover cells */
 .disc-cell__age {
   position: absolute; top: 8px; right: 10px;

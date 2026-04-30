@@ -1046,6 +1046,7 @@ function renderDrawerContent(d) {
     }
   } catch (e) { console.error("[assumptions]", e); }
 
+  try { renderComparablesCard(d); } catch (e) { console.error("[cmp]", e); }
   try { renderNotes(d); } catch (e) { console.error("[notes]", e); }
   try { if (d.price_history) renderPriceChart(d.price_history); } catch (e) { console.error("[priceChart]", e); }
   try { if (d.fcf_chart)     renderDcfChart(d.fcf_chart); }       catch (e) { console.error("[dcfChart]", e); }
@@ -2060,6 +2061,39 @@ function setupCustomDCFSliders() {
   window._cdReset = reset;
 }
 
+// ── Comparables-based profitability card ──────────────────────────────
+function renderComparablesCard(d) {
+  const card = $("comparablesCard");
+  if (!card) return;
+  const cmp = d.comparables_model;
+  if (!cmp || !cmp.used) {
+    card.classList.add("hidden");
+    return;
+  }
+  card.classList.remove("hidden");
+
+  $("cmpProb").textContent = cmp.p_attain != null ? `P=${fmt(cmp.p_attain, 0)}%` : "—";
+  $("cmpReason").textContent = cmp.reason || "";
+
+  $("cmpAge").textContent       = cmp.age_years != null ? `${fmt(cmp.age_years, 1)} yr` : "—";
+  $("cmpCurMargin").textContent = cmp.current_margin != null ? `${fmt(cmp.current_margin, 1)}%` : "—";
+  $("cmpPeerAvg").textContent   = cmp.peer_avg_margin != null ? `${fmt(cmp.peer_avg_margin, 1)}%` : "—";
+  $("cmpPAttain").textContent   = cmp.p_attain != null ? `${fmt(cmp.p_attain, 0)}%` : "—";
+
+  const peers = cmp.peer_margins || {};
+  $("cmpPeers").innerHTML = Object.keys(peers).length === 0
+    ? `<span style="color:var(--ink-muted);font-size:12px;">no peer data</span>`
+    : Object.entries(peers).map(([t, m]) => `
+        <span class="cmp-peer">
+          <span class="cmp-peer__ticker">${escHtml(t)}</span>
+          <span class="cmp-peer__margin">${fmt(m, 1)}%</span>
+        </span>`).join("");
+
+  $("cmpFcfNow").textContent      = cmp.current_base_fcf != null ? fmtBig(cmp.current_base_fcf) : "—";
+  $("cmpFcfPeer").textContent     = cmp.peer_implied_fcf != null ? fmtBig(cmp.peer_implied_fcf) : "—";
+  $("cmpFcfWeighted").textContent = cmp.weighted_base_fcf != null ? fmtBig(cmp.weighted_base_fcf) : "—";
+}
+
 // ── Low confidence explainer ───────────────────────────────────────────
 function setupLowConfExplainer() {
   // Delegated click — the chip is rendered dynamically inside the MOS pill
@@ -2752,11 +2786,17 @@ function renderDiscover(failed = false) {
     // sizeMode === "treemap": cell flex-basis is proportional to sqrt(mcap)
     // so a $3T name is ~4× the area of a $200B name; linear scaling crushes
     // small caps to single pixels.  Min-width ensures readability at all sizes.
+    // Finviz-style sizing — small dense cells; sqrt(mcap) drives relative
+    // area within a sector, but min-width/height stay tight so the whole
+    // universe fits on one screen without much scrolling.
     const sizeStyle = (sizeMode === "treemap" && sizeBasis != null)
-      ? `flex:${sizeBasis} 1 ${Math.max(120, sizeBasis * 30)}px;min-width:120px;min-height:${Math.max(86, Math.min(180, 60 + sizeBasis * 8))}px;`
+      ? `flex:${sizeBasis} 1 ${Math.max(64, sizeBasis * 14)}px;min-width:64px;min-height:${Math.max(38, Math.min(96, 32 + sizeBasis * 4))}px;`
       : "";
+    // Tooltip carries the name+tier+mos that the dense Finviz tiles hide.
+    const tooltip = `${it.ticker} · ${it.name || ""} · ${it.label || ""} · MoS ${mos}`;
     return `
       <div class="disc-cell ${sizeMode === "treemap" ? "disc-cell--tm" : ""}" data-disc-ticker="${escHtml(it.ticker)}"
+           title="${escHtml(tooltip)}"
            style="--tier-accent:${c.accent};--tier-strong:${c.strong};--tier-glow:${c.glow};${sizeStyle}">
         ${stratIcon}
         ${policyChip}
@@ -2772,12 +2812,12 @@ function renderDiscover(failed = false) {
     `;
   }
 
-  // Treemap mode: group by sector, size cells by sqrt(market_cap).  Falls
-  // back to the uniform grid when (a) viewport is narrow (<640px), or
-  // (b) market_cap data isn't available on the items.
-  const isMobile = window.matchMedia("(max-width: 640px)").matches;
+  // Finviz-style heatmap: always group by sector, always size cells by
+  // sqrt(market_cap). The previous "uniform grid fallback" produced a
+  // long scrolling list — users want to see everything at once. Cells
+  // shrink on narrow viewports via CSS rather than switching layouts.
   const haveMcap = items.some(it => it.market_cap != null && it.market_cap > 0);
-  const useTreemap = haveMcap && !isMobile && _DISC_SORT !== "ticker";
+  const useTreemap = haveMcap && _DISC_SORT !== "ticker";
 
   if (useTreemap) {
     // Group by sector while preserving sort order within each group.
