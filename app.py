@@ -3102,53 +3102,68 @@ def get_base_fcf(info, stock):
 _FINVIZ_GROWTH_CACHE = {}        # {ticker: (timestamp, growth_or_none)}
 _FINVIZ_GROWTH_CACHE_TTL = 6 * 3600   # 6h — Finviz updates daily at most
 
-# Alpha Vantage gives ~20 years of annual income statements on the free tier
-# (5 req/min, 500/day). Cache aggressively to stay under the daily ceiling.
-_AV_INCOME_CACHE = {}            # {ticker: (timestamp, {"revenue": [...], "net_income": [...]})}
-_AV_INCOME_CACHE_TTL = 24 * 3600  # 24h
+# Long-history income statement cache (currently sourced from stockanalysis.com,
+# which serves ~10y free with no API-key throttle). Falls back silently to
+# yfinance's ~4y history when the scrape fails.
+_LONG_INCOME_CACHE = {}          # {ticker: (timestamp, {"revenue": [...], "net_income": [...]})}
+_LONG_INCOME_CACHE_TTL = 24 * 3600
 
 
-def _get_alphavantage_income_history(ticker):
+def _get_long_income_history(ticker):
     """
-    Pull up to 10 years of annual revenue and net income from Alpha Vantage.
-    Returns {"revenue": [most-recent-first floats], "net_income": [...]}
-    or None when the key is missing, the call fails, or the response is empty.
+    Best-effort 10-year annual revenue and net-income history. Source:
+    stockanalysis.com (free, no API key, no daily limit). Returns
+    {"revenue": [most-recent-first floats], "net_income": [...]} when at
+    least one series is parseable, else None.
+
+    Why not Alpha Vantage: free tier was throttled to 25 req/day in 2025,
+    which a single Discover sweep blows through. Stockanalysis.com is
+    free-tier and unmetered for our usage pattern.
     """
     if not ticker:
         return None
-    api_key = os.environ.get("ALPHA_VANTAGE_API_KEY")
-    if not api_key:
-        return None
     t = ticker.upper().strip()
-    cached = _AV_INCOME_CACHE.get(t)
-    if cached and (time.time() - cached[0]) < _AV_INCOME_CACHE_TTL:
+    cached = _LONG_INCOME_CACHE.get(t)
+    if cached and (time.time() - cached[0]) < _LONG_INCOME_CACHE_TTL:
         return cached[1]
     result = None
     try:
         r = requests.get(
-            "https://www.alphavantage.co/query",
-            params={"function": "INCOME_STATEMENT", "symbol": t, "apikey": api_key},
-            timeout=8,
+            f"https://stockanalysis.com/stocks/{t.lower()}/financials/",
+            headers={"User-Agent": "Mozilla/5.0 (compatible; VALUS/1.0)"},
+            timeout=6,
         )
         if r.status_code == 200:
-            j = r.json() or {}
-            rows = j.get("annualReports") or []
-            if rows:
-                rev, ni = [], []
-                for row in rows[:10]:
-                    rv = row.get("totalRevenue")
-                    nv = row.get("netIncome")
-                    if rv and rv != "None":
-                        try: rev.append(float(rv))
-                        except Exception: pass
-                    if nv and nv != "None":
-                        try: ni.append(float(nv))
-                        except Exception: pass
-                if rev or ni:
-                    result = {"revenue": rev, "net_income": ni}
+            html = r.text
+            # Both Revenue and Net Income labels are followed by a sequence
+            # of <td class="bolded ...">VALUE</td> cells (one per year, most
+            # recent first; values in millions, comma-formatted, possibly
+            # negative). Free tier exposes ~6 columns (TTM + 5y annual);
+            # we trim TTM to keep the series strictly annual.
+            def _extract(row_label, after_offset=4000):
+                idx = html.find(f">{row_label}<")
+                if idx < 0:
+                    return []
+                chunk = html[idx: idx + after_offset]
+                raw = re.findall(
+                    r'<td class="bolded[^"]*">(-?[\d,\.]+)</td>', chunk
+                )
+                out = []
+                for s in raw:
+                    try:
+                        out.append(float(s.replace(",", "")) * 1e6)
+                    except Exception:
+                        pass
+                # Drop the first cell (TTM) so we return strictly annual data.
+                return out[1:11] if len(out) > 1 else out
+
+            rev = _extract("Revenue")
+            ni  = _extract("Net Income")
+            if rev or ni:
+                result = {"revenue": rev, "net_income": ni}
     except Exception:
         result = None
-    _AV_INCOME_CACHE[t] = (time.time(), result)
+    _LONG_INCOME_CACHE[t] = (time.time(), result)
     return result
 
 
@@ -3251,11 +3266,11 @@ def compute_blended_growth(stock, info, fcf_series, income_stmt,
     rev = _get_revenue_history(income_stmt)
     eps = _get_earnings_history(income_stmt)
 
-    # Alpha Vantage extension: yfinance free tier returns ~4 years of annual
-    # data; Alpha Vantage returns up to ~20. Prefer AV when it gives a
-    # strictly longer series — falling back silently when the key is missing,
-    # the API throttles, or the response is empty.
-    av = _get_alphavantage_income_history(ticker)
+    # Long-history extension: yfinance free tier returns ~4 years of annual
+    # data; stockanalysis.com serves ~10y free with no API-key throttle.
+    # Prefer it when it gives a strictly longer series — falling back
+    # silently to yfinance when the scrape fails or returns nothing.
+    av = _get_long_income_history(ticker)
     if av:
         if av.get("revenue") and len(av["revenue"]) > len(rev):
             rev = av["revenue"]
@@ -3296,7 +3311,7 @@ def compute_blended_growth(stock, info, fcf_series, income_stmt,
         "revenue_years":     len(rev),
         "earnings_years":    len(eps),
         "fcf_years":         len(fcf_series or []),
-        "alphavantage_used": bool(av),
+        "long_history_used": bool(av),
     }
 
     # Industry proxy: 70% of the sector's max_s1 ceiling represents a
@@ -3379,51 +3394,134 @@ def compute_blended_growth(stock, info, fcf_series, income_stmt,
 # (yfinance peer lists are noisy and often include unrelated names), so
 # we curate the obvious analogues and gracefully no-op for everything else.
 COMPARABLES_MAP = {
-    # Restaurants — fast-casual / QSR
+    # Restaurants — fast-casual / QSR / coffee
     "CAVA":  ["CMG", "SHAK", "QSR"],
-    "SG":    ["CMG", "SHAK"],          # Sweetgreen
+    "SG":    ["CMG", "SHAK"],
     "WING":  ["CMG", "DPZ"],
-    # Software / consumer fintech
-    "TOST":  ["SQ", "FI"],             # Toast → Block, Fiserv
+    "DNUT":  ["SBUX", "DPZ"],
+    "FWRG":  ["SHAK", "WING"],          # First Watch
+    "BROS":  ["SBUX", "MCD"],           # Dutch Bros
+    # Software / consumer fintech / payments
+    "TOST":  ["SQ", "FI"],
     "AFRM":  ["PYPL", "V"],
     "HOOD":  ["SCHW", "IBKR"],
-    # Consumer / social
+    "SOFI":  ["SCHW", "JPM"],
+    "UPST":  ["DFS", "COF"],
+    "MARA":  ["RIOT"],
+    # Consumer / social / streaming-adjacent
     "RDDT":  ["META", "PINS", "SNAP"],
     "PINS":  ["META", "SNAP"],
     "SNAP":  ["META", "PINS"],
     "RBLX":  ["EA", "TTWO"],
-    # Mobility / delivery
+    "DUOL":  ["MTCH", "RBLX"],
+    "BMBL":  ["MTCH"],
+    "MTCH":  ["META"],
+    "SPOT":  ["NFLX"],
+    "NFLX":  ["DIS"],
+    # Mobility / delivery / travel
     "UBER":  ["EXPE", "BKNG"],
     "LYFT":  ["UBER"],
     "DASH":  ["UBER"],
-    # E-commerce / consumer
+    "ABNB":  ["BKNG", "EXPE"],
+    "TRIP":  ["BKNG"],
+    # E-commerce / digital consumer / advertising
     "CHWY":  ["AMZN", "WMT"],
     "WBD":   ["DIS", "NFLX"],
-    # EV / energy
+    "ETSY":  ["EBAY", "AMZN"],
+    "W":     ["AMZN", "TGT"],            # Wayfair
+    "FIGS":  ["LULU"],
+    "OLPX":  ["EL", "ULTA"],
+    "PTON":  ["NKE"],
+    "RVLV":  ["LULU"],
+    # EV / clean energy / mobility-adjacent
     "RIVN":  ["TSLA", "F"],
     "LCID":  ["TSLA", "F"],
-    # Crypto-adjacent
+    "NIO":   ["TSLA"],
+    "XPEV":  ["TSLA"],
+    "LI":    ["TSLA"],
+    "CHPT":  ["EBAY"],                   # speculative — charging network
+    "ENPH":  ["FSLR"],
+    "RUN":   ["FSLR"],
+    "PLUG":  ["FSLR"],
+    # Crypto-adjacent / fintech rails
     "COIN":  ["SCHW", "ICE"],
-    # Health-tech / life sciences platforms
+    "HOOD":  ["SCHW", "IBKR"],
+    # Cybersecurity / observability / infra SaaS
+    "S":     ["CRWD", "PANW"],           # SentinelOne
+    "PATH":  ["MSFT", "NOW"],
+    "BILL":  ["INTU"],
+    "GTLB":  ["MSFT"],
+    "NET":   ["AKAM", "FFIV"],
+    "DDOG":  ["NOW"],
+    "MDB":   ["ORCL"],
+    "ZS":    ["CRWD", "PANW"],
+    "SNOW":  ["ORCL"],
+    "FRSH":  ["NOW", "CRM"],
+    # AI / data / vertical SaaS
+    "AI":    ["NOW", "PLTR"],
+    "PLTR":  ["NOW", "MSFT"],
+    "U":     ["EA"],                      # Unity
+    "TWLO":  ["NOW"],
+    # Health-tech / life sciences / consumer health
     "HIMS":  ["CVS"],
     "TDOC":  ["UNH", "CVS"],
+    "ONEM":  ["UNH"],
+    "GH":    ["LH"],
+    "NVAX":  ["MRNA", "PFE"],
+    "BNTX":  ["MRNA"],
+    # Space / next-gen industrials
+    "RKLB":  ["LMT", "BA"],
+    "ASTS":  ["LMT"],
+    "ACHR":  ["BA"],
+    "JOBY":  ["BA"],
+    # Renewable / nuclear
+    "OKLO":  ["VST", "CEG"],
+    "SMR":   ["VST", "CEG"],
 }
 
 _PEER_INFO_CACHE = {}            # {peer_ticker: (timestamp, info_subset)}
 _PEER_INFO_CACHE_TTL = 6 * 3600  # 6h
 
 
-def _company_age_years(info):
-    """Years since IPO from yfinance firstTradeDateEpochUtc. None when missing."""
+def _company_age_years(info, stock=None):
+    """
+    Years since IPO. Tries (in order): firstTradeDateEpochUtc (seconds),
+    firstTradeDateMilliseconds, firstTradeDate, then earliest price-history
+    date from stock.history(period='max'). Returns float or None.
+    """
     if not info:
-        return None
-    epoch = info.get("firstTradeDateEpochUtc") or info.get("firstTradeDate")
-    if not epoch:
-        return None
-    try:
-        return max(0.0, (time.time() - float(epoch)) / (365.25 * 86400))
-    except Exception:
-        return None
+        info = {}
+    # Yahoo sometimes returns this in seconds, sometimes milliseconds —
+    # detect by magnitude (anything > year 3000 in seconds is ms).
+    for key in ("firstTradeDateEpochUtc", "firstTradeDate"):
+        v = info.get(key)
+        if v:
+            try:
+                v = float(v)
+                if v > 4e10:        # ms epoch
+                    v = v / 1000.0
+                if v > 0:
+                    return max(0.0, (time.time() - v) / (365.25 * 86400))
+            except Exception:
+                pass
+    v = info.get("firstTradeDateMilliseconds")
+    if v:
+        try:
+            return max(0.0, (time.time() - float(v) / 1000.0) / (365.25 * 86400))
+        except Exception:
+            pass
+    # Last-resort fallback: earliest available price bar.
+    if stock is not None:
+        try:
+            h = stock.history(period="max", interval="1mo")
+            if h is not None and not h.empty:
+                first = h.index[0]
+                first_ts = first.timestamp() if hasattr(first, "timestamp") else None
+                if first_ts:
+                    return max(0.0, (time.time() - float(first_ts)) / (365.25 * 86400))
+        except Exception:
+            pass
+    return None
 
 
 def _get_peer_operating_margin(peer_ticker):
@@ -3541,7 +3639,7 @@ def compute_comparables_model(stock, info, ticker, base_fcf, tax_rate, fx_rate):
         out["reason"] = "no ticker"
         return out
 
-    age   = _company_age_years(info)
+    age   = _company_age_years(info, stock)
     op_m  = safe(info.get("operatingMargins"))
     rev_g = safe(info.get("revenueGrowth"))
     out["age_years"]      = age
