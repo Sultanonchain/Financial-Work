@@ -2768,9 +2768,70 @@ function renderDiscover(failed = false) {
     return `${Math.round(ageS/3600)}h ago`;
   }
 
+  // Squarified treemap (Bruls/Huijsen 2000). Takes items with `value`
+  // (positive numeric) and a target rect, returns each item with x/y/w/h
+  // assigned. Aspect ratios stay close to 1 so cells remain readable.
+  function squarifyTreemap(items, x, y, w, h) {
+    if (!items.length || w <= 0 || h <= 0) return [];
+    const sumV = items.reduce((s, it) => s + (it.value || 0), 0);
+    if (sumV <= 0) return [];
+    const totalArea = w * h;
+    const norm = items.map(it => ({ ...it, _area: ((it.value || 0) / sumV) * totalArea }))
+                      .filter(it => it._area > 0)
+                      .sort((a, b) => b._area - a._area);
+    const out = [];
+    function worst(row, side) {
+      const sum = row.reduce((s, it) => s + it._area, 0);
+      let mx = 0, mn = Infinity;
+      for (const it of row) { if (it._area > mx) mx = it._area; if (it._area < mn) mn = it._area; }
+      if (!mn) return Infinity;
+      return Math.max((side * side * mx) / (sum * sum),
+                      (sum * sum) / (side * side * mn));
+    }
+    function layoutRow(row, rx, ry, rw, rh) {
+      const sum = row.reduce((s, it) => s + it._area, 0);
+      if (rw <= rh) {
+        const rowH = sum / rw;
+        let cx = rx;
+        for (const it of row) {
+          const cw = it._area / rowH;
+          out.push({ ...it, x: cx, y: ry, w: cw, h: rowH });
+          cx += cw;
+        }
+        return [rx, ry + rowH, rw, rh - rowH];
+      } else {
+        const rowW = sum / rh;
+        let cy = ry;
+        for (const it of row) {
+          const ch = it._area / rowW;
+          out.push({ ...it, x: rx, y: cy, w: rowW, h: ch });
+          cy += ch;
+        }
+        return [rx + rowW, ry, rw - rowW, rh];
+      }
+    }
+    let queue = norm.slice();
+    let cx = x, cy = y, cw = w, ch = h;
+    while (queue.length) {
+      const row = [queue.shift()];
+      const side = Math.min(cw, ch);
+      let bestR = worst(row, side);
+      while (queue.length) {
+        const test = [...row, queue[0]];
+        const r = worst(test, side);
+        if (r <= bestR) { row.push(queue.shift()); bestR = r; }
+        else break;
+      }
+      [cx, cy, cw, ch] = layoutRow(row, cx, cy, cw, ch);
+    }
+    return out;
+  }
+
   // Renders a single ticker cell.  Reused by both the treemap and the
   // mobile-grid fallback so the cell content + interactions are identical.
-  function renderCell(it, sizeMode = "grid", sizeBasis = null) {
+  // In treemap mode, sizeBasis carries an {x,y,w,h} rect for absolute
+  // positioning relative to the parent sector rect.
+  function renderCell(it, sizeMode = "grid", sizeBasis = null, rect = null) {
     const c = tierColor(it.tier);
     const mos = it.mos != null ? fmtPct(it.mos) : "—";
     const cap = it.mos != null ? Math.min(Math.abs(it.mos), 100) : 50;
@@ -2786,12 +2847,25 @@ function renderDiscover(failed = false) {
     // sizeMode === "treemap": cell flex-basis is proportional to sqrt(mcap)
     // so a $3T name is ~4× the area of a $200B name; linear scaling crushes
     // small caps to single pixels.  Min-width ensures readability at all sizes.
-    // Finviz-style sizing — small dense cells; sqrt(mcap) drives relative
-    // area within a sector, but min-width/height stay tight so the whole
-    // universe fits on one screen without much scrolling.
-    const sizeStyle = (sizeMode === "treemap" && sizeBasis != null)
-      ? `flex:${sizeBasis} 1 ${Math.max(64, sizeBasis * 14)}px;min-width:64px;min-height:${Math.max(38, Math.min(96, 32 + sizeBasis * 4))}px;`
-      : "";
+    // Squarified-treemap mode: absolute positioning relative to the sector
+    // rect. The rect carries x/y/w/h in pixels (relative to the grid).
+    // Sector position is set on the parent .disc-sector; the cell offsets
+    // are converted to be relative to that sector via subtraction.
+    let sizeStyle = "";
+    if (sizeMode === "treemap" && rect) {
+      // rect is in grid coordinates; sector wrapper handles its own
+      // (rect-x, rect-y) — but our cell rect was computed in the same grid
+      // coordinate system, so re-anchor to the parent sector via inline
+      // style with negative-offset trick: parent has left:sec.x, top:sec.y;
+      // we use absolute pixels for the cell directly inside it. To keep
+      // things simple, we render the cell with absolute coords relative
+      // to the grid root and the sector wrapper is also positioned that
+      // way (no nested coordinate translation needed).
+      sizeStyle = `position:absolute;left:${rect.x}px;top:${rect.y}px;width:${rect.w}px;height:${rect.h}px;`;
+    } else if (sizeMode === "treemap" && sizeBasis != null) {
+      // Legacy flexbox path (kept as a defensive fallback).
+      sizeStyle = `flex:${sizeBasis} 1 ${Math.max(64, sizeBasis * 14)}px;min-width:64px;min-height:${Math.max(38, Math.min(96, 32 + sizeBasis * 4))}px;`;
+    }
     // Tooltip carries the name+tier+mos that the dense Finviz tiles hide.
     const tooltip = `${it.ticker} · ${it.name || ""} · ${it.label || ""} · MoS ${mos}`;
     return `
@@ -2812,44 +2886,67 @@ function renderDiscover(failed = false) {
     `;
   }
 
-  // Finviz-style heatmap: always group by sector, always size cells by
-  // sqrt(market_cap). The previous "uniform grid fallback" produced a
-  // long scrolling list — users want to see everything at once. Cells
-  // shrink on narrow viewports via CSS rather than switching layouts.
+  // Finviz-style 2D squarified treemap — sectors and tickers tile into a
+  // single fixed-height rect so the entire universe is visible at once.
+  // Falls back to the uniform grid only when market-cap data is missing.
   const haveMcap = items.some(it => it.market_cap != null && it.market_cap > 0);
   const useTreemap = haveMcap && _DISC_SORT !== "ticker";
 
   if (useTreemap) {
-    // Group by sector while preserving sort order within each group.
+    grid.classList.add("disc-grid--treemap");
+
+    // Group items by sector, sort sectors and tickers by mcap desc.
     const bySector = new Map();
     for (const it of items) {
       const sec = it.sector || "Other";
       if (!bySector.has(sec)) bySector.set(sec, []);
       bySector.get(sec).push(it);
     }
-    // Order sectors by total mcap descending so the biggest groups go top.
-    const sectorList = [...bySector.entries()]
-      .map(([sec, arr]) => [sec, arr, arr.reduce((s, it) => s + (it.market_cap || 0), 0)])
-      .sort((a, b) => b[2] - a[2]);
-    grid.classList.add("disc-grid--treemap");
-    grid.innerHTML = sectorList.map(([sec, arr]) => {
-      // Compute flex bases as sqrt(mcap), normalized so cells are comparable
-      // across sectors (a $3T Tech and $3T Healthcare should look similar).
-      const cells = arr.map(it => {
-        const basis = it.market_cap ? Math.sqrt(it.market_cap / 1e9) : 1.0;
-        return renderCell(it, "treemap", Math.max(0.5, basis));
-      }).join("");
+    const sectorEntries = [...bySector.entries()]
+      .map(([sec, arr]) => {
+        arr.sort((a, b) => (b.market_cap || 0) - (a.market_cap || 0));
+        return { name: sec, items: arr,
+                 value: arr.reduce((s, it) => s + (it.market_cap || 0), 0) };
+      })
+      .sort((a, b) => b.value - a.value);
+
+    // Measure container — if not yet in DOM, defer to next frame.
+    const W = grid.clientWidth || 1200;
+    const H = Math.max(420, Math.round(window.innerHeight - 200));
+    grid.style.height = `${H}px`;
+
+    const sectorRects = squarifyTreemap(sectorEntries, 0, 0, W, H);
+    const HEAD_H = 18;   // sector header strip height
+    const PAD    = 2;    // inner padding so sector borders are visible
+
+    grid.innerHTML = sectorRects.map(rect => {
+      const { x, y, w, h, items: arr, name } = rect;
+      // Squarify ticker rects in sector-LOCAL coords (origin 0,0) so each
+      // cell's absolute position is relative to its parent .disc-sector.
+      const innerY = HEAD_H;
+      const innerH = Math.max(0, h - HEAD_H - PAD);
+      const innerX = PAD;
+      const innerW = Math.max(0, w - PAD * 2);
+      const tickerEntries = arr.map(it => ({
+        ...it,
+        // sqrt scaling — keeps small caps visible without crushing big ones.
+        value: Math.sqrt(Math.max(it.market_cap || 1, 1)),
+      }));
+      const cells = squarifyTreemap(tickerEntries, innerX, innerY, innerW, innerH)
+        .map(r => renderCell(r, "treemap", null, r))
+        .join("");
       return `
-        <div class="disc-sector">
-          <div class="disc-sector__head">
-            <span class="disc-sector__name">${escHtml(sec)}</span>
+        <div class="disc-sector" style="left:${x}px;top:${y}px;width:${w}px;height:${h}px;">
+          <div class="disc-sector__head" style="height:${HEAD_H}px;">
+            <span class="disc-sector__name">${escHtml(name)}</span>
             <span class="disc-sector__count">${arr.length}</span>
           </div>
-          <div class="disc-sector__cells">${cells}</div>
+          ${cells}
         </div>`;
     }).join("");
   } else {
     grid.classList.remove("disc-grid--treemap");
+    grid.style.height = "";
     grid.innerHTML = items.map(it => renderCell(it, "grid")).join("");
   }
 

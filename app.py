@@ -3102,23 +3102,68 @@ def get_base_fcf(info, stock):
 _FINVIZ_GROWTH_CACHE = {}        # {ticker: (timestamp, growth_or_none)}
 _FINVIZ_GROWTH_CACHE_TTL = 6 * 3600   # 6h — Finviz updates daily at most
 
-# Long-history income statement cache (currently sourced from stockanalysis.com,
-# which serves ~10y free with no API-key throttle). Falls back silently to
-# yfinance's ~4y history when the scrape fails.
-_LONG_INCOME_CACHE = {}          # {ticker: (timestamp, {"revenue": [...], "net_income": [...]})}
+# Long-history income statement cache. Sources data from SEC EDGAR's
+# companyfacts API — 25+ years of annual revenue/net income, free, no key.
+# Two-tier cache: ticker→CIK map (refreshed weekly), per-ticker facts (24h).
+_LONG_INCOME_CACHE = {}          # {ticker: (timestamp, {"revenue":[...], "net_income":[...]})}
 _LONG_INCOME_CACHE_TTL = 24 * 3600
+_SEC_TICKER_MAP = None           # {ticker: cik_int}
+_SEC_TICKER_MAP_TS = 0
+_SEC_TICKER_MAP_TTL = 7 * 86400  # weekly
+
+# SEC requires a User-Agent identifying the requester (name + contact).
+# Override with SEC_USER_AGENT env var in prod.
+_SEC_UA = os.environ.get(
+    "SEC_USER_AGENT",
+    "VALUS Research contact@valusfinancial.com",
+)
+
+
+def _sec_get_ticker_cik_map():
+    """One-time fetch of SEC's ticker→CIK index (~10k tickers, ~1MB JSON)."""
+    global _SEC_TICKER_MAP, _SEC_TICKER_MAP_TS
+    if _SEC_TICKER_MAP and (time.time() - _SEC_TICKER_MAP_TS) < _SEC_TICKER_MAP_TTL:
+        return _SEC_TICKER_MAP
+    try:
+        r = requests.get(
+            "https://www.sec.gov/files/company_tickers.json",
+            headers={"User-Agent": _SEC_UA},
+            timeout=10,
+        )
+        if r.status_code == 200:
+            j = r.json() or {}
+            _SEC_TICKER_MAP = {
+                v["ticker"].upper(): int(v["cik_str"])
+                for v in j.values() if v.get("ticker") and v.get("cik_str")
+            }
+            _SEC_TICKER_MAP_TS = time.time()
+    except Exception:
+        pass
+    return _SEC_TICKER_MAP or {}
+
+
+# us-gaap concept variants companies use for revenue and net income.
+# Different filers use different tags depending on industry / era; we merge
+# results across all of them by fiscal year.
+_SEC_REVENUE_CONCEPTS = (
+    "Revenues",
+    "RevenueFromContractWithCustomerExcludingAssessedTax",
+    "RevenueFromContractWithCustomerIncludingAssessedTax",
+    "SalesRevenueNet",
+    "SalesRevenueGoodsNet",
+)
+_SEC_NETINCOME_CONCEPTS = (
+    "NetIncomeLoss",
+    "ProfitLoss",
+)
 
 
 def _get_long_income_history(ticker):
     """
-    Best-effort 10-year annual revenue and net-income history. Source:
-    stockanalysis.com (free, no API key, no daily limit). Returns
-    {"revenue": [most-recent-first floats], "net_income": [...]} when at
-    least one series is parseable, else None.
-
-    Why not Alpha Vantage: free tier was throttled to 25 req/day in 2025,
-    which a single Discover sweep blows through. Stockanalysis.com is
-    free-tier and unmetered for our usage pattern.
+    25-year annual revenue & net-income history via SEC EDGAR companyfacts.
+    Returns {"revenue":[most-recent-first floats], "net_income":[...]} or
+    None when the ticker isn't a US filer or the API call fails. Last 10
+    years are returned.
     """
     if not ticker:
         return None
@@ -3128,39 +3173,45 @@ def _get_long_income_history(ticker):
         return cached[1]
     result = None
     try:
-        r = requests.get(
-            f"https://stockanalysis.com/stocks/{t.lower()}/financials/",
-            headers={"User-Agent": "Mozilla/5.0 (compatible; VALUS/1.0)"},
-            timeout=6,
-        )
-        if r.status_code == 200:
-            html = r.text
-            # Both Revenue and Net Income labels are followed by a sequence
-            # of <td class="bolded ...">VALUE</td> cells (one per year, most
-            # recent first; values in millions, comma-formatted, possibly
-            # negative). Free tier exposes ~6 columns (TTM + 5y annual);
-            # we trim TTM to keep the series strictly annual.
-            def _extract(row_label, after_offset=4000):
-                idx = html.find(f">{row_label}<")
-                if idx < 0:
-                    return []
-                chunk = html[idx: idx + after_offset]
-                raw = re.findall(
-                    r'<td class="bolded[^"]*">(-?[\d,\.]+)</td>', chunk
-                )
-                out = []
-                for s in raw:
-                    try:
-                        out.append(float(s.replace(",", "")) * 1e6)
-                    except Exception:
-                        pass
-                # Drop the first cell (TTM) so we return strictly annual data.
-                return out[1:11] if len(out) > 1 else out
+        cik_map = _sec_get_ticker_cik_map()
+        cik = cik_map.get(t)
+        if cik:
+            cik_padded = f"{cik:010d}"
+            r = requests.get(
+                f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik_padded}.json",
+                headers={"User-Agent": _SEC_UA},
+                timeout=10,
+            )
+            if r.status_code == 200:
+                gaap = (r.json() or {}).get("facts", {}).get("us-gaap", {})
 
-            rev = _extract("Revenue")
-            ni  = _extract("Net Income")
-            if rev or ni:
-                result = {"revenue": rev, "net_income": ni}
+                def _collect(concepts):
+                    """Merge annual (10-K, FP=FY) values across concept variants."""
+                    by_year = {}
+                    for c in concepts:
+                        usd = gaap.get(c, {}).get("units", {}).get("USD", [])
+                        for x in usd:
+                            if x.get("form") == "10-K" and x.get("fp") == "FY":
+                                year = x.get("end", "")[:4]
+                                val  = x.get("val")
+                                if year and val is not None:
+                                    # Several filings can refer to the same FY
+                                    # (e.g. amended). Keep the largest absolute
+                                    # value — usually the original full-year.
+                                    prev = by_year.get(year)
+                                    if prev is None or abs(val) > abs(prev):
+                                        by_year[year] = val
+                    return by_year
+
+                rev_by_year = _collect(_SEC_REVENUE_CONCEPTS)
+                ni_by_year  = _collect(_SEC_NETINCOME_CONCEPTS)
+
+                # Sort newest-first, take last 10 years.
+                rev = [rev_by_year[y] for y in sorted(rev_by_year, reverse=True)][:10]
+                ni  = [ni_by_year[y]  for y in sorted(ni_by_year,  reverse=True)][:10]
+
+                if rev or ni:
+                    result = {"revenue": rev, "net_income": ni}
     except Exception:
         result = None
     _LONG_INCOME_CACHE[t] = (time.time(), result)
