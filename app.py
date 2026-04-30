@@ -1,5 +1,11 @@
 from flask import Flask, render_template, jsonify, request, session, redirect, url_for
 from flask_cors import CORS
+# Load .env for local dev (Vercel/Render inject env vars natively, so this is a no-op there)
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv()
+except Exception:
+    pass
 import yfinance as yf
 import numpy as np
 import pandas as pd
@@ -3086,6 +3092,282 @@ def get_base_fcf(info, stock):
 
 # ── Growth rate estimation ─────────────────────────────────────────────────────
 
+# ── Blended Growth Calculator ─────────────────────────────────────────────────
+# Combines historical revenue/earnings/FCF, next-2y analyst estimates, and
+# Finviz 5-year EPS estimate into Stage-1 / Stage-2 / terminal growth rates.
+# Falls back to industry-level proxy when data is sparse or volatile.
+# Terminal growth is soft-capped at 6% (industry permitting), hard-capped at
+# 8%, and never allowed to exceed Stage-2 minus 0.5pp.
+
+_FINVIZ_GROWTH_CACHE = {}        # {ticker: (timestamp, growth_or_none)}
+_FINVIZ_GROWTH_CACHE_TTL = 6 * 3600   # 6h — Finviz updates daily at most
+
+# Alpha Vantage gives ~20 years of annual income statements on the free tier
+# (5 req/min, 500/day). Cache aggressively to stay under the daily ceiling.
+_AV_INCOME_CACHE = {}            # {ticker: (timestamp, {"revenue": [...], "net_income": [...]})}
+_AV_INCOME_CACHE_TTL = 24 * 3600  # 24h
+
+
+def _get_alphavantage_income_history(ticker):
+    """
+    Pull up to 10 years of annual revenue and net income from Alpha Vantage.
+    Returns {"revenue": [most-recent-first floats], "net_income": [...]}
+    or None when the key is missing, the call fails, or the response is empty.
+    """
+    if not ticker:
+        return None
+    api_key = os.environ.get("ALPHA_VANTAGE_API_KEY")
+    if not api_key:
+        return None
+    t = ticker.upper().strip()
+    cached = _AV_INCOME_CACHE.get(t)
+    if cached and (time.time() - cached[0]) < _AV_INCOME_CACHE_TTL:
+        return cached[1]
+    result = None
+    try:
+        r = requests.get(
+            "https://www.alphavantage.co/query",
+            params={"function": "INCOME_STATEMENT", "symbol": t, "apikey": api_key},
+            timeout=8,
+        )
+        if r.status_code == 200:
+            j = r.json() or {}
+            rows = j.get("annualReports") or []
+            if rows:
+                rev, ni = [], []
+                for row in rows[:10]:
+                    rv = row.get("totalRevenue")
+                    nv = row.get("netIncome")
+                    if rv and rv != "None":
+                        try: rev.append(float(rv))
+                        except Exception: pass
+                    if nv and nv != "None":
+                        try: ni.append(float(nv))
+                        except Exception: pass
+                if rev or ni:
+                    result = {"revenue": rev, "net_income": ni}
+    except Exception:
+        result = None
+    _AV_INCOME_CACHE[t] = (time.time(), result)
+    return result
+
+
+def _get_revenue_history(income_stmt):
+    """Annual revenue series, most recent first. Up to ~10 years if available."""
+    if income_stmt is None or getattr(income_stmt, "empty", True):
+        return []
+    for key in ("Total Revenue", "TotalRevenue"):
+        if key in income_stmt.index:
+            row = income_stmt.loc[key].dropna()
+            return [float(v) for v in row.values if v is not None and not pd.isna(v)]
+    return []
+
+
+def _get_earnings_history(income_stmt):
+    """Annual net income series, most recent first."""
+    if income_stmt is None or getattr(income_stmt, "empty", True):
+        return []
+    for key in ("Net Income", "NetIncome", "Net Income Common Stockholders"):
+        if key in income_stmt.index:
+            row = income_stmt.loc[key].dropna()
+            return [float(v) for v in row.values if v is not None and not pd.isna(v)]
+    return []
+
+
+def _series_cagr(values):
+    """CAGR from a series ordered most-recent-first. Needs ≥3 positive points."""
+    pos = [v for v in values if v and v > 0]
+    if len(pos) < 3:
+        return None
+    n = len(pos) - 1
+    try:
+        return (pos[0] / pos[-1]) ** (1 / n) - 1
+    except Exception:
+        return None
+
+
+def _is_volatile(values, cv_threshold=1.0):
+    """Coefficient of variation on year-over-year growth > threshold → volatile."""
+    pos = [v for v in values if v and v > 0]
+    if len(pos) < 4:
+        return True
+    growths = [(pos[i] - pos[i + 1]) / pos[i + 1] for i in range(len(pos) - 1)]
+    mean = sum(growths) / len(growths)
+    if abs(mean) < 1e-6:
+        return False
+    var = sum((g - mean) ** 2 for g in growths) / len(growths)
+    return (var ** 0.5) / abs(mean) > cv_threshold
+
+
+def _get_finviz_5y_growth(ticker):
+    """
+    Scrape Finviz 'EPS next 5Y' estimate. Returns float (e.g. 0.18) or None.
+    Cached for 6h; failures cached as None to avoid repeated 5s timeouts.
+    """
+    if not ticker:
+        return None
+    t = ticker.upper().strip()
+    cached = _FINVIZ_GROWTH_CACHE.get(t)
+    if cached and (time.time() - cached[0]) < _FINVIZ_GROWTH_CACHE_TTL:
+        return cached[1]
+    growth = None
+    try:
+        r = requests.get(
+            f"https://finviz.com/quote.ashx?t={t}",
+            headers={"User-Agent": "Mozilla/5.0 (compatible; VALUS/1.0)"},
+            timeout=5,
+        )
+        if r.status_code == 200:
+            # Finviz snapshot table: "EPS next 5Y" cell followed by <b>NN.NN%</b>
+            m = re.search(
+                r"EPS next 5Y[^<]*</td>\s*<td[^>]*>\s*<b>\s*(-?[\d.]+)\s*%",
+                r.text,
+            )
+            if m:
+                v = float(m.group(1)) / 100
+                if -0.5 < v < 1.0:        # sanity: -50% .. +100%
+                    growth = v
+    except Exception:
+        growth = None
+    _FINVIZ_GROWTH_CACHE[t] = (time.time(), growth)
+    return growth
+
+
+def compute_blended_growth(stock, info, fcf_series, income_stmt,
+                           ind_params, ticker):
+    """
+    Blend historical, analyst, and Finviz signals into Stage-1, Stage-2, and
+    terminal growth rates. Falls back to industry proxy when data is sparse
+    or volatile.
+
+    Returns dict:
+      {
+        "s1": float, "s2": float, "tg": float,
+        "source": str, "confidence": "high"|"medium"|"low",
+        "fellback_to_industry": bool,
+        "components": { ... raw signals ... },
+      }
+    """
+    rev = _get_revenue_history(income_stmt)
+    eps = _get_earnings_history(income_stmt)
+
+    # Alpha Vantage extension: yfinance free tier returns ~4 years of annual
+    # data; Alpha Vantage returns up to ~20. Prefer AV when it gives a
+    # strictly longer series — falling back silently when the key is missing,
+    # the API throttles, or the response is empty.
+    av = _get_alphavantage_income_history(ticker)
+    if av:
+        if av.get("revenue") and len(av["revenue"]) > len(rev):
+            rev = av["revenue"]
+        if av.get("net_income") and len(av["net_income"]) > len(eps):
+            eps = av["net_income"]
+
+    rev_cagr = _series_cagr(rev)
+    fcf_cagr = _series_cagr(fcf_series or [])
+    eps_cagr = _series_cagr(eps)
+
+    hist_signals = [c for c in (rev_cagr, fcf_cagr, eps_cagr) if c is not None]
+    hist_growth = sum(hist_signals) / len(hist_signals) if hist_signals else None
+
+    # Next-2y analyst earnings estimate (average +1y and +2y when both exist)
+    analyst_growth = None
+    try:
+        ee = stock.earnings_estimate
+        if ee is not None and not ee.empty:
+            vals = []
+            for k in ("+1y", "+2y"):
+                if k in ee.index:
+                    v = safe(ee.loc[k, "growth"])
+                    if v is not None and -0.5 < v < 1.0:
+                        vals.append(float(v))
+            if vals:
+                analyst_growth = sum(vals) / len(vals)
+    except Exception:
+        pass
+
+    finviz_growth = _get_finviz_5y_growth(ticker)
+
+    components = {
+        "hist_revenue_cagr": rev_cagr,
+        "hist_fcf_cagr":     fcf_cagr,
+        "hist_eps_cagr":     eps_cagr,
+        "analyst_2y_avg":    analyst_growth,
+        "finviz_5y_eps":     finviz_growth,
+        "revenue_years":     len(rev),
+        "earnings_years":    len(eps),
+        "fcf_years":         len(fcf_series or []),
+        "alphavantage_used": bool(av),
+    }
+
+    # Industry proxy: 70% of the sector's max_s1 ceiling represents a
+    # mid-cycle "average mature company in this industry" growth rate.
+    industry_proxy = ind_params["max_s1"] * 0.70
+
+    # Sparseness/volatility detection — if both rev and fcf history are
+    # too short or whipsawing, and we have no forward signals, fall back.
+    rev_ok = len(rev) >= 3 and not _is_volatile(rev)
+    fcf_ok = len(fcf_series or []) >= 3 and not _is_volatile(fcf_series or [])
+    forward_ok = (analyst_growth is not None) or (finviz_growth is not None)
+    must_fall_back = (not rev_ok) and (not fcf_ok) and (not forward_ok)
+
+    if must_fall_back:
+        s1 = industry_proxy
+        source = "Industry proxy (sparse / volatile data)"
+        confidence = "low"
+        fellback = True
+    else:
+        # Stage 1 weighted blend: analyst > Finviz > historical.
+        # Re-normalises across whichever signals are available.
+        weights, values = [], []
+        if analyst_growth is not None:
+            weights.append(0.50); values.append(analyst_growth)
+        if finviz_growth is not None:
+            weights.append(0.30); values.append(finviz_growth)
+        if hist_growth is not None:
+            weights.append(0.20); values.append(hist_growth)
+        if not values:
+            s1 = industry_proxy
+            source = "Industry proxy"
+            confidence = "low"
+            fellback = True
+        else:
+            s1 = sum(v * w for v, w in zip(values, weights)) / sum(weights)
+            source = "Blended (analyst · Finviz · historical)"
+            confidence = "high" if len(values) == 3 else "medium" if len(values) == 2 else "low"
+            fellback = False
+
+    # Cap Stage 1 at industry ceiling, floor at 0.
+    s1 = max(min(s1, ind_params["max_s1"]), 0.0)
+
+    # Stage 2 (years 6–10): mean-reversion. Weighted toward historical CAGR
+    # and a mature-industry rate, with a small Finviz contribution if present.
+    s2_pairs = []
+    if hist_growth is not None:
+        s2_pairs.append((hist_growth, 0.55))
+    if finviz_growth is not None:
+        s2_pairs.append((finviz_growth * 0.7, 0.25))   # discount: years 6–10 is past Finviz horizon
+    s2_pairs.append((industry_proxy * 0.5, 0.20))      # mature-rate anchor
+    s2 = sum(v * w for v, w in s2_pairs) / sum(w for _, w in s2_pairs)
+    # Cap Stage 2 at 65% of industry max_s1 (matches existing convention),
+    # floor at 2%, never above Stage 1.
+    s2 = max(min(s2, ind_params["max_s1"] * 0.65, s1), 0.02)
+
+    # Terminal growth: soft-cap at min(industry max_tg, 6%); hard-cap at 8%;
+    # always strictly below Stage 2.
+    tg_cap_soft = min(ind_params["max_tg"], 0.06)
+    tg_cap_hard = 0.08
+    tg = min(tg_cap_soft, tg_cap_hard)
+    tg = min(tg, max(s2 - 0.005, 0.005))
+
+    return {
+        "s1": s1, "s2": s2, "tg": tg,
+        "source": source,
+        "confidence": confidence,
+        "fellback_to_industry": fellback,
+        "components": components,
+    }
+
+
 def get_forward_growth(stock, info, fcf_series):
     """
     Best available forward FCF/earnings growth for Stage 1.
@@ -4094,6 +4376,7 @@ def analyze():
         s1_ov = request.args.get("growth1")
         s2_ov = request.args.get("growth2")
         tg    = float(request.args.get("terminal", 0.03))
+        blended = None   # populated below when dcf_available; surfaced in payload
         yrs   = int(request.args.get("years", 10))
         tg    = min(max(tg, 0.01), 0.05)
         yrs   = min(max(yrs, 5), 15)
@@ -4453,6 +4736,20 @@ def analyze():
             )
             effective_max_s1 = max(ind_params["max_s1"], 0.35) if is_backbone_moat else ind_params["max_s1"]
 
+            # Blended growth calculator — produces s1, s2, and a tg seed by
+            # combining historical revenue/earnings/FCF, next-2y analyst
+            # estimates, and Finviz 5-year EPS growth, with industry-proxy
+            # fallback when data is sparse or volatile. User overrides on the
+            # individual stages still win below.
+            blended = compute_blended_growth(
+                stock, info, fcf_series, income_stmt, ind_params, ticker
+            )
+            # Seed terminal growth from blended calc unless user overrode it.
+            # Existing industry / moat / payment-network / WACC-spread caps
+            # below still get the final word.
+            if not user_tg_override:
+                tg = blended["tg"]
+
             if s1_ov:
                 _s1_raw = float(s1_ov) / 100 if float(s1_ov) > 1 else float(s1_ov)
                 # Clamp user override to the same sector ceiling we apply to
@@ -4462,8 +4759,8 @@ def analyze():
                 s1 = max(min(_s1_raw, effective_max_s1), 0.0)
                 growth_source = "User override"
             else:
-                s1, growth_source = get_forward_growth(stock, info, fcf_series)
-                s1 = min(s1, effective_max_s1)
+                s1 = min(blended["s1"], effective_max_s1)
+                growth_source = blended["source"]
                 # Transformative-catalyst Stage-1 lift: when a durable
                 # industry-specific milestone fired in the news scan
                 # (eVTOL Part 135, semi tape-out, biotech BLA approval,
@@ -4486,10 +4783,12 @@ def analyze():
                 # auto path uses to keep mid-period growth credible.
                 s2 = max(min(_s2_raw, effective_max_s1 * 0.65), tg)
             else:
-                # Stage 2 = 55% of Stage 1 (standard mean-reversion taper), with:
-                #   • floor of (TG + 0.5pp) — prevents S2 falling below terminal rate
-                #   • absolute floor of 2% — even mature companies grow at nominal GDP pace
-                s2 = max(s1 * 0.55, tg + 0.005, 0.02)
+                # Take the blended Stage 2 (historical-weighted mean reversion),
+                # then enforce the same invariants the legacy auto path used:
+                # not above Stage 1, ≥ TG + 0.5pp, ≥ 2% absolute floor.
+                s2 = blended["s2"]
+                s2 = min(s2, s1)
+                s2 = max(s2, tg + 0.005, 0.02)
 
             # ── Structural Transformer: Robotaxi / FSD Stage 2 premium ────────
             # Tesla launched unsupervised Robotaxis (Dallas/Houston, Q1 2026) with
@@ -5773,6 +6072,15 @@ def analyze():
             "stage1_growth": round(s1 * 100, 2) if s1 is not None else None,
             "stage2_growth": round(s2 * 100, 2) if s2 is not None else None,
             "terminal_growth":round(tg * 100, 2),
+            "blended_growth": ({
+                "source":              blended.get("source"),
+                "confidence":          blended.get("confidence"),
+                "fellback_to_industry": blended.get("fellback_to_industry"),
+                "components": {
+                    k: (round(v * 100, 2) if isinstance(v, float) else v)
+                    for k, v in (blended.get("components") or {}).items()
+                },
+            } if blended else None),
             "projection_years": yrs,
             "base_fcf":       base_fcf,
             "historical_fcf": fcf_series[:5],

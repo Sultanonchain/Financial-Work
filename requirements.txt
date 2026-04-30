@@ -10,3 +10,5 @@ gunicorn>=21.2.0
 authlib>=1.3.0
 redis>=5.0.0
 requests>=2.31.0
+# .env loader for local dev (Vercel/Render set env vars natively)
+python-dotenv>=1.0.0
