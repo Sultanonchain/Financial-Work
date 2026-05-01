@@ -69,6 +69,19 @@ def kv_set(key, value, ttl=None):
         except Exception: pass
     return False
 
+# ── Rate limiting — uses Redis when available, falls back to memory ────
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+
+_limiter_storage = os.environ.get("KV_URL") if _kv else None
+limiter = Limiter(
+    key_func=get_remote_address,
+    app=app,
+    storage_uri=_limiter_storage or "memory://",
+    default_limits=[],
+    headers_enabled=True,
+)
+
 # ── Google OAuth (optional — gracefully disabled when env vars absent) ─
 _oauth = None
 _GOOGLE_CONFIGURED = bool(
@@ -4622,9 +4635,34 @@ def filtered_df_to_rows(df, row_order):
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
+from flask_limiter.errors import RateLimitExceeded
+
+@app.errorhandler(RateLimitExceeded)
+def handle_rate_limit(e):
+    return jsonify({
+        "error": "rate_limited",
+        "message": "You've hit the free limit. Sign in to get more free lookups and unlock full access.",
+        "login_url": "/auth/login",
+    }), 429
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/robots.txt")
+def robots_txt():
+    body = (
+        "User-agent: GPTBot\nDisallow: /\n\n"
+        "User-agent: ClaudeBot\nDisallow: /\n\n"
+        "User-agent: Google-Extended\nDisallow: /\n\n"
+        "User-agent: CCBot\nDisallow: /\n\n"
+        "User-agent: anthropic-ai\nDisallow: /\n\n"
+        "User-agent: PerplexityBot\nDisallow: /\n\n"
+        "User-agent: *\nAllow: /\n"
+    )
+    return app.response_class(body, mimetype="text/plain")
 
 
 @app.route("/docs")
@@ -4734,6 +4772,7 @@ def auth_logout():
 
 
 @app.route("/api/search")
+@limiter.limit("30 per minute; 300 per day")
 def search():
     q = request.args.get("q", "").strip()
     if not q:
@@ -4758,6 +4797,7 @@ def search():
 
 
 @app.route("/api/history")
+@limiter.limit("30 per minute; 300 per day")
 def history():
     ticker = request.args.get("ticker", "").strip().upper()
     period = request.args.get("period", "1y").lower()
@@ -4891,6 +4931,7 @@ def _fetch_insider_form4(ticker: str, days: int = 90, max_items: int = 10):
 
 
 @app.route("/api/insider")
+@limiter.limit("20 per minute; 200 per day")
 def api_insider():
     ticker = request.args.get("ticker", "").strip().upper()
     if not ticker:
@@ -4903,6 +4944,7 @@ def api_insider():
 
 
 @app.route("/api/valuation-history")
+@limiter.limit("20 per minute; 200 per day")
 def valuation_history():
     """
     Phase A: 5-year historical intrinsic value vs. price.
@@ -4948,6 +4990,7 @@ _QUOTE_CACHE = {}        # {ticker: (timestamp, payload)}
 _QUOTE_CACHE_TTL_S = 30  # short TTL — this is a live-tick endpoint
 
 @app.route("/api/quote")
+@limiter.limit("30 per minute; 300 per day")
 def quote():
     raw = request.args.get("tickers") or request.args.get("ticker") or ""
     tickers = [t.strip().upper() for t in raw.split(",") if t.strip()]
@@ -4991,6 +5034,7 @@ def quote():
 
 
 @app.route("/api/statements")
+@limiter.limit("20 per minute; 200 per day")
 def statements():
     ticker = request.args.get("ticker", "").strip().upper()
     if not ticker:
@@ -5078,6 +5122,7 @@ DISCOVERY_TICKERS = [
 ]
 
 @app.route("/api/discover")
+@limiter.limit("10 per minute; 100 per day")
 def discover():
     """
     Returns a thin summary for every ticker in DISCOVERY_TICKERS using the
@@ -5407,6 +5452,7 @@ def leaderboard():
 
 
 @app.route("/api/analyze")
+@limiter.limit("10 per minute; 50 per day")
 def analyze():
     ticker = request.args.get("ticker", "").strip().upper()
     if not ticker:
@@ -7332,7 +7378,7 @@ def analyze():
             # post-search insight cards (no extra API calls).
             "fifty_two_week_high":       safe(info.get("fiftyTwoWeekHigh")),
             "fifty_two_week_low":        safe(info.get("fiftyTwoWeekLow")),
-            "quality_metrics": _build_quality_metrics(info, base_fcf, revenue_ttm),
+            "quality_metrics": _build_quality_metrics(info, base_fcf, rev_ttm),
         }
 
         cleaned = clean(result)

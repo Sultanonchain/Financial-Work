@@ -129,6 +129,10 @@ async function analyze(ticker, params = {}) {
   try {
     const res = await fetch(url);
     const data = await res.json();
+    if (res.status === 429) {
+      showRateLimit();
+      return;
+    }
     if (!res.ok || data.error) {
       throw new Error(data.error || `HTTP ${res.status}`);
     }
@@ -166,6 +170,11 @@ function showLoading() { $("loading").classList.remove("hidden"); }
 function hideLoading() { $("loading").classList.add("hidden"); }
 function showError(msg) {
   $("errorMsg").textContent = msg;
+  $("error").classList.remove("hidden");
+}
+function showRateLimit() {
+  $("errorMsg").innerHTML =
+    'Free limit reached. <a href="/auth/login" style="color:inherit;text-decoration:underline;font-weight:600;">Sign in</a> to get more free lookups and unlock full access.';
   $("error").classList.remove("hidden");
 }
 function hideError() { $("error").classList.add("hidden"); }
