@@ -1630,6 +1630,88 @@ def safe(val, default=None):
         return default
 
 
+def _qual_score_pct(pct, good, great):
+    """Score a percentage value into one of {weak, ok, strong, elite}.
+    `good` is the threshold for ok→strong, `great` is strong→elite."""
+    if pct is None:
+        return None
+    if pct >= great: return "elite"
+    if pct >= good:  return "strong"
+    if pct >= 0:     return "ok"
+    return "weak"
+
+
+def _qual_score_low(val, good, great):
+    """Score a metric where lower is better (e.g. debt/equity)."""
+    if val is None:
+        return None
+    if val <= great: return "elite"
+    if val <= good:  return "strong"
+    if val <= good * 2: return "ok"
+    return "weak"
+
+
+def _build_quality_metrics(info, base_fcf, revenue_ttm):
+    """
+    Snapshot of profitability, returns, and leverage from the live info
+    dict + already-computed FCF & revenue. No additional API calls.
+
+    Each metric reports value (% or ratio), label, and a qualitative tier
+    so the UI can colour-code.
+    """
+    if not info:
+        return None
+    roe = safe(info.get("returnOnEquity"))
+    roa = safe(info.get("returnOnAssets"))
+    op_margin = safe(info.get("operatingMargins"))
+    profit_margin = safe(info.get("profitMargins"))
+    de  = safe(info.get("debtToEquity"))    # yfinance returns this as a percent (e.g. 145 for 1.45x)
+    fcf_margin = None
+    if base_fcf and revenue_ttm and revenue_ttm > 0:
+        fcf_margin = float(base_fcf) / float(revenue_ttm)
+
+    de_ratio = (de / 100.0) if de is not None else None
+    metrics = []
+
+    if roe is not None:
+        metrics.append({
+            "key": "roe", "label": "Return on Equity",
+            "value_pct": round(roe * 100, 1),
+            "tier": _qual_score_pct(roe * 100, good=10, great=20),
+        })
+    if roa is not None:
+        metrics.append({
+            "key": "roa", "label": "Return on Assets",
+            "value_pct": round(roa * 100, 1),
+            "tier": _qual_score_pct(roa * 100, good=5, great=10),
+        })
+    if op_margin is not None:
+        metrics.append({
+            "key": "op_margin", "label": "Operating Margin",
+            "value_pct": round(op_margin * 100, 1),
+            "tier": _qual_score_pct(op_margin * 100, good=10, great=20),
+        })
+    if profit_margin is not None:
+        metrics.append({
+            "key": "profit_margin", "label": "Net Margin",
+            "value_pct": round(profit_margin * 100, 1),
+            "tier": _qual_score_pct(profit_margin * 100, good=8, great=15),
+        })
+    if fcf_margin is not None:
+        metrics.append({
+            "key": "fcf_margin", "label": "FCF Margin",
+            "value_pct": round(fcf_margin * 100, 1),
+            "tier": _qual_score_pct(fcf_margin * 100, good=8, great=15),
+        })
+    if de_ratio is not None:
+        metrics.append({
+            "key": "debt_equity", "label": "Debt / Equity",
+            "value_ratio": round(de_ratio, 2),
+            "tier": _qual_score_low(de_ratio, good=1.0, great=0.5),
+        })
+    return metrics if metrics else None
+
+
 def clean(v):
     if isinstance(v, float) and (np.isnan(v) or np.isinf(v)):
         return None
@@ -4704,6 +4786,122 @@ def history():
         return jsonify({"error": "Couldn't load price history. Try again."}), 500
 
 
+# ── Insider Activity (SEC Form 4) ─────────────────────────────────────────────
+# Form 4 = statement of changes in beneficial ownership, filed within 2 business
+# days of an insider trade. We pull the EDGAR Atom feed for the ticker filtered
+# to type=4 and parse the most recent ~10 filings. Free, public-domain, fully
+# compliant. Cached 6h.
+_INSIDER_CACHE = {}
+_INSIDER_CACHE_TTL = 6 * 3600
+
+
+def _fetch_insider_form4(ticker: str, days: int = 90, max_items: int = 10):
+    """
+    Returns dict:
+      {
+        "buys": int, "sells": int,
+        "net_value": float,         # signed USD, +ve = net buying
+        "items": [{date, insider, type, shares, value, role}],
+        "as_of": iso,
+      }
+    or None on failure / no Form 4 history.
+    """
+    if not ticker:
+        return None
+    t = ticker.upper().strip()
+    cached = _INSIDER_CACHE.get(t)
+    if cached and (time.time() - cached[0]) < _INSIDER_CACHE_TTL:
+        return cached[1]
+
+    cik_map = _sec_get_ticker_cik_map()
+    cik = cik_map.get(t)
+    if not cik:
+        _INSIDER_CACHE[t] = (time.time(), None)
+        return None
+
+    result = None
+    try:
+        url = (
+            f"https://www.sec.gov/cgi-bin/browse-edgar?"
+            f"action=getcompany&CIK={cik:010d}&type=4&dateb=&owner=include&count=20&output=atom"
+        )
+        r = requests.get(url, headers={"User-Agent": _SEC_UA}, timeout=10)
+        if r.status_code != 200:
+            _INSIDER_CACHE[t] = (time.time(), None)
+            return None
+
+        ns = {"a": "http://www.w3.org/2005/Atom"}
+        root = ET.fromstring(r.text)
+        cutoff = (datetime.utcnow() - timedelta(days=days)).date()
+        items = []
+        buys = sells = 0
+        net_value = 0.0
+
+        for entry in root.findall("a:entry", ns)[: 2 * max_items]:
+            updated_el = entry.find("a:updated", ns)
+            title_el   = entry.find("a:title", ns)
+            content_el = entry.find("a:content", ns)
+            link_el    = entry.find("a:link", ns)
+
+            if updated_el is None or title_el is None:
+                continue
+            try:
+                d = datetime.fromisoformat(updated_el.text.replace("Z", "+00:00")).date()
+            except Exception:
+                continue
+            if d < cutoff:
+                continue
+
+            # Title format: "4 - <Insider Name> (CIK) (Filer)"
+            title = (title_el.text or "").strip()
+            content = (content_el.text or "") if content_el is not None else ""
+
+            # Best-effort extraction of insider name and role from content/title.
+            insider = None
+            role = None
+            m_name = re.search(r"4 - ([^(]+)\(", title)
+            if m_name:
+                insider = m_name.group(1).strip()
+            m_role = re.search(r"(Director|Officer|10% Owner|CEO|CFO|COO|President|Chairman)",
+                               content, re.IGNORECASE)
+            if m_role:
+                role = m_role.group(1)
+
+            href = link_el.get("href") if link_el is not None else None
+            items.append({
+                "date":    d.isoformat(),
+                "insider": insider or "Insider",
+                "role":    role,
+                "url":     href,
+            })
+
+        if items:
+            result = {
+                "buys":      None,        # transaction-level detail requires the per-filing XML
+                "sells":     None,
+                "net_value": None,
+                "items":     items[:max_items],
+                "filings":   len(items),
+                "as_of":     date.today().isoformat(),
+            }
+    except Exception:
+        result = None
+    _INSIDER_CACHE[t] = (time.time(), result)
+    return result
+
+
+@app.route("/api/insider")
+def api_insider():
+    ticker = request.args.get("ticker", "").strip().upper()
+    if not ticker:
+        return jsonify({"error": "ticker required"}), 400
+    payload = _fetch_insider_form4(ticker)
+    if not payload:
+        return jsonify({"available": False, "reason": "No recent Form 4 filings or non-US filer."})
+    payload["available"] = True
+    return jsonify(payload)
+
+
 @app.route("/api/valuation-history")
 def valuation_history():
     """
@@ -7129,6 +7327,12 @@ def analyze():
             "growth_catalyst_lift_pp":   round(growth_catalyst_lift_pp, 2),
             "transformative_labels":     transformative_labels,
             "news_interpretation":       news_interpretation,
+            # ── Hero insights & quality scorecard ────────────────────────
+            # All sourced from existing info dict; surfaced for the new
+            # post-search insight cards (no extra API calls).
+            "fifty_two_week_high":       safe(info.get("fiftyTwoWeekHigh")),
+            "fifty_two_week_low":        safe(info.get("fiftyTwoWeekLow")),
+            "quality_metrics": _build_quality_metrics(info, base_fcf, revenue_ttm),
         }
 
         cleaned = clean(result)

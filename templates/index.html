@@ -658,19 +658,32 @@
 
       <div class="verdict-line" id="vVerdict">—</div>
 
-      <div class="scenario-toggle" role="tablist" id="scToggle">
-        <button class="scenario-toggle__btn bear" data-sc="bear" role="tab">
-          <span class="scenario-toggle__label">▾ Bear</span>
-          <span class="scenario-toggle__value numeric" data-sc-val="bear">—</span>
-        </button>
-        <button class="scenario-toggle__btn base active" data-sc="base" role="tab">
-          <span class="scenario-toggle__label">◆ Base</span>
-          <span class="scenario-toggle__value numeric" data-sc-val="base">—</span>
-        </button>
-        <button class="scenario-toggle__btn bull" data-sc="bull" role="tab">
-          <span class="scenario-toggle__label">▴ Bull</span>
-          <span class="scenario-toggle__value numeric" data-sc-val="bull">—</span>
-        </button>
+      <!-- Inline insight row: confidence + implied growth + 52w range.
+           Replaces the previous Bear/Base/Bull toggle (redundant with the
+           detailed Scenario Analysis card below). -->
+      <div class="hero-insights" id="vInsights">
+        <div class="hero-insight" id="viConfidenceWrap" hidden>
+          <span class="hero-insight__label">Confidence</span>
+          <span class="hero-insight__value" id="viConfidence">—</span>
+          <span class="hero-insight__hint" id="viConfidenceHint"></span>
+        </div>
+        <div class="hero-insight" id="viImpliedWrap" hidden>
+          <span class="hero-insight__label">Implied growth</span>
+          <span class="hero-insight__value" id="viImplied">—</span>
+          <span class="hero-insight__hint" id="viImpliedHint"></span>
+        </div>
+        <div class="hero-insight hero-insight--range" id="viRangeWrap" hidden>
+          <span class="hero-insight__label">52-week range</span>
+          <div class="hr-bar">
+            <div class="hr-bar__track">
+              <div class="hr-bar__marker" id="viRangeMarker"></div>
+            </div>
+            <div class="hr-bar__ends">
+              <span id="viRangeLow">—</span>
+              <span id="viRangeHigh">—</span>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -683,6 +696,13 @@
         </div>
         <div class="vh-stats" id="vhStats"></div>
       </div>
+      <!-- Cyclical-pattern caveat: shown when the deterministic IV is
+           consistently far below price (auto/airline/semi trough names).
+           Pure DCF systematically undervalues these — surface that. -->
+      <div class="vh-caveat hidden" id="vhCaveat">
+        <span class="vh-caveat__icon" aria-hidden="true">⚠</span>
+        <span class="vh-caveat__text" id="vhCaveatText"></span>
+      </div>
       <div class="vh-chart-wrap">
         <canvas id="valuationHistoryChart" aria-label="Valuation history chart"></canvas>
       </div>
@@ -693,6 +713,32 @@
       </div>
       <div class="vh-empty hidden" id="vhEmpty">
         Historical valuation requires SEC EDGAR data — available for US-listed filers with sufficient history.
+      </div>
+    </section>
+
+    <!-- INSIGHTS GRID: quality scorecard + insider activity + news summary -->
+    <section class="insights-grid hidden" id="insightsGrid">
+      <div class="card insights-card" id="qualityCard" hidden>
+        <div class="ic-head">
+          <div class="ic-title">Quality scorecard</div>
+          <div class="ic-sub" id="qualitySub">Profitability, returns, leverage</div>
+        </div>
+        <div class="quality-grid" id="qualityGrid"></div>
+      </div>
+      <div class="card insights-card" id="insiderCard" hidden>
+        <div class="ic-head">
+          <div class="ic-title">Insider activity (90d)</div>
+          <div class="ic-sub" id="insiderSub">SEC Form 4 — last 90 days</div>
+        </div>
+        <div class="insider-summary" id="insiderSummary"></div>
+        <div class="insider-list" id="insiderList"></div>
+      </div>
+      <div class="card insights-card" id="newsSummaryCard" hidden>
+        <div class="ic-head">
+          <div class="ic-title">News &amp; catalysts</div>
+          <div class="ic-sub" id="newsSummarySub">Top recent signals</div>
+        </div>
+        <div class="news-summary-body" id="newsSummaryBody"></div>
       </div>
     </section>
 

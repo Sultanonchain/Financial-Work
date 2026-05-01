@@ -216,6 +216,9 @@ function renderResults(d) {
   renderMethodology(d);
   renderScenarios(d);
   renderMiniStats(d);
+  renderQualityCard(d);
+  renderInsiderCard(d.ticker);
+  renderNewsSummaryCard(d);
   renderDrawerContent(d);
   syncAddPortfolioButtonForCurrent();
   if (typeof window._cdReset === "function") window._cdReset();
@@ -554,17 +557,69 @@ function renderHeroVerdict(d) {
   // Verdict line
   $("vVerdict").textContent = vs.verdict || pf.narrative || "";
 
-  // Scenario toggle values
-  const sc = d.scenarios || {};
-  document.querySelector('[data-sc-val="bear"]').textContent = sc.bear?.value != null ? fmtPrice(sc.bear.value) : "—";
-  document.querySelector('[data-sc-val="base"]').textContent = sc.base?.value != null ? fmtPrice(sc.base.value) : "—";
-  document.querySelector('[data-sc-val="bull"]').textContent = sc.bull?.value != null ? fmtPrice(sc.bull.value) : "—";
+  // Hero insights (replaces the old Bear/Base/Bull toggle).
+  renderHeroInsights(d);
+}
 
-  // Bind toggle (animate IV cross-fade between scenarios)
-  document.querySelectorAll(".scenario-toggle__btn").forEach(btn => {
-    btn.onclick = () => activateScenario(btn.dataset.sc);
-  });
-  activateScenarioVisual("base");
+// Populates the inline confidence + implied-growth + 52-week range row.
+// All three are independent — each hidden when its data is missing.
+function renderHeroInsights(d) {
+  // ── Confidence ──
+  const confWrap = document.getElementById("viConfidenceWrap");
+  const confEl   = document.getElementById("viConfidence");
+  const confHint = document.getElementById("viConfidenceHint");
+  const conf     = d.dcf_confidence;
+  if (conf && conf !== "not_applicable") {
+    const label = (d.dcf_confidence_label || conf).replace(/^\w/, c => c.toUpperCase());
+    confEl.textContent = label;
+    confEl.className = `hero-insight__value conf-${conf}`;
+    const reason = (d.dcf_confidence_warnings || [])[0];
+    confHint.textContent = reason ? reason.split(/[—–-]/)[0].trim().slice(0, 60) : "";
+    confWrap.hidden = false;
+  } else {
+    confWrap.hidden = true;
+  }
+
+  // ── Implied growth vs sector ceiling ──
+  const ig = d.implied_growth_pct;
+  const ceil = d.sector_growth_ceiling_pct;
+  const igWrap = document.getElementById("viImpliedWrap");
+  const igEl   = document.getElementById("viImplied");
+  const igHint = document.getElementById("viImpliedHint");
+  if (ig != null) {
+    igEl.textContent = `${fmt(ig, 1)}%`;
+    if (ceil != null) {
+      const ratio = ig / ceil;
+      let cls = "ok";
+      if (ratio > 1.5)      cls = "speculative";
+      else if (ratio > 1.2) cls = "stretched";
+      else if (ratio > 0.9) cls = "ok";
+      else                  cls = "conservative";
+      igEl.className = `hero-insight__value ig-${cls}`;
+      igHint.textContent = `vs ${fmt(ceil, 1)}% sector ceiling`;
+    } else {
+      igEl.className = "hero-insight__value";
+      igHint.textContent = "";
+    }
+    igWrap.hidden = false;
+  } else {
+    igWrap.hidden = true;
+  }
+
+  // ── 52-week range marker ──
+  const lo = d.fifty_two_week_low;
+  const hi = d.fifty_two_week_high;
+  const px = d.current_price;
+  const rWrap = document.getElementById("viRangeWrap");
+  if (lo != null && hi != null && px != null && hi > lo) {
+    const pct = Math.max(0, Math.min(100, ((px - lo) / (hi - lo)) * 100));
+    document.getElementById("viRangeMarker").style.left = `${pct}%`;
+    document.getElementById("viRangeLow").textContent  = `$${fmt(lo, 2)}`;
+    document.getElementById("viRangeHigh").textContent = `$${fmt(hi, 2)}`;
+    rWrap.hidden = false;
+  } else {
+    rWrap.hidden = true;
+  }
 }
 
 // Renders the news chip + expandable list on the verdict card.  Called
@@ -1174,6 +1229,93 @@ function destroyValuationHistoryChart() {
   }
 }
 
+// ── Quality scorecard ────────────────────────────────────────────────────
+// Server emits an array of metrics with {label, value_pct|value_ratio, tier}.
+// Tier ∈ {weak, ok, strong, elite} drives colour.
+function renderQualityCard(d) {
+  const card = document.getElementById("qualityCard");
+  const grid = document.getElementById("qualityGrid");
+  const insightsGrid = document.getElementById("insightsGrid");
+  if (!card || !grid) return;
+  const metrics = d.quality_metrics;
+  if (!Array.isArray(metrics) || metrics.length === 0) {
+    card.hidden = true;
+    return;
+  }
+  grid.innerHTML = metrics.map(m => {
+    const v = m.value_pct != null ? `${fmt(m.value_pct, 1)}%`
+            : m.value_ratio != null ? `${fmt(m.value_ratio, 2)}×`
+            : "—";
+    return `
+      <div class="quality-cell q-${m.tier || 'ok'}">
+        <span class="quality-cell__label">${escHtml(m.label)}</span>
+        <span class="quality-cell__value">${v}</span>
+      </div>`;
+  }).join("");
+  card.hidden = false;
+  if (insightsGrid) insightsGrid.classList.remove("hidden");
+}
+
+// ── Insider activity (Form 4) ────────────────────────────────────────────
+// Async — fetches /api/insider when a ticker is analyzed. Hides card on
+// failure or no recent filings.
+async function renderInsiderCard(ticker) {
+  const card = document.getElementById("insiderCard");
+  const summary = document.getElementById("insiderSummary");
+  const list = document.getElementById("insiderList");
+  const insightsGrid = document.getElementById("insightsGrid");
+  if (!card || !ticker) return;
+  card.hidden = true;
+  try {
+    const r = await fetch(`/api/insider?ticker=${encodeURIComponent(ticker)}`);
+    const j = await r.json();
+    if (!j.available || !Array.isArray(j.items) || j.items.length === 0) {
+      card.hidden = true;
+      return;
+    }
+    const tone = j.filings >= 5 ? "active" : j.filings >= 2 ? "moderate" : "quiet";
+    const pill = tone === "active" ? "Active" : tone === "moderate" ? "Moderate" : "Quiet";
+    summary.innerHTML =
+      `<span class="insider-pill insider-pill--${tone}">${j.filings} Form 4 filing${j.filings === 1 ? "" : "s"} · ${pill}</span>`;
+    list.innerHTML = j.items.slice(0, 6).map(it => `
+      <a class="insider-row" href="${escHtml(it.url || '#')}" target="_blank" rel="noopener">
+        <span class="insider-row__date">${escHtml(it.date)}</span>
+        <span class="insider-row__name">Form 4 filing</span>
+        <span class="insider-row__role">View ↗</span>
+      </a>
+    `).join("");
+    card.hidden = false;
+    if (insightsGrid) insightsGrid.classList.remove("hidden");
+  } catch {
+    card.hidden = true;
+  }
+}
+
+// ── News & catalysts summary ─────────────────────────────────────────────
+// Reuses the catalyst_insights / news_interpretation already on the payload.
+// Top 3 lines, deduped, with sentiment tint.
+function renderNewsSummaryCard(d) {
+  const card = document.getElementById("newsSummaryCard");
+  const body = document.getElementById("newsSummaryBody");
+  const insightsGrid = document.getElementById("insightsGrid");
+  if (!card || !body) return;
+  const cats = (d.catalyst_labels || []).map(l => ({ label: l, kind: "pos" }));
+  const risks = (d.risk_labels || []).map(l => ({ label: l, kind: "neg" }));
+  const items = [...cats, ...risks].slice(0, 6);
+  if (items.length === 0) {
+    card.hidden = true;
+    return;
+  }
+  body.innerHTML = items.map(it => `
+    <div class="news-line news-line--${it.kind}">
+      <span class="news-line__dot"></span>
+      <span class="news-line__txt">${escHtml(it.label)}</span>
+    </div>
+  `).join("");
+  card.hidden = false;
+  if (insightsGrid) insightsGrid.classList.remove("hidden");
+}
+
 function renderValuationHistoryChart(payload) {
   const canvas = $("valuationHistoryChart");
   if (!canvas) return;
@@ -1273,12 +1415,40 @@ function renderValuationHistoryChart(payload) {
           grid:  { display: false },
         },
         y: {
+          // Auto-zoom to actual data range. Starting at $0 makes cyclicals
+          // (where IV ~$40 vs price ~$500) look catastrophically wrong.
           ticks: { color: "#6b7382", callback: v => `$${fmt(v, 0)}` },
           grid:  { color: "rgba(255,255,255,0.04)" },
+          beginAtZero: false,
         },
       },
     },
   });
+
+  // ── Cyclical-pattern caveat ───────────────────────────────────────────
+  // When the deterministic IV is consistently far below price across the
+  // full 5y window, surface a banner — pure DCF systematically underestimates
+  // value for cyclicals at trough (autos, airlines, semis, materials).
+  const caveat = document.getElementById("vhCaveat");
+  const caveatTxt = document.getElementById("vhCaveatText");
+  if (caveat && caveatTxt && priceSeries.length && ivPts.length) {
+    const ivVals = ivPts.map(p => p.iv).filter(v => v > 0);
+    const pxVals = priceSeries.filter(v => v > 0);
+    if (ivVals.length && pxVals.length) {
+      const ivMedian = ivVals.slice().sort((a,b) => a - b)[Math.floor(ivVals.length / 2)];
+      const pxMedian = pxVals.slice().sort((a,b) => a - b)[Math.floor(pxVals.length / 2)];
+      const gap = pxMedian > 0 ? (pxMedian - ivMedian) / pxMedian : 0;
+      if (gap > 0.55) {
+        caveatTxt.textContent =
+          "Cyclical / inflection-point pattern detected. Pure-DCF replay underestimates value when current FCF is at a trough — the scenario analysis below captures the bull case more honestly.";
+        caveat.classList.remove("hidden");
+      } else {
+        caveat.classList.add("hidden");
+      }
+    } else {
+      caveat.classList.add("hidden");
+    }
+  }
 
   // Headline stats: latest IV vs latest price → over/undervalued %.
   const stats = $("vhStats");
