@@ -5060,14 +5060,23 @@ def statements():
 # Repeated visits to the same ticker (e.g. portfolio refresh, share-link
 # clicks, discovery heatmap) hit the cache for sub-100ms responses.
 _ANALYZE_CACHE = {}      # {(ticker, params_str): (timestamp, response_dict)}
-_ANALYZE_CACHE_TTL_S = 900   # 15 minutes
+_ANALYZE_CACHE_TTL_S = 1800  # 30 minutes — enough for intraday freshness
 _ANALYZE_CACHE_MAX = 500     # cap to bound memory
 
 def _analyze_cache_key(ticker, args):
     relevant = sorted((k, v) for k, v in args.items() if k != "ticker")
-    return f"{ticker}|{relevant}"
+    return f"valus:analyze:{ticker}|{relevant}"
 
 def _analyze_cache_get(key):
+    # 1. Check Redis first (shared across all Vercel instances)
+    if _kv:
+        try:
+            raw = _kv.get(key)
+            if raw:
+                return _json_top.loads(raw)
+        except Exception:
+            pass
+    # 2. Fall back to in-process memory (local dev / single-instance)
     entry = _ANALYZE_CACHE.get(key)
     if entry is None: return None
     ts, payload = entry
@@ -5077,9 +5086,15 @@ def _analyze_cache_get(key):
     return None
 
 def _analyze_cache_set(key, payload):
+    # Write to Redis (persistent, shared)
+    if _kv:
+        try:
+            _kv.setex(key, _ANALYZE_CACHE_TTL_S, _json_top.dumps(payload))
+        except Exception:
+            pass
+    # Always write to in-process memory too (zero-latency hit on same instance)
     _ANALYZE_CACHE[key] = (time.time(), payload)
     if len(_ANALYZE_CACHE) > _ANALYZE_CACHE_MAX:
-        # Drop the oldest entry to bound size
         oldest = min(_ANALYZE_CACHE.keys(), key=lambda k: _ANALYZE_CACHE[k][0])
         _ANALYZE_CACHE.pop(oldest, None)
 
