@@ -155,19 +155,31 @@
 
       <div class="advanced-panel hidden" id="advancedPanel">
         <div class="advanced-field">
-          <label for="advYrs">Projection years</label>
+          <label for="advYrs">
+            Projection years
+            <span class="field-help" data-tip="How many years of free cash flow VALUS forecasts before applying terminal growth. Default is 10 — longer horizons add uncertainty.">?</span>
+          </label>
           <input id="advYrs" type="number" placeholder="10" min="3" max="20"/>
         </div>
         <div class="advanced-field">
-          <label for="advS1">Stage 1 growth (%)</label>
+          <label for="advS1">
+            Stage 1 growth (%)
+            <span class="field-help" data-tip="Annual revenue/FCF growth rate during years 1–5 of the forecast. 'Auto' uses analyst consensus + sector ceiling.">?</span>
+          </label>
           <input id="advS1" type="number" placeholder="auto" step="0.1"/>
         </div>
         <div class="advanced-field">
-          <label for="advS2">Stage 2 growth (%)</label>
+          <label for="advS2">
+            Stage 2 growth (%)
+            <span class="field-help" data-tip="Annual growth during years 6–10, typically lower than Stage 1 as companies mature. 'Auto' tapers from Stage 1 toward terminal.">?</span>
+          </label>
           <input id="advS2" type="number" placeholder="auto" step="0.1"/>
         </div>
         <div class="advanced-field">
-          <label for="advTg">Terminal growth (%)</label>
+          <label for="advTg">
+            Terminal growth (%)
+            <span class="field-help" data-tip="Perpetual growth rate after year 10. Default 2.5% ≈ long-run GDP growth. Higher = more aggressive valuation.">?</span>
+          </label>
           <input id="advTg" type="number" placeholder="2.5" step="0.1"/>
         </div>
       </div>
@@ -739,22 +751,6 @@
           <div class="ic-sub" id="newsSummarySub">Top recent signals</div>
         </div>
         <div class="news-summary-body" id="newsSummaryBody"></div>
-      </div>
-    </section>
-
-    <!-- METHODOLOGY EXPLAINER -->
-    <section class="card methodology" id="methodology">
-      <div class="methodology__head" id="methodologyHead" role="button" tabindex="0" aria-expanded="false">
-        <div class="methodology__title">
-          <div class="methodology__title-icon">∑</div>
-          <span>How VALUS calculated this</span>
-        </div>
-        <span class="methodology__chev">▾</span>
-      </div>
-      <div class="methodology__body">
-        <div class="methodology__inner">
-          <div id="methodSteps"></div>
-        </div>
       </div>
     </section>
 

@@ -1090,6 +1090,20 @@ function renderDrawerContent(d) {
   try {
     const ag = $("assumptionsGrid");
     if (ag) {
+      const TIPS = {
+        "WACC":            "Weighted Average Cost of Capital — the blended discount rate VALUS uses to bring future cash flows to today's value. Higher WACC = lower fair value.",
+        "Cost of Equity":  "What equity investors demand as a return, given the stock's risk (beta) relative to the broader market. Built from CAPM: risk-free rate + beta × equity risk premium.",
+        "Cost of Debt":    "After-tax interest rate the company effectively pays on its borrowings. Lower than cost of equity because interest is tax-deductible.",
+        "Beta":             "How volatile the stock is vs. the S&P 500. 1.0 = moves with the market; >1 = more volatile; <1 = less volatile. Higher beta → higher cost of equity.",
+        "Stage 1 growth":  "Annual revenue/FCF growth rate VALUS assumes for years 1–5 of the forecast.",
+        "Stage 2 growth":  "Growth during years 6–10, typically tapered down from Stage 1 as competition compresses margins.",
+        "Terminal growth": "Perpetual growth rate after year 10. Usually 2–3% (≈ long-run GDP). Anchors the terminal-value calculation.",
+        "Tax rate":         "Effective tax rate applied to operating income. Used to compute after-tax cash flows.",
+        "Base FCF":         "Trailing twelve-month free cash flow — the starting point for the 10-year projection.",
+        "Net debt":         "Total debt minus cash. Subtracted from enterprise value to get equity value. Negative means the company has more cash than debt.",
+        "Shares out":       "Diluted shares outstanding. Equity value is divided by this to get per-share fair value.",
+        "Years projected":  "How many years of explicit cash flow are forecast before applying the terminal value formula.",
+      };
       const rows = [
         ["WACC",            d.wacc != null ? `${fmt(d.wacc, 1)}%` : "—"],
         ["Cost of Equity",  d.cost_of_equity != null ? `${fmt(d.cost_of_equity, 1)}%` : "—"],
@@ -1104,9 +1118,11 @@ function renderDrawerContent(d) {
         ["Shares out",      d.shares_outstanding != null ? fmtBig(d.shares_outstanding).replace("$","") : "—"],
         ["Years projected", d.projection_years || 10],
       ];
-      ag.innerHTML = rows.map(([l, v]) =>
-        `<div class="assumption"><span class="assumption__label">${l}</span><span class="assumption__value numeric">${v}</span></div>`
-      ).join("");
+      const esc = s => String(s).replace(/"/g, "&quot;");
+      ag.innerHTML = rows.map(([l, v]) => {
+        const tip = TIPS[l] ? ` data-tip="${esc(TIPS[l])}"` : "";
+        return `<div class="assumption" tabindex="0"${tip}><span class="assumption__label">${l}</span><span class="assumption__value numeric">${v}</span></div>`;
+      }).join("");
     }
   } catch (e) { console.error("[assumptions]", e); }
 

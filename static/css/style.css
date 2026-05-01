@@ -550,23 +550,63 @@ button { font-family: inherit; cursor: pointer; }
   display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-4);
 }
 .advanced-panel.hidden { display: none; }
-.advanced-field { display: flex; flex-direction: column; gap: 4px; text-align: left; }
+.advanced-field { display: flex; flex-direction: column; gap: 6px; text-align: left; }
 .advanced-field label {
-  font-size: 11px; color: var(--ink-muted); font-family: var(--font-mono);
-  text-transform: uppercase; letter-spacing: 0.06em;
+  font-size: 12px; color: rgba(230, 233, 239, 0.85);
+  font-family: inherit;
+  font-weight: 500; letter-spacing: 0.01em;
+  display: inline-flex; align-items: center; gap: 6px;
 }
+.advanced-field label .field-help {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: rgba(255,255,255,0.08); color: var(--ink-muted);
+  font-size: 10px; font-weight: 600; cursor: help;
+}
+.advanced-field label .field-help:hover { background: var(--accent-soft); color: var(--accent-strong); }
 .advanced-field input {
   background: var(--bg-deep);
-  border: 1px solid rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.10);
   border-radius: var(--radius-sm);
-  padding: 9px 12px;
+  padding: 10px 12px;
   color: var(--ink-primary);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 500;
+  transition: border-color 120ms, box-shadow 120ms;
 }
+.advanced-field input::placeholder {
+  color: var(--ink-muted); opacity: 0.55; font-style: italic;
+}
+.advanced-field input:hover { border-color: rgba(255,255,255,0.18); }
 .advanced-field input:focus {
   outline: none; border-color: var(--accent-strong);
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* ── Lightweight tooltip system (data-tip) ─────────────────────────── */
+[data-tip] { position: relative; }
+[data-tip]:hover::after,
+[data-tip]:focus::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+  background: #1a1f2a; color: #e6e9ef;
+  padding: 8px 12px; border-radius: 6px;
+  font-size: 12px; font-weight: 400; line-height: 1.45;
+  white-space: normal; max-width: 280px; width: max-content;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+  border: 1px solid rgba(255,255,255,0.08);
+  z-index: 9999; pointer-events: none;
+  text-transform: none; letter-spacing: normal;
+  font-family: inherit;
+}
+[data-tip]:hover::before,
+[data-tip]:focus::before {
+  content: ""; position: absolute;
+  bottom: calc(100% + 2px); left: 50%; transform: translateX(-50%);
+  border: 6px solid transparent; border-top-color: #1a1f2a;
+  z-index: 9999; pointer-events: none;
 }
 
 @media (max-width: 768px) {
@@ -2357,6 +2397,17 @@ button { font-family: inherit; cursor: pointer; }
   border: 1px solid rgba(255,255,255,0.04);
   border-radius: var(--radius-sm);
   display: flex; flex-direction: column; gap: 2px;
+  transition: border-color 120ms, background 120ms;
+  cursor: help;
+}
+.assumption[data-tip]:hover {
+  border-color: rgba(255,255,255,0.15);
+  background: var(--bg-elevated, var(--bg-elevated-2));
+}
+.assumption[data-tip] .assumption__label::after {
+  content: " ⓘ";
+  opacity: 0.45;
+  font-size: 10px;
 }
 .assumption__label { font-size: 11px; color: var(--ink-muted); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.05em; }
 .assumption__value { font-size: 14px; font-weight: 500; color: var(--ink-primary); font-feature-settings: "tnum" 1; }
