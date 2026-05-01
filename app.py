@@ -73,9 +73,36 @@ def kv_set(key, value, ttl=None):
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
+def _rate_limit_key():
+    """Per-user counting when signed in, per-IP for anonymous."""
+    try:
+        u = session.get("user") or {}
+        email = u.get("email")
+        if email:
+            return f"user:{email}"
+    except Exception:
+        pass
+    return f"ip:{get_remote_address()}"
+
+def _is_signed_in():
+    try:
+        return bool((session.get("user") or {}).get("email"))
+    except Exception:
+        return False
+
+# Dynamic limits — signed-in users get 3-5x more than anonymous
+def limit_analyze():
+    return "40 per minute; 300 per day" if _is_signed_in() else "10 per minute; 50 per day"
+def limit_discover():
+    return "30 per minute; 500 per day" if _is_signed_in() else "10 per minute; 100 per day"
+def limit_medium():
+    return "60 per minute; 1000 per day" if _is_signed_in() else "20 per minute; 200 per day"
+def limit_light():
+    return "120 per minute; 2000 per day" if _is_signed_in() else "30 per minute; 300 per day"
+
 _limiter_storage = os.environ.get("KV_URL") if _kv else None
 limiter = Limiter(
-    key_func=get_remote_address,
+    key_func=_rate_limit_key,
     app=app,
     storage_uri=_limiter_storage or "memory://",
     default_limits=[],
@@ -435,6 +462,17 @@ def _claude_interpret_headline(ticker, sector, title, summary):
     cached = _CLAUDE_INTERP_CACHE.get(cache_key)
     if cached and (time.time() - cached[0]) < _CLAUDE_INTERP_CACHE_TTL:
         return cached[1]
+    # Redis lookup — cuts cost across Vercel instances
+    redis_key = f"valus:claude:{ticker}:{hash((title or '')[:200])}"
+    if _kv:
+        try:
+            raw = _kv.get(redis_key)
+            if raw:
+                parsed = _json_top.loads(raw)
+                _CLAUDE_INTERP_CACHE[cache_key] = (time.time(), parsed)
+                return parsed
+        except Exception:
+            pass
 
     try:
         prompt = (
@@ -487,6 +525,11 @@ def _claude_interpret_headline(ticker, sector, title, summary):
             "reason":     str(parsed.get("reason", ""))[:60],
         }
         _CLAUDE_INTERP_CACHE[cache_key] = (time.time(), result)
+        if _kv:
+            try:
+                _kv.setex(redis_key, _CLAUDE_INTERP_CACHE_TTL, _json_top.dumps(result))
+            except Exception:
+                pass
         return result
     except Exception:
         return None
@@ -4772,7 +4815,7 @@ def auth_logout():
 
 
 @app.route("/api/search")
-@limiter.limit("30 per minute; 300 per day")
+@limiter.limit(limit_light)
 def search():
     q = request.args.get("q", "").strip()
     if not q:
@@ -4797,7 +4840,7 @@ def search():
 
 
 @app.route("/api/history")
-@limiter.limit("30 per minute; 300 per day")
+@limiter.limit(limit_light)
 def history():
     ticker = request.args.get("ticker", "").strip().upper()
     period = request.args.get("period", "1y").lower()
@@ -4931,7 +4974,7 @@ def _fetch_insider_form4(ticker: str, days: int = 90, max_items: int = 10):
 
 
 @app.route("/api/insider")
-@limiter.limit("20 per minute; 200 per day")
+@limiter.limit(limit_medium)
 def api_insider():
     ticker = request.args.get("ticker", "").strip().upper()
     if not ticker:
@@ -4944,7 +4987,7 @@ def api_insider():
 
 
 @app.route("/api/valuation-history")
-@limiter.limit("20 per minute; 200 per day")
+@limiter.limit(limit_medium)
 def valuation_history():
     """
     Phase A: 5-year historical intrinsic value vs. price.
@@ -4990,7 +5033,7 @@ _QUOTE_CACHE = {}        # {ticker: (timestamp, payload)}
 _QUOTE_CACHE_TTL_S = 30  # short TTL — this is a live-tick endpoint
 
 @app.route("/api/quote")
-@limiter.limit("30 per minute; 300 per day")
+@limiter.limit(limit_light)
 def quote():
     raw = request.args.get("tickers") or request.args.get("ticker") or ""
     tickers = [t.strip().upper() for t in raw.split(",") if t.strip()]
@@ -5034,7 +5077,7 @@ def quote():
 
 
 @app.route("/api/statements")
-@limiter.limit("20 per minute; 200 per day")
+@limiter.limit(limit_medium)
 def statements():
     ticker = request.args.get("ticker", "").strip().upper()
     if not ticker:
@@ -5060,8 +5103,22 @@ def statements():
 # Repeated visits to the same ticker (e.g. portfolio refresh, share-link
 # clicks, discovery heatmap) hit the cache for sub-100ms responses.
 _ANALYZE_CACHE = {}      # {(ticker, params_str): (timestamp, response_dict)}
-_ANALYZE_CACHE_TTL_S = 1800  # 30 minutes — enough for intraday freshness
+_ANALYZE_CACHE_TTL_S = 1800  # 30 minutes default
+_ANALYZE_CACHE_TTL_POPULAR_S = 7200  # 2 hours for popular tickers
 _ANALYZE_CACHE_MAX = 500     # cap to bound memory
+
+# Mega-cap tickers that get cached longer — fundamentals barely move intraday
+# and these account for the bulk of search traffic.
+_POPULAR_TICKERS = {
+    "AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "META", "TSLA", "NVDA",
+    "BRK-B", "BRK-A", "JPM", "V", "MA", "UNH", "XOM", "JNJ", "WMT",
+    "PG", "HD", "BAC", "AVGO", "LLY", "ORCL", "COST", "MRK", "PEP",
+    "ABBV", "KO", "ADBE", "CRM", "AMD", "NFLX", "TMUS", "DIS", "CSCO",
+    "INTC", "QCOM", "PFE", "T", "VZ", "BA", "GS", "MS", "C",
+}
+
+def _ttl_for_ticker(ticker):
+    return _ANALYZE_CACHE_TTL_POPULAR_S if ticker.upper() in _POPULAR_TICKERS else _ANALYZE_CACHE_TTL_S
 
 def _analyze_cache_key(ticker, args):
     relevant = sorted((k, v) for k, v in args.items() if k != "ticker")
@@ -5080,16 +5137,20 @@ def _analyze_cache_get(key):
     entry = _ANALYZE_CACHE.get(key)
     if entry is None: return None
     ts, payload = entry
-    if time.time() - ts < _ANALYZE_CACHE_TTL_S:
+    # Use the longer TTL when checking memory — Redis already enforces its own
+    if time.time() - ts < _ANALYZE_CACHE_TTL_POPULAR_S:
         return payload
     _ANALYZE_CACHE.pop(key, None)
     return None
 
 def _analyze_cache_set(key, payload):
+    # Determine TTL based on ticker (popular = 2h, others = 30m)
+    ticker = (payload.get("ticker") or "").upper() if isinstance(payload, dict) else ""
+    ttl = _ttl_for_ticker(ticker) if ticker else _ANALYZE_CACHE_TTL_S
     # Write to Redis (persistent, shared)
     if _kv:
         try:
-            _kv.setex(key, _ANALYZE_CACHE_TTL_S, _json_top.dumps(payload))
+            _kv.setex(key, ttl, _json_top.dumps(payload))
         except Exception:
             pass
     # Always write to in-process memory too (zero-latency hit on same instance)
@@ -5137,7 +5198,7 @@ DISCOVERY_TICKERS = [
 ]
 
 @app.route("/api/discover")
-@limiter.limit("10 per minute; 100 per day")
+@limiter.limit(limit_discover)
 def discover():
     """
     Returns a thin summary for every ticker in DISCOVERY_TICKERS using the
@@ -5467,7 +5528,7 @@ def leaderboard():
 
 
 @app.route("/api/analyze")
-@limiter.limit("10 per minute; 50 per day")
+@limiter.limit(limit_analyze)
 def analyze():
     ticker = request.args.get("ticker", "").strip().upper()
     if not ticker:

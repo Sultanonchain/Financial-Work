@@ -1992,7 +1992,12 @@ function syncAddPortfolioButtonForCurrent() {
 // ── Portfolio page (full-screen view, replaces modal) ─────────────────
 let _PF_SORT = "added";   // ticker | mos | added
 
-function openPortfolioPage() {
+async function openPortfolioPage() {
+  // Sign-in gate — portfolio is for authenticated users only
+  if (!_ME) {
+    const ok = await requireAuthWithRedirectIntent("portfolio");
+    if (!ok) return;
+  }
   // Hide ALL other views — portfolio is its own dedicated page
   hideAllViews?.();
   $("results").classList.add("hidden");
