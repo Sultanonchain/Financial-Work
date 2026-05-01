@@ -264,6 +264,14 @@
             <span class="tg-desc">Market is overly pessimistic. Trading well below fair value, often during macro fear or sector rotation.</span>
           </div>
         </div>
+        <div class="tg-row tier-positive" data-tier="strategic_discount">
+          <span class="tg-dot"></span>
+          <div class="tg-body">
+            <span class="tg-label">Strategic Discount</span>
+            <span class="tg-mos">Pre-revenue strategic asset</span>
+            <span class="tg-desc">Sovereign-backstopped franchise (defense, CHIPS Act, DOE). DCF undervalues; analyst consensus and policy tailwinds support upside.</span>
+          </div>
+        </div>
         <div class="tg-row tier-positive" data-tier="deep_discount">
           <span class="tg-dot"></span>
           <div class="tg-body">
@@ -663,6 +671,28 @@
           <span class="scenario-toggle__label">▴ Bull</span>
           <span class="scenario-toggle__value numeric" data-sc-val="bull">—</span>
         </button>
+      </div>
+    </section>
+
+    <!-- VALUATION HISTORY (5y price vs intrinsic value) -->
+    <section class="card valuation-history hidden" id="valuationHistoryCard">
+      <div class="vh-head">
+        <div class="vh-title-block">
+          <div class="vh-title">Valuation History</div>
+          <div class="vh-sub" id="vhSub">5-year price vs. intrinsic value · point-in-time DCF replay</div>
+        </div>
+        <div class="vh-stats" id="vhStats"></div>
+      </div>
+      <div class="vh-chart-wrap">
+        <canvas id="valuationHistoryChart" aria-label="Valuation history chart"></canvas>
+      </div>
+      <div class="vh-legend">
+        <span class="vh-legend__item"><span class="vh-dot vh-dot--price"></span>Price</span>
+        <span class="vh-legend__item"><span class="vh-dot vh-dot--iv"></span>Intrinsic Value (point-in-time DCF)</span>
+        <span class="vh-legend__hint">Hover for details · IV recomputed each year using only data filed by that date</span>
+      </div>
+      <div class="vh-empty hidden" id="vhEmpty">
+        Historical valuation requires SEC EDGAR data — available for US-listed filers with sufficient history.
       </div>
     </section>
 

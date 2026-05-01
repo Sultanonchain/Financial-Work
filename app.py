@@ -16,7 +16,7 @@ import re
 import os
 import json as _json_top
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from urllib.parse import urlencode, urlparse
 
 # Optional .env loading for local dev
@@ -3218,6 +3218,322 @@ def _get_long_income_history(ticker):
     return result
 
 
+# ── Historical Valuation (Phase A) ────────────────────────────────────────────
+# Point-in-time DCF replay: at each annual cutoff over the last 5 years, fetch
+# the financials that were *publicly known on that date* via EDGAR companyfacts,
+# then run the existing DCF engine with deterministic growth assumptions
+# derived solely from data available at that point in history.  Combined with a
+# monthly close-price line, this powers the Valuation History chart that
+# competitors (alphaspread.com, simplywall.st) ship as a paid feature.
+#
+# Caching strategy: per-ticker companyfacts JSON cached 24h; computed history
+# points cached 12h (refreshes when a new 10-K filing lands).
+_SEC_COMPANYFACTS_CACHE = {}      # {ticker: (timestamp, facts_dict)}
+_SEC_COMPANYFACTS_CACHE_TTL = 24 * 3600
+_VALUATION_HISTORY_CACHE = {}     # {ticker: (timestamp, payload)}
+_VALUATION_HISTORY_CACHE_TTL = 12 * 3600
+
+
+def _sec_companyfacts(ticker):
+    """Raw EDGAR companyfacts us-gaap dict for a ticker, cached 24h. None on failure."""
+    if not ticker:
+        return None
+    t = ticker.upper().strip()
+    cached = _SEC_COMPANYFACTS_CACHE.get(t)
+    if cached and (time.time() - cached[0]) < _SEC_COMPANYFACTS_CACHE_TTL:
+        return cached[1]
+    facts = None
+    try:
+        cik_map = _sec_get_ticker_cik_map()
+        cik = cik_map.get(t)
+        if cik:
+            r = requests.get(
+                f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json",
+                headers={"User-Agent": _SEC_UA},
+                timeout=10,
+            )
+            if r.status_code == 200:
+                facts = (r.json() or {}).get("facts", {}).get("us-gaap", {})
+    except Exception:
+        facts = None
+    _SEC_COMPANYFACTS_CACHE[t] = (time.time(), facts)
+    return facts
+
+
+def _sec_dei_facts(ticker):
+    """DEI namespace (entity-level data, e.g. shares outstanding)."""
+    if not ticker:
+        return None
+    t = ticker.upper().strip()
+    try:
+        cik_map = _sec_get_ticker_cik_map()
+        cik = cik_map.get(t)
+        if not cik:
+            return None
+        r = requests.get(
+            f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json",
+            headers={"User-Agent": _SEC_UA},
+            timeout=10,
+        )
+        if r.status_code == 200:
+            return (r.json() or {}).get("facts", {}).get("dei", {})
+    except Exception:
+        pass
+    return None
+
+
+def _pit_latest_value(facts, concepts, asof_iso, units=("USD",), forms=None):
+    """
+    Most-recent value for any of `concepts`, restricted to records where
+    `filed <= asof_iso` and form ∈ forms (if provided). Picks the record with
+    the latest `end` date (the most recent reporting period known by asof).
+    Returns float or None.
+    """
+    if not facts:
+        return None
+    best_end = None
+    best_val = None
+    for c in concepts:
+        for unit_key in units:
+            recs = (facts.get(c, {}).get("units", {}).get(unit_key, []))
+            for x in recs:
+                filed = x.get("filed", "")
+                if not filed or filed > asof_iso:
+                    continue
+                if forms and x.get("form") not in forms:
+                    continue
+                end = x.get("end")
+                val = x.get("val")
+                if not end or val is None:
+                    continue
+                if best_end is None or end > best_end:
+                    best_end = end
+                    best_val = val
+    return best_val
+
+
+def _pit_annual_series(facts, concepts, asof_iso):
+    """
+    Annual (FY) values keyed by fiscal year, restricted to filings made by
+    asof_iso. Used to compute trailing CAGRs at a given point in history.
+    Returns {YYYY: value} dict.
+    """
+    if not facts:
+        return {}
+    by_year = {}
+    for c in concepts:
+        for x in facts.get(c, {}).get("units", {}).get("USD", []):
+            if x.get("form") != "10-K" or x.get("fp") != "FY":
+                continue
+            if x.get("filed", "") > asof_iso:
+                continue
+            year = (x.get("end") or "")[:4]
+            val  = x.get("val")
+            if year and val is not None:
+                prev = by_year.get(year)
+                if prev is None or abs(val) > abs(prev):
+                    by_year[year] = val
+    return by_year
+
+
+_FCF_OCF_CONCEPTS = (
+    "NetCashProvidedByUsedInOperatingActivities",
+    "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",
+)
+_FCF_CAPEX_CONCEPTS = (
+    "PaymentsToAcquirePropertyPlantAndEquipment",
+    "PaymentsToAcquireProductiveAssets",
+)
+_DEBT_CONCEPTS = (
+    "LongTermDebt",
+    "LongTermDebtNoncurrent",
+)
+_SHORT_DEBT_CONCEPTS = (
+    "LongTermDebtCurrent",
+    "DebtCurrent",
+)
+_CASH_CONCEPTS = (
+    "CashAndCashEquivalentsAtCarryingValue",
+    "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
+)
+_SHARES_CONCEPTS_DEI = (
+    "EntityCommonStockSharesOutstanding",
+)
+_SHARES_CONCEPTS_GAAP = (
+    "CommonStockSharesOutstanding",
+    "WeightedAverageNumberOfDilutedSharesOutstanding",
+)
+
+
+def _pit_shares(facts_gaap, facts_dei, asof_iso):
+    """Most recent shares-outstanding value as-of asof_iso (DEI preferred, GAAP fallback)."""
+    if facts_dei:
+        v = _pit_latest_value(facts_dei, _SHARES_CONCEPTS_DEI, asof_iso, units=("shares",))
+        if v:
+            return v
+    if facts_gaap:
+        v = _pit_latest_value(facts_gaap, _SHARES_CONCEPTS_GAAP, asof_iso, units=("shares",))
+        if v:
+            return v
+    return None
+
+
+def _trailing_cagr_at(annual_dict, asof_year, lookback=3):
+    """CAGR of last `lookback` available FYs ≤ asof_year. None if too few points."""
+    years = sorted([int(y) for y in annual_dict if int(y) <= asof_year], reverse=True)
+    vals  = [annual_dict[str(y)] for y in years[:lookback + 1]
+             if annual_dict.get(str(y)) and annual_dict[str(y)] > 0]
+    if len(vals) < 3:
+        return None
+    n = len(vals) - 1
+    try:
+        return (vals[0] / vals[-1]) ** (1 / n) - 1
+    except Exception:
+        return None
+
+
+def _get_monthly_price_history(ticker, years=5):
+    """Monthly close prices for the last `years` years. Returns [{date, price}] list."""
+    try:
+        h = yf.Ticker(ticker).history(period=f"{years}y", interval="1mo", auto_adjust=False)
+        if h is None or h.empty:
+            return []
+        out = []
+        for idx, row in h.iterrows():
+            close = row.get("Close")
+            if close is None or pd.isna(close):
+                continue
+            out.append({
+                "date":  idx.date().isoformat(),
+                "price": round(float(close), 2),
+            })
+        return out
+    except Exception:
+        return []
+
+
+def get_valuation_history(ticker, info, fx_rate=1.0, sector=None, industry=None):
+    """
+    Build a 5-year valuation history for the chart: at each annual cutoff,
+    replay DCF using only data publicly known at that date. Combined with
+    monthly close prices.
+
+    Uses deterministic growth assumptions (point-in-time trailing CAGR with
+    sector guardrails) — no Claude calls, no analyst estimates of the future.
+    Cached 12h per ticker.
+
+    Returns dict:
+      {
+        "ticker": str,
+        "currency": "USD",
+        "iv_points":   [{date, iv, fcf, growth_used, cagr_at_date}],
+        "price_points":[{date, price}],
+        "method": "edgar_pit_dcf_v1",
+      }
+    or None when EDGAR data isn't available (non-US filer, etc.).
+    """
+    if not ticker:
+        return None
+    t = ticker.upper().strip()
+    cached = _VALUATION_HISTORY_CACHE.get(t)
+    if cached and (time.time() - cached[0]) < _VALUATION_HISTORY_CACHE_TTL:
+        return cached[1]
+
+    facts_gaap = _sec_companyfacts(t)
+    if not facts_gaap:
+        _VALUATION_HISTORY_CACHE[t] = (time.time(), None)
+        return None
+    facts_dei  = _sec_dei_facts(t)
+
+    # Resolve sector params for guardrails (default if unknown).
+    ind_key = _classify_industry(sector or "", industry or "")
+    ind_params = INDUSTRY_PARAMS.get(ind_key, INDUSTRY_PARAMS["default"])
+
+    # Annual revenue series for point-in-time CAGR.
+    rev_annual_full = _pit_annual_series(facts_gaap, _SEC_REVENUE_CONCEPTS, "9999-12-31")
+
+    today = date.today()
+    iv_points = []
+
+    for years_ago in range(5, -1, -1):
+        asof = date(today.year - years_ago, today.month, 1) - timedelta(days=1)
+        asof_iso = asof.isoformat()
+
+        # FCF (annual): take latest 10-K OCF and CapEx as of asof.
+        ocf = _pit_latest_value(facts_gaap, _FCF_OCF_CONCEPTS, asof_iso, forms=("10-K",))
+        if ocf is None or ocf <= 0:
+            continue
+        capex = _pit_latest_value(facts_gaap, _FCF_CAPEX_CONCEPTS, asof_iso, forms=("10-K",)) or 0
+        # CapEx is reported as a positive payment; subtract.
+        fcf = ocf - abs(capex)
+        if fcf <= 0:
+            continue
+
+        # Shares outstanding as-of asof.
+        shares = _pit_shares(facts_gaap, facts_dei, asof_iso)
+        if not shares or shares <= 0:
+            continue
+
+        # Net debt as-of asof (both LTD and short-term where available).
+        ltd  = _pit_latest_value(facts_gaap, _DEBT_CONCEPTS, asof_iso) or 0
+        std  = _pit_latest_value(facts_gaap, _SHORT_DEBT_CONCEPTS, asof_iso) or 0
+        cash = _pit_latest_value(facts_gaap, _CASH_CONCEPTS, asof_iso) or 0
+        net_debt = (ltd + std) - cash
+
+        # Growth: point-in-time 3yr revenue CAGR, capped by sector guardrails.
+        # Falls back to industry mid-cycle proxy when history is too short.
+        cagr = _trailing_cagr_at(
+            {y: v for y, v in rev_annual_full.items() if int(y) <= asof.year},
+            asof_year=asof.year,
+            lookback=3,
+        )
+        if cagr is None:
+            s1 = ind_params["max_s1"] * 0.65
+        else:
+            s1 = max(0.0, min(cagr, ind_params["max_s1"]))
+        s2 = max(min(s1 * 0.55, ind_params["max_s1"] * 0.55), 0.02)
+        tg = min(ind_params["max_tg"], max(s2 - 0.005, 0.005))
+        wacc = max(ind_params["min_wacc"] + 0.005, tg + ind_params["wacc_spread"])
+
+        # Replay DCF with these point-in-time inputs.
+        try:
+            iv, _proj, _ev, _eq, _pvt = run_dcf_single(
+                base_fcf=fcf,
+                s1=s1, s2=s2, tg=tg, wacc=wacc,
+                yrs=10,
+                info={"sharesOutstanding": shares},
+                fx_rate=1.0,                 # USD-denominated EDGAR data
+                net_debt_override=net_debt,
+            )
+        except Exception:
+            iv = None
+
+        if iv and iv > 0:
+            iv_points.append({
+                "date":         asof_iso,
+                "iv":           round(float(iv), 2),
+                "fcf":          round(float(fcf), 0),
+                "growth_used":  round(float(s1) * 100, 2),
+                "cagr_at_date": round(float(cagr) * 100, 2) if cagr is not None else None,
+            })
+
+    if not iv_points:
+        _VALUATION_HISTORY_CACHE[t] = (time.time(), None)
+        return None
+
+    price_points = _get_monthly_price_history(t, years=5)
+
+    payload = {
+        "ticker":       t,
+        "currency":     "USD",
+        "iv_points":    iv_points,
+        "price_points": price_points,
+        "method":       "edgar_pit_dcf_v1",
+    }
+    _VALUATION_HISTORY_CACHE[t] = (time.time(), payload)
+    return payload
+
+
 def _get_revenue_history(income_stmt):
     """Annual revenue series, most recent first. Up to ~10 years if available."""
     if income_stmt is None or getattr(income_stmt, "empty", True):
@@ -4386,6 +4702,42 @@ def history():
     except Exception as e:
         app.logger.exception("history fetch failed for %s", ticker)
         return jsonify({"error": "Couldn't load price history. Try again."}), 500
+
+
+@app.route("/api/valuation-history")
+def valuation_history():
+    """
+    Phase A: 5-year historical intrinsic value vs. price.
+    Replays DCF at each annual cutoff using EDGAR point-in-time fundamentals,
+    pairs with monthly close prices. US filers only.
+    """
+    ticker = request.args.get("ticker", "").strip().upper()
+    if not ticker:
+        return jsonify({"error": "ticker required"}), 400
+    try:
+        info = {}
+        sector = industry = ""
+        try:
+            t = yf.Ticker(ticker)
+            info = t.info or {}
+            sector   = info.get("sector")   or ""
+            industry = info.get("industry") or ""
+        except Exception:
+            pass
+        payload = get_valuation_history(
+            ticker=ticker, info=info, fx_rate=1.0,
+            sector=sector, industry=industry,
+        )
+        if not payload:
+            return jsonify({
+                "available": False,
+                "reason": "Historical data unavailable — non-US filer or insufficient EDGAR coverage.",
+            })
+        payload["available"] = True
+        return jsonify(payload)
+    except Exception:
+        app.logger.exception("valuation-history failed for %s", ticker)
+        return jsonify({"error": "Couldn't build valuation history. Try again."}), 500
 
 
 # ── Live quote endpoint (fast tier — price ticks only) ─────────────────────
@@ -6822,4 +7174,4 @@ def _warm_discovery_cache():
 if __name__ == "__main__":
     # Kick off background warmup once
     _warm_discovery_cache()
-    app.run(debug=True, port=5050)
+    app.run(debug=True, port=int(os.environ.get("PORT", 5050)))

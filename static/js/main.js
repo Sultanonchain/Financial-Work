@@ -1050,6 +1050,7 @@ function renderDrawerContent(d) {
   try { renderNotes(d); } catch (e) { console.error("[notes]", e); }
   try { if (d.price_history) renderPriceChart(d.price_history); } catch (e) { console.error("[priceChart]", e); }
   try { if (d.fcf_chart)     renderDcfChart(d.fcf_chart); }       catch (e) { console.error("[dcfChart]", e); }
+  try { fetchAndRenderValuationHistory(d.ticker); } catch (e) { console.error("[valHist]", e); }
   try { renderProjectionTable(d); } catch (e) { console.error("[projTable]", e); }
   // Financial statements are now lazy-loaded on first drawer open (see above).
   // Reset the flag for each new analysis so a fresh ticker re-fetches.
@@ -1138,7 +1139,168 @@ function renderNotes(d) {
    Charts
    ════════════════════════════════════════════════════════════════════════ */
 
-let priceChartInstance, dcfChartInstance;
+let priceChartInstance, dcfChartInstance, valuationHistoryChartInstance;
+
+// ── Valuation History (Phase A) ──────────────────────────────────────────
+// Fetches the 5y price + point-in-time IV series from /api/valuation-history
+// and renders a dual-line chart. Hides the card gracefully when EDGAR data
+// is unavailable (non-US filers).
+async function fetchAndRenderValuationHistory(ticker) {
+  const card  = $("valuationHistoryCard");
+  const empty = $("vhEmpty");
+  if (!card || !ticker) return;
+  card.classList.remove("hidden");
+  if (empty) empty.classList.add("hidden");
+  try {
+    const res = await fetch(`/api/valuation-history?ticker=${encodeURIComponent(ticker)}`);
+    const j = await res.json();
+    if (!j || j.available === false || !Array.isArray(j.iv_points) || j.iv_points.length === 0) {
+      if (empty) empty.classList.remove("hidden");
+      destroyValuationHistoryChart();
+      return;
+    }
+    renderValuationHistoryChart(j);
+  } catch (e) {
+    console.error("[valHist] fetch failed", e);
+    if (empty) empty.classList.remove("hidden");
+    destroyValuationHistoryChart();
+  }
+}
+
+function destroyValuationHistoryChart() {
+  if (valuationHistoryChartInstance) {
+    valuationHistoryChartInstance.destroy();
+    valuationHistoryChartInstance = null;
+  }
+}
+
+function renderValuationHistoryChart(payload) {
+  const canvas = $("valuationHistoryChart");
+  if (!canvas) return;
+  destroyValuationHistoryChart();
+
+  const ivPts    = payload.iv_points    || [];
+  const pricePts = payload.price_points || [];
+
+  // Unified date axis. Prefer monthly price labels; fall back to IV dates
+  // when price history is unavailable (e.g. yfinance rate-limited).
+  const labels = (pricePts.length ? pricePts.map(p => p.date)
+                                  : ivPts.map(p => p.date));
+
+  // For each label (monthly), find the most recent IV point ≤ that date
+  // → produces a step-line that updates each year when a new 10-K lands.
+  const ivByDate = ivPts.map(p => ({ date: p.date, iv: p.iv }));
+  const ivStep   = labels.map(lbl => {
+    let last = null;
+    for (const p of ivByDate) {
+      if (p.date <= lbl) last = p.iv;
+      else break;
+    }
+    return last;
+  });
+
+  const priceSeries = pricePts.map(p => p.price);
+
+  const ctx = canvas.getContext("2d");
+  valuationHistoryChartInstance = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "Price",
+          data: priceSeries,
+          borderColor: "#60a5fa",
+          backgroundColor: "rgba(96,165,250,0.08)",
+          borderWidth: 2,
+          fill: true,
+          tension: 0.25,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          order: 2,
+        },
+        {
+          label: "Intrinsic Value",
+          data: ivStep,
+          borderColor: "#f59e0b",
+          backgroundColor: "rgba(245,158,11,0.0)",
+          borderWidth: 2,
+          borderDash: [4, 3],
+          stepped: true,
+          fill: false,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          order: 1,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: "#11151d",
+          borderColor: "rgba(255,255,255,0.08)",
+          borderWidth: 1,
+          titleColor: "#f5f7fa",
+          bodyColor: "#b6bdcb",
+          callbacks: {
+            label: (c) => {
+              const v = c.parsed.y;
+              if (v == null) return null;
+              return `${c.dataset.label}: $${fmt(v, 2)}`;
+            },
+            afterBody: (items) => {
+              const lbl = items?.[0]?.label;
+              const ivPt = ivByDate.filter(p => p.date <= lbl).slice(-1)[0];
+              if (!ivPt) return null;
+              const orig = ivPts.find(p => p.date === ivPt.date);
+              if (!orig) return null;
+              const lines = [`As of ${orig.date}:`];
+              if (orig.cagr_at_date != null) lines.push(`Trailing 3y rev CAGR: ${fmt(orig.cagr_at_date,1)}%`);
+              if (orig.growth_used  != null) lines.push(`Growth used: ${fmt(orig.growth_used,1)}%`);
+              if (orig.fcf          != null) lines.push(`FCF: $${fmt(orig.fcf/1e9, 2)}B`);
+              return lines;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          ticks: { color: "#6b7382", maxRotation: 0, autoSkip: true, maxTicksLimit: 6 },
+          grid:  { display: false },
+        },
+        y: {
+          ticks: { color: "#6b7382", callback: v => `$${fmt(v, 0)}` },
+          grid:  { color: "rgba(255,255,255,0.04)" },
+        },
+      },
+    },
+  });
+
+  // Headline stats: latest IV vs latest price → over/undervalued %.
+  const stats = $("vhStats");
+  if (stats) {
+    const latestIv    = ivPts[ivPts.length - 1]?.iv;
+    const latestPrice = priceSeries.length ? priceSeries[priceSeries.length - 1] : null;
+    if (latestIv && latestPrice) {
+      const diffPct = ((latestIv - latestPrice) / latestPrice) * 100;
+      const cls = diffPct >= 10 ? "vh-pill vh-pill--good"
+                : diffPct <= -10 ? "vh-pill vh-pill--bad"
+                : "vh-pill vh-pill--neutral";
+      const verdict = diffPct >= 10 ? "Undervalued"
+                    : diffPct <= -10 ? "Overvalued"
+                    : "Fair value";
+      stats.innerHTML =
+        `<span class="${cls}">${verdict} · ${diffPct >= 0 ? "+" : ""}${fmt(diffPct,1)}%</span>` +
+        `<span class="vh-stat">IV $${fmt(latestIv,2)} · Px $${fmt(latestPrice,2)}</span>`;
+    } else {
+      stats.innerHTML = "";
+    }
+  }
+}
 
 function renderPriceChart(history) {
   const canvas = $("priceChart");
@@ -1864,6 +2026,8 @@ const TIER_META = {
                    desc: "Market expects flawless execution. Premium pricing requires growth, margins, and capital discipline to all work together — limited margin of error if any leg slips." },
   miracle:       { label: "Priced for Miracle",       mos: "MOS < −50% or speculative growth", color: "tier-negative",
                    desc: "Market is pricing in extraordinary outcomes that fewer than 1% of public companies achieve over a decade. Speculative — driven by momentum, not fundamentals." },
+  strategic_discount: { label: "Strategic Discount", mos: "Pre-revenue strategic asset", color: "tier-positive",
+                   desc: "Pure DCF undervalues this name because earnings haven't materialised yet. Sovereign-backstopped franchise (defense / CHIPS Act / DOE) — analyst consensus and policy tailwinds support upside that the cashflow model can't see." },
 };
 
 function setupTierGlossary() {
@@ -1891,12 +2055,18 @@ function openTierModal() {
   if (!_LAST_DATA) return;
   const pf = _LAST_DATA.priced_for || {};
   const tier = pf.tier;
-  const meta = TIER_META[tier];
+  // Fallback meta for any tier we don't recognise — modal must always open.
+  const meta = TIER_META[tier] || {
+    label: (pf.label || "Verdict"),
+    mos:   "—",
+    color: "tier-info",
+    desc:  (pf.narrative || "VALUS verdict for this stock. Detail metadata not available."),
+  };
   const currentEl = $("tgCurrent");
   const fullList  = $("tgFullList");
   const expandBtn = $("tgExpandBtn");
 
-  if (!meta || !currentEl) return;
+  if (!currentEl) return;
 
   // Reset full list to hidden each time
   fullList.classList.add("hidden");
