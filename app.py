@@ -5103,8 +5103,9 @@ def statements():
 # Repeated visits to the same ticker (e.g. portfolio refresh, share-link
 # clicks, discovery heatmap) hit the cache for sub-100ms responses.
 _ANALYZE_CACHE = {}      # {(ticker, params_str): (timestamp, response_dict)}
-_ANALYZE_CACHE_TTL_S = 1800  # 30 minutes default
-_ANALYZE_CACHE_TTL_POPULAR_S = 7200  # 2 hours for popular tickers
+_ANALYZE_CACHE_TTL_S = 1800        # 30 min default — fresh for one-off lookups
+_ANALYZE_CACHE_TTL_POPULAR_S = 7200  # 2 hours for popular mega-caps
+_ANALYZE_CACHE_TTL_DISCOVERY_S = 93600  # 26 hours — bridges daily cron cycles
 _ANALYZE_CACHE_MAX = 500     # cap to bound memory
 
 # Mega-cap tickers that get cached longer — fundamentals barely move intraday
@@ -5118,7 +5119,14 @@ _POPULAR_TICKERS = {
 }
 
 def _ttl_for_ticker(ticker):
-    return _ANALYZE_CACHE_TTL_POPULAR_S if ticker.upper() in _POPULAR_TICKERS else _ANALYZE_CACHE_TTL_S
+    t = (ticker or "").upper()
+    # Discovery tickers cache the longest — the daily cron rebuilds them, and
+    # we want every viewer of the heatmap to hit the cache, not pay for compute.
+    if t in globals().get("DISCOVERY_TICKERS_SET", set()):
+        return _ANALYZE_CACHE_TTL_DISCOVERY_S
+    if t in _POPULAR_TICKERS:
+        return _ANALYZE_CACHE_TTL_POPULAR_S
+    return _ANALYZE_CACHE_TTL_S
 
 def _analyze_cache_key(ticker, args):
     relevant = sorted((k, v) for k, v in args.items() if k != "ticker")
@@ -5165,37 +5173,55 @@ def _analyze_cache_set(key, payload):
 # /api/discover endpoint is hit, each ticker is run through the cached
 # analyze pipeline and a thin summary is returned.
 DISCOVERY_TICKERS = [
-    # Tech — mega + semis + software
+    # ── Tech — mega + semis + software ────────────────────────────────────
     "AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "META", "NVDA", "TSLA",
     "ORCL", "CRM", "ADBE", "AMD", "INTC", "AVGO", "QCOM", "TXN",
-    "MU", "ARM", "NOW", "SNOW", "PLTR", "PANW", "CRWD",
-    # Strategic semis (analog/defense + cap equipment monopoly)
-    "ADI", "MCHP", "ON", "AMAT", "KLAC", "LRCX",
-    # Financials — banks, payments, brokers
-    "JPM", "BAC", "WFC", "GS", "MS", "BRK-B", "V", "MA", "AXP",
-    "SCHW", "BLK", "SPGI", "COIN", "HOOD",
-    # Healthcare — pharma + medtech
+    "MU", "ARM", "NOW", "SNOW", "PLTR", "PANW", "CRWD", "DDOG", "MDB",
+    "NET", "ZS", "FTNT", "SHOP", "SQ", "PYPL", "ROKU", "UBER", "LYFT",
+    "DASH", "ABNB", "RBLX", "U", "TEAM", "WDAY", "INTU", "ADP",
+    "IBM", "ACN", "CSCO", "HPQ", "DELL", "WDC", "STX",
+    # ── Strategic semis (analog/defense + cap equipment monopoly) ─────────
+    "ADI", "MCHP", "ON", "AMAT", "KLAC", "LRCX", "ASML", "NXPI", "MRVL",
+    "TSM", "STM", "GFS",
+    # ── Financials — banks, payments, brokers, insurance ──────────────────
+    "JPM", "BAC", "WFC", "GS", "MS", "C", "USB", "PNC", "TFC",
+    "BRK-B", "V", "MA", "AXP", "DFS", "COF",
+    "SCHW", "BLK", "SPGI", "MCO", "MSCI", "ICE", "CME", "CB", "AIG",
+    "MET", "PRU", "ALL", "TRV", "MMC", "AFL",
+    "COIN", "HOOD", "SOFI", "PYPL",
+    # ── Healthcare — pharma + medtech + insurers ──────────────────────────
     "JNJ", "UNH", "LLY", "PFE", "ABBV", "MRK", "TMO", "ABT", "DHR",
-    "ISRG", "VRTX", "REGN",
-    # Consumer
+    "ISRG", "VRTX", "REGN", "AMGN", "GILD", "BMY", "BIIB", "ZTS",
+    "ELV", "CVS", "CI", "HUM", "MDT", "SYK", "BSX", "EW", "BDX",
+    "MRNA", "BNTX",
+    # ── Consumer staples + discretionary ──────────────────────────────────
     "WMT", "HD", "MCD", "NKE", "KO", "PEP", "SBUX", "COST", "TGT",
-    "LULU", "CMG", "ABNB", "BKNG",
-    # Auto / Mobility
-    "F", "GM", "UBER",
-    # Energy / Materials
-    "XOM", "CVX", "COP", "OXY", "FCX", "LIN",
-    # Industrials / Defense
-    "CAT", "BA", "GE", "UNP", "RTX", "HON", "LMT", "DE",
-    "NOC", "GD", "LHX", "HII",
-    # Communications / Streaming
-    "DIS", "NFLX", "CMCSA", "T", "VZ", "TMUS", "SPOT",
-    # Real Estate / Utilities + Energy Sovereignty
-    "AMT", "PLD", "EQIX", "NEE", "DUK", "CEG", "VST",
-    # Critical Materials & Nuclear
-    "MP", "LEU", "BWXT",
-    # Urban Air Mobility — speculative franchise bets
-    "JOBY", "ACHR", "RKLB",
+    "LULU", "CMG", "BKNG", "MAR", "HLT", "RCL", "CCL", "LOW",
+    "TJX", "DG", "DLTR", "KR", "SYY", "CL", "PG", "KMB", "MO",
+    "PM", "EL", "MDLZ", "MNST", "KHC", "STZ", "DEO", "ULTA",
+    # ── Auto / Mobility / Trucking ────────────────────────────────────────
+    "F", "GM", "STLA", "RIVN", "LCID", "TM", "HMC",
+    # ── Energy / Materials ────────────────────────────────────────────────
+    "XOM", "CVX", "COP", "OXY", "EOG", "PSX", "MPC", "VLO", "SLB",
+    "FCX", "LIN", "NEM", "GOLD", "APD", "ECL", "DD", "DOW",
+    # ── Industrials / Defense / Aero ──────────────────────────────────────
+    "CAT", "BA", "GE", "UNP", "RTX", "HON", "LMT", "DE", "MMM",
+    "NOC", "GD", "LHX", "HII", "TXT", "EMR", "ETN", "ITW", "CSX",
+    "NSC", "FDX", "UPS", "WM", "RSG", "PH",
+    # ── Communications / Streaming / Media ────────────────────────────────
+    "DIS", "NFLX", "CMCSA", "T", "VZ", "TMUS", "SPOT", "WBD", "PARA",
+    "EA", "TTWO", "ATVI", "PINS", "SNAP",
+    # ── Real Estate / Utilities + Energy Sovereignty ──────────────────────
+    "AMT", "PLD", "EQIX", "DLR", "PSA", "O", "SPG", "WELL", "CCI",
+    "NEE", "DUK", "SO", "AEP", "CEG", "VST", "EXC", "D", "PCG", "SRE",
+    # ── Critical Materials & Nuclear ──────────────────────────────────────
+    "MP", "LEU", "BWXT", "CCJ", "URA", "USAR",
+    # ── Urban Air Mobility — speculative franchise bets ───────────────────
+    "JOBY", "ACHR", "RKLB", "ASTS",
+    # ── Crypto-adjacent ───────────────────────────────────────────────────
+    "MSTR", "MARA", "RIOT",
 ]
+DISCOVERY_TICKERS_SET = set(DISCOVERY_TICKERS)
 
 @app.route("/api/discover")
 @limiter.limit(limit_discover)
@@ -5314,9 +5340,12 @@ def cron_refresh_heatmap():
     def _force_refresh(t):
         try:
             ck = _analyze_cache_key(t, {})
-            # Evict any existing cache entry — the cron IS the freshness
-            # guarantee, so we don't trust stale values.
+            # Evict any existing cache entry (both in-memory AND Redis) —
+            # the cron IS the freshness guarantee, so we don't trust stale.
             _ANALYZE_CACHE.pop(ck, None)
+            if _kv:
+                try: _kv.delete(ck)
+                except Exception: pass
             with app.test_request_context(f"/api/analyze?ticker={t}"):
                 resp = analyze()
             if isinstance(resp, tuple):
