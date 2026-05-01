@@ -5678,8 +5678,8 @@ def analyze():
             strategic["wacc_delta"] -= 0.0025      # extra 25bp reduction
             strategic["live_policy_amplifier"] = True
 
-        # ── Price history (1Y default) ────────────────────────────────────────
-        hist = stock.history(period="1y", interval="1d")
+        # ── Price history (5Y daily — frontend filters to 3M/6M/YTD/1Y/2Y/5Y) ──
+        hist = stock.history(period="5y", interval="1d")
         price_history = []
         if not hist.empty:
             price_history = [

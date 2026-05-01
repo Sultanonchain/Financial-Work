@@ -590,11 +590,16 @@ button { font-family: inherit; cursor: pointer; }
 [data-tip]:focus::after {
   content: attr(data-tip);
   position: absolute;
-  bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+  bottom: calc(100% + 8px);
+  /* Center, but clamp so tooltip never extends past the parent's bounds —
+     prevents viewport-edge clipping on first/last grid items. */
+  left: 50%;
+  transform: translateX(var(--tip-shift, -50%));
   background: #1a1f2a; color: #e6e9ef;
   padding: 8px 12px; border-radius: 6px;
   font-size: 12px; font-weight: 400; line-height: 1.45;
-  white-space: normal; max-width: 280px; width: max-content;
+  white-space: normal; width: max-content;
+  max-width: min(280px, 90vw);
   box-shadow: 0 8px 24px rgba(0,0,0,0.45);
   border: 1px solid rgba(255,255,255,0.08);
   z-index: 9999; pointer-events: none;
@@ -608,6 +613,12 @@ button { font-family: inherit; cursor: pointer; }
   border: 6px solid transparent; border-top-color: #1a1f2a;
   z-index: 9999; pointer-events: none;
 }
+/* Anchor tooltip to left/right edge of the tile near grid edges so it
+   never clips the viewport. JS toggles the modifier class at runtime. */
+[data-tip].tip-align-left:hover::after,
+[data-tip].tip-align-left:focus::after { left: 0; transform: none; }
+[data-tip].tip-align-right:hover::after,
+[data-tip].tip-align-right:focus::after { left: auto; right: 0; transform: none; }
 
 @media (max-width: 768px) {
   .hero { padding: var(--space-7) 0 var(--space-5); }
@@ -2411,6 +2422,35 @@ button { font-family: inherit; cursor: pointer; }
 }
 .assumption__label { font-size: 11px; color: var(--ink-muted); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.05em; }
 .assumption__value { font-size: 14px; font-weight: 500; color: var(--ink-primary); font-feature-settings: "tnum" 1; }
+
+/* Price chart header: title + stats + range tabs */
+.price-chart-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-3);
+}
+.price-chart-stats {
+  display: flex; gap: var(--space-3); flex-wrap: wrap;
+  font-size: 12px; font-family: var(--font-mono);
+}
+.price-chart-stats .pc-stat { font-feature-settings: "tnum" 1; }
+.price-chart-stats .pc-up { color: #34d399; }
+.price-chart-stats .pc-down { color: #f87171; }
+.price-chart-stats .pc-muted { color: var(--ink-muted); }
+.price-range-tabs {
+  display: inline-flex; gap: 2px; background: var(--bg-elevated-2);
+  padding: 3px; border-radius: var(--radius-sm);
+  border: 1px solid rgba(255,255,255,0.04);
+}
+.price-range-tabs button {
+  background: transparent; border: 0; color: var(--ink-muted);
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.05em;
+  padding: 5px 10px; border-radius: 4px; cursor: pointer;
+  transition: background 120ms, color 120ms;
+}
+.price-range-tabs button:hover { color: var(--ink-secondary); }
+.price-range-tabs button.is-active {
+  background: rgba(52,211,153,0.12); color: #34d399;
+}
 
 /* Notes / flags inside drawer */
 .notes-list { display: flex; flex-direction: column; gap: var(--space-2); }

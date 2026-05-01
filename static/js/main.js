@@ -1124,6 +1124,11 @@ function renderDrawerContent(d) {
         const tip = TIPS[l] ? ` data-tip="${esc(TIPS[l])}"` : "";
         return `<div class="assumption" tabindex="0"${tip}><span class="assumption__label">${l}</span><span class="assumption__value numeric">${v}</span></div>`;
       }).join("");
+      _alignAssumptionTooltips(ag);
+      if (!ag.dataset.alignBound) {
+        window.addEventListener("resize", () => _alignAssumptionTooltips(ag));
+        ag.dataset.alignBound = "1";
+      }
     }
   } catch (e) { console.error("[assumptions]", e); }
 
@@ -1498,18 +1503,109 @@ function renderValuationHistoryChart(payload) {
   }
 }
 
+// Align assumption-tile tooltips to grid edges so the 280px tip never
+// extends past the viewport on left/right-most tiles.
+function _alignAssumptionTooltips(grid) {
+  if (!grid) return;
+  const tiles = Array.from(grid.querySelectorAll(".assumption[data-tip]"));
+  if (tiles.length === 0) return;
+  const rows = new Map();
+  tiles.forEach(t => {
+    const top = Math.round(t.offsetTop);
+    if (!rows.has(top)) rows.set(top, []);
+    rows.get(top).push(t);
+    t.classList.remove("tip-align-left", "tip-align-right");
+  });
+  rows.forEach(arr => {
+    if (arr.length < 2) return;  // alone in row → centered is fine
+    arr.sort((a, b) => a.offsetLeft - b.offsetLeft);
+    arr[0].classList.add("tip-align-left");
+    arr[arr.length - 1].classList.add("tip-align-right");
+  });
+}
+
+let _PRICE_HISTORY_FULL = [];
+let _PRICE_RANGE = "1Y";
+
+function _filterPriceRange(history, range) {
+  if (!history || history.length === 0) return [];
+  const last = new Date(history[history.length - 1].date);
+  let cutoff;
+  if (range === "YTD") {
+    cutoff = new Date(last.getFullYear(), 0, 1);
+  } else {
+    const months = { "3M": 3, "6M": 6, "1Y": 12, "2Y": 24, "5Y": 60 }[range] || 12;
+    cutoff = new Date(last); cutoff.setMonth(cutoff.getMonth() - months);
+  }
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  return history.filter(h => h.date >= cutoffStr);
+}
+
+function _renderPriceStats(slice) {
+  const el = $("priceChartStats");
+  if (!el || !slice || slice.length < 2) { if (el) el.innerHTML = ""; return; }
+  const first = slice[0].close, last = slice[slice.length - 1].close;
+  const chg = last - first, pct = (chg / first) * 100;
+  let athVal = -Infinity, athDate = "";
+  for (const p of slice) if (p.close > athVal) { athVal = p.close; athDate = p.date; }
+  const up = chg >= 0;
+  const cls = up ? "pc-up" : "pc-down";
+  const sign = up ? "+" : "";
+  el.innerHTML =
+    `<span class="pc-stat ${cls}">${sign}$${fmt(chg, 2)} (${sign}${fmt(pct, 2)}%)</span>` +
+    `<span class="pc-stat pc-muted">High $${fmt(athVal, 2)} · ${athDate}</span>`;
+}
+
 function renderPriceChart(history) {
   const canvas = $("priceChart");
   if (!canvas || !history || history.length === 0) return;
+  _PRICE_HISTORY_FULL = history;
+
+  // Wire range tabs once
+  const tabs = $("priceRangeTabs");
+  if (tabs && !tabs.dataset.bound) {
+    tabs.addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-range]");
+      if (!btn) return;
+      _PRICE_RANGE = btn.dataset.range;
+      tabs.querySelectorAll("button").forEach(b => b.classList.toggle("is-active", b === btn));
+      _drawPriceChart();
+    });
+    tabs.dataset.bound = "1";
+  }
+  // Default range: pick widest available that has data
+  const tabsEl = $("priceRangeTabs");
+  if (tabsEl) {
+    const active = tabsEl.querySelector("button.is-active");
+    _PRICE_RANGE = active ? active.dataset.range : "1Y";
+  }
+  _drawPriceChart();
+}
+
+function _drawPriceChart() {
+  const canvas = $("priceChart");
+  if (!canvas) return;
+  const slice = _filterPriceRange(_PRICE_HISTORY_FULL, _PRICE_RANGE);
+  if (slice.length === 0) return;
+  _renderPriceStats(slice);
+
   const ctx = canvas.getContext("2d");
   if (priceChartInstance) priceChartInstance.destroy();
 
-  const labels = history.map(h => h.date);
-  const prices = history.map(h => h.close);
+  const labels = slice.map(h => h.date);
+  const prices = slice.map(h => h.close);
 
-  // Line color: green if up, red if down over period
+  // ATH point in slice
+  let athIdx = 0, athVal = prices[0];
+  for (let i = 1; i < prices.length; i++) if (prices[i] > athVal) { athVal = prices[i]; athIdx = i; }
+
   const up = prices[prices.length - 1] >= prices[0];
   const color = up ? "#34d399" : "#f87171";
+
+  // ATH highlight overlay (single visible point)
+  const athPointRadius = prices.map((_, i) => i === athIdx ? 5 : 0);
+  const athPointColor  = prices.map((_, i) => i === athIdx ? "#fbbf24" : "rgba(0,0,0,0)");
+  const athPointBorder = prices.map((_, i) => i === athIdx ? "#11151d" : "rgba(0,0,0,0)");
 
   priceChartInstance = new Chart(ctx, {
     type: "line",
@@ -1518,15 +1614,31 @@ function renderPriceChart(history) {
       datasets: [{
         data: prices, borderColor: color, borderWidth: 2,
         backgroundColor: up ? "rgba(52,211,153,0.10)" : "rgba(248,113,113,0.10)",
-        fill: true, tension: 0.25, pointRadius: 0, pointHoverRadius: 4
+        fill: true, tension: 0.25,
+        pointRadius: athPointRadius,
+        pointBackgroundColor: athPointColor,
+        pointBorderColor: athPointBorder,
+        pointBorderWidth: 2,
+        pointHoverRadius: 5,
+        pointHoverBackgroundColor: color,
+        pointHoverBorderColor: "#11151d",
+        pointHoverBorderWidth: 2,
       }]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
       plugins: { legend: { display: false }, tooltip: {
         backgroundColor: "#11151d", borderColor: "rgba(255,255,255,0.08)",
         borderWidth: 1, titleColor: "#f5f7fa", bodyColor: "#b6bdcb",
-        callbacks: { label: (c) => `$${fmt(c.parsed.y, 2)}` }
+        padding: 10, displayColors: false,
+        callbacks: {
+          title: (items) => items.length ? items[0].label : "",
+          label: (c) => {
+            const isAth = c.dataIndex === athIdx;
+            return `$${fmt(c.parsed.y, 2)}${isAth ? "  · all-time high" : ""}`;
+          }
+        }
       } },
       scales: {
         x: { ticks: { color: "#6b7382", maxRotation: 0, autoSkip: true, maxTicksLimit: 6 }, grid: { display: false } },

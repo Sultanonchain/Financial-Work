@@ -960,7 +960,20 @@
 
           <!-- Price chart -->
           <div class="card">
-            <div class="section-title">Price · last 12 months</div>
+            <div class="price-chart-head">
+              <div>
+                <div class="section-title" style="margin-bottom:4px;">Price history</div>
+                <div class="price-chart-stats" id="priceChartStats"></div>
+              </div>
+              <div class="price-range-tabs" id="priceRangeTabs" role="tablist">
+                <button type="button" data-range="3M">3M</button>
+                <button type="button" data-range="6M">6M</button>
+                <button type="button" data-range="YTD">YTD</button>
+                <button type="button" data-range="1Y" class="is-active">1Y</button>
+                <button type="button" data-range="2Y">2Y</button>
+                <button type="button" data-range="5Y">5Y</button>
+              </div>
+            </div>
             <div class="chart-wrap"><canvas id="priceChart"></canvas></div>
           </div>
 
