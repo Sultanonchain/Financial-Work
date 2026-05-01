@@ -584,41 +584,37 @@ button { font-family: inherit; cursor: pointer; }
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-/* ── Lightweight tooltip system (data-tip) ─────────────────────────── */
-[data-tip] { position: relative; }
-[data-tip]:hover::after,
-[data-tip]:focus::after {
-  content: attr(data-tip);
-  position: absolute;
-  bottom: calc(100% + 8px);
-  /* Center, but clamp so tooltip never extends past the parent's bounds —
-     prevents viewport-edge clipping on first/last grid items. */
-  left: 50%;
-  transform: translateX(var(--tip-shift, -50%));
+/* ── Floating tooltip (managed by JS, appended to body to escape any
+   ancestor's `overflow: hidden`). ───────────────────────────────────── */
+.floating-tip {
+  position: fixed;
   background: #1a1f2a; color: #e6e9ef;
   padding: 8px 12px; border-radius: 6px;
   font-size: 12px; font-weight: 400; line-height: 1.45;
   white-space: normal; width: max-content;
-  max-width: min(280px, 90vw);
+  max-width: min(320px, calc(100vw - 16px));
   box-shadow: 0 8px 24px rgba(0,0,0,0.45);
   border: 1px solid rgba(255,255,255,0.08);
-  z-index: 9999; pointer-events: none;
+  z-index: 99999; pointer-events: none;
   text-transform: none; letter-spacing: normal;
   font-family: inherit;
+  opacity: 0; transform: translateY(2px);
+  transition: opacity 100ms ease, transform 100ms ease;
 }
-[data-tip]:hover::before,
-[data-tip]:focus::before {
-  content: ""; position: absolute;
-  bottom: calc(100% + 2px); left: 50%; transform: translateX(-50%);
-  border: 6px solid transparent; border-top-color: #1a1f2a;
-  z-index: 9999; pointer-events: none;
+.floating-tip.is-visible { opacity: 1; transform: translateY(0); }
+.floating-tip::after {
+  content: "";
+  position: absolute;
+  left: var(--tip-arrow-x, 50%);
+  transform: translateX(-50%);
+  border: 6px solid transparent;
 }
-/* Anchor tooltip to left/right edge of the tile near grid edges so it
-   never clips the viewport. JS toggles the modifier class at runtime. */
-[data-tip].tip-align-left:hover::after,
-[data-tip].tip-align-left:focus::after { left: 0; transform: none; }
-[data-tip].tip-align-right:hover::after,
-[data-tip].tip-align-right:focus::after { left: auto; right: 0; transform: none; }
+.floating-tip[data-pos="top"]::after {
+  top: 100%; border-top-color: #1a1f2a;
+}
+.floating-tip[data-pos="bottom"]::after {
+  bottom: 100%; border-bottom-color: #1a1f2a;
+}
 
 @media (max-width: 768px) {
   .hero { padding: var(--space-7) 0 var(--space-5); }

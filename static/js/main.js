@@ -1503,26 +1503,69 @@ function renderValuationHistoryChart(payload) {
   }
 }
 
-// Align assumption-tile tooltips to grid edges so the 280px tip never
-// extends past the viewport on left/right-most tiles.
-function _alignAssumptionTooltips(grid) {
-  if (!grid) return;
-  const tiles = Array.from(grid.querySelectorAll(".assumption[data-tip]"));
-  if (tiles.length === 0) return;
-  const rows = new Map();
-  tiles.forEach(t => {
-    const top = Math.round(t.offsetTop);
-    if (!rows.has(top)) rows.set(top, []);
-    rows.get(top).push(t);
-    t.classList.remove("tip-align-left", "tip-align-right");
+// Floating tooltip — appended to body so it can escape any ancestor's
+// `overflow: hidden`. Positions itself above the trigger with viewport
+// clamping so it never clips the screen edge.
+(function _setupFloatingTip() {
+  let tip;
+  function getTip() {
+    if (!tip) {
+      tip = document.createElement("div");
+      tip.className = "floating-tip";
+      tip.setAttribute("role", "tooltip");
+      document.body.appendChild(tip);
+    }
+    return tip;
+  }
+  function show(target) {
+    const text = target.getAttribute("data-tip");
+    if (!text) return;
+    const el = getTip();
+    el.textContent = text;
+    el.dataset.pos = "top";
+    el.classList.add("is-visible");
+    position(target, el);
+  }
+  function hide() {
+    if (tip) tip.classList.remove("is-visible");
+  }
+  function position(target, el) {
+    const r = target.getBoundingClientRect();
+    const pad = 8;
+    el.style.left = "0px"; el.style.top = "0px";  // measure
+    const tw = el.offsetWidth, th = el.offsetHeight;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let top = r.top - th - pad;
+    let pos = "top";
+    if (top < 8) {
+      top = r.bottom + pad;
+      pos = "bottom";
+    }
+    let left = r.left + r.width / 2 - tw / 2;
+    left = Math.max(8, Math.min(left, vw - tw - 8));
+    el.style.left = `${Math.round(left)}px`;
+    el.style.top  = `${Math.round(Math.min(top, vh - th - 8))}px`;
+    el.dataset.pos = pos;
+    // Arrow position: center on trigger (clamped to tooltip bounds)
+    const arrowX = Math.max(12, Math.min(r.left + r.width / 2 - left, tw - 12));
+    el.style.setProperty("--tip-arrow-x", `${Math.round(arrowX)}px`);
+  }
+  document.addEventListener("mouseover", (e) => {
+    const t = e.target.closest("[data-tip]");
+    if (t) show(t);
   });
-  rows.forEach(arr => {
-    if (arr.length < 2) return;  // alone in row → centered is fine
-    arr.sort((a, b) => a.offsetLeft - b.offsetLeft);
-    arr[0].classList.add("tip-align-left");
-    arr[arr.length - 1].classList.add("tip-align-right");
+  document.addEventListener("mouseout", (e) => {
+    const t = e.target.closest("[data-tip]");
+    if (t && (!e.relatedTarget || !t.contains(e.relatedTarget))) hide();
   });
-}
+  document.addEventListener("focusin", (e) => {
+    const t = e.target.closest("[data-tip]");
+    if (t) show(t);
+  });
+  document.addEventListener("focusout", () => hide());
+  window.addEventListener("scroll", hide, true);
+})();
+function _alignAssumptionTooltips() { /* legacy no-op — floating-tip handles clamping */ }
 
 let _PRICE_HISTORY_FULL = [];
 let _PRICE_RANGE = "1Y";
@@ -1801,6 +1844,28 @@ function renderDcfChart(fcfData) {
     update(parseInt(slider.value, 10) || 1);
   }
 
+  // Compute the other two scenarios as reference overlay lines so users
+  // see the bull/bear range without having to toggle.
+  const refScenarios = ["bear", "base", "bull"].filter(k => k !== which);
+  const refDatasets = refScenarios.map(k => {
+    const sim = projectScenario(_LAST_DATA, k);
+    if (!sim) return null;
+    const c = k === "bull" ? "#34d399" : k === "bear" ? "#f87171" : "#94a3b8";
+    return {
+      type: "line",
+      label: `${k === "bull" ? "▴ Bull" : k === "bear" ? "▾ Bear" : "◆ Base"} (FCF, reference)`,
+      data: sim.projected,
+      borderColor: c,
+      backgroundColor: "rgba(0,0,0,0)",
+      borderWidth: 1.5,
+      borderDash: [5, 4],
+      pointRadius: 0,
+      pointHoverRadius: 4,
+      tension: 0.25,
+      order: 0,
+    };
+  }).filter(Boolean);
+
   dcfChartInstance = new Chart(ctx, {
     type: "bar",
     data: {
@@ -1808,10 +1873,11 @@ function renderDcfChart(fcfData) {
       datasets: [
         { label: "Projected FCF",      data: projected,
           backgroundColor: t.projBg, borderColor: t.proj,
-          borderWidth: 1, borderRadius: 4 },
+          borderWidth: 1, borderRadius: 4, order: 2 },
         { label: "Discounted FCF (PV)", data: discounted,
           backgroundColor: t.discBg, borderColor: t.disc,
-          borderWidth: 1, borderRadius: 4 },
+          borderWidth: 1, borderRadius: 4, order: 2 },
+        ...refDatasets,
       ]
     },
     options: {
