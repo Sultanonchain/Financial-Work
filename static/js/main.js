@@ -904,6 +904,7 @@ function valueClassFor(s) {
 function renderMethodology(d) {
   const steps = d.methodology_steps || [];
   const container = $("methodSteps");
+  if (!container) return;  // Section was removed from the DOM
   container.innerHTML = "";
 
   if (steps.length === 0) {

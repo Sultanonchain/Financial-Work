@@ -5174,52 +5174,43 @@ def _analyze_cache_set(key, payload):
 # analyze pipeline and a thin summary is returned.
 DISCOVERY_TICKERS = [
     # ── Tech — mega + semis + software ────────────────────────────────────
-    "AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "META", "NVDA", "TSLA",
-    "ORCL", "CRM", "ADBE", "AMD", "INTC", "AVGO", "QCOM", "TXN",
-    "MU", "ARM", "NOW", "SNOW", "PLTR", "PANW", "CRWD", "DDOG", "MDB",
-    "NET", "ZS", "FTNT", "SHOP", "SQ", "PYPL", "ROKU", "UBER", "LYFT",
-    "DASH", "ABNB", "RBLX", "U", "TEAM", "WDAY", "INTU", "ADP",
-    "IBM", "ACN", "CSCO", "HPQ", "DELL", "WDC", "STX",
-    # ── Strategic semis (analog/defense + cap equipment monopoly) ─────────
-    "ADI", "MCHP", "ON", "AMAT", "KLAC", "LRCX", "ASML", "NXPI", "MRVL",
-    "TSM", "STM", "GFS",
-    # ── Financials — banks, payments, brokers, insurance ──────────────────
-    "JPM", "BAC", "WFC", "GS", "MS", "C", "USB", "PNC", "TFC",
-    "BRK-B", "V", "MA", "AXP", "DFS", "COF",
-    "SCHW", "BLK", "SPGI", "MCO", "MSCI", "ICE", "CME", "CB", "AIG",
-    "MET", "PRU", "ALL", "TRV", "MMC", "AFL",
-    "COIN", "HOOD", "SOFI", "PYPL",
-    # ── Healthcare — pharma + medtech + insurers ──────────────────────────
-    "JNJ", "UNH", "LLY", "PFE", "ABBV", "MRK", "TMO", "ABT", "DHR",
-    "ISRG", "VRTX", "REGN", "AMGN", "GILD", "BMY", "BIIB", "ZTS",
-    "ELV", "CVS", "CI", "HUM", "MDT", "SYK", "BSX", "EW", "BDX",
-    "MRNA", "BNTX",
+    "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA",
+    "ORCL", "CRM", "ADBE", "AMD", "AVGO", "QCOM", "TXN",
+    "MU", "ARM", "NOW", "PLTR", "PANW", "CRWD", "DDOG",
+    "NET", "SHOP", "SQ", "PYPL", "UBER",
+    "ABNB", "RBLX", "INTU", "ADP", "IBM", "CSCO",
+    # ── Strategic semis ───────────────────────────────────────────────────
+    "AMAT", "KLAC", "LRCX", "ASML", "MRVL", "TSM",
+    # ── Financials — banks, payments, brokers ─────────────────────────────
+    "JPM", "BAC", "WFC", "GS", "MS", "C",
+    "BRK-B", "V", "MA", "AXP",
+    "SCHW", "BLK", "SPGI", "ICE", "CME",
+    "COIN", "HOOD",
+    # ── Healthcare — pharma + medtech ─────────────────────────────────────
+    "JNJ", "UNH", "LLY", "PFE", "ABBV", "MRK", "TMO", "ABT",
+    "ISRG", "VRTX", "AMGN", "GILD", "BMY",
+    "ELV", "CVS", "MDT", "SYK",
     # ── Consumer staples + discretionary ──────────────────────────────────
-    "WMT", "HD", "MCD", "NKE", "KO", "PEP", "SBUX", "COST", "TGT",
-    "LULU", "CMG", "BKNG", "MAR", "HLT", "RCL", "CCL", "LOW",
-    "TJX", "DG", "DLTR", "KR", "SYY", "CL", "PG", "KMB", "MO",
-    "PM", "EL", "MDLZ", "MNST", "KHC", "STZ", "DEO", "ULTA",
-    # ── Auto / Mobility / Trucking ────────────────────────────────────────
-    "F", "GM", "STLA", "RIVN", "LCID", "TM", "HMC",
+    "WMT", "HD", "MCD", "NKE", "KO", "PEP", "SBUX", "COST",
+    "LULU", "BKNG", "TJX", "PG", "MO", "MDLZ",
+    # ── Auto / Mobility ───────────────────────────────────────────────────
+    "F", "GM", "RIVN",
     # ── Energy / Materials ────────────────────────────────────────────────
-    "XOM", "CVX", "COP", "OXY", "EOG", "PSX", "MPC", "VLO", "SLB",
-    "FCX", "LIN", "NEM", "GOLD", "APD", "ECL", "DD", "DOW",
+    "XOM", "CVX", "COP", "OXY", "EOG", "SLB",
+    "FCX", "LIN", "NEM",
     # ── Industrials / Defense / Aero ──────────────────────────────────────
-    "CAT", "BA", "GE", "UNP", "RTX", "HON", "LMT", "DE", "MMM",
-    "NOC", "GD", "LHX", "HII", "TXT", "EMR", "ETN", "ITW", "CSX",
-    "NSC", "FDX", "UPS", "WM", "RSG", "PH",
+    "CAT", "BA", "GE", "UNP", "RTX", "HON", "LMT", "DE",
+    "NOC", "GD", "LHX", "FDX", "UPS",
     # ── Communications / Streaming / Media ────────────────────────────────
-    "DIS", "NFLX", "CMCSA", "T", "VZ", "TMUS", "SPOT", "WBD", "PARA",
-    "EA", "TTWO", "ATVI", "PINS", "SNAP",
-    # ── Real Estate / Utilities + Energy Sovereignty ──────────────────────
-    "AMT", "PLD", "EQIX", "DLR", "PSA", "O", "SPG", "WELL", "CCI",
-    "NEE", "DUK", "SO", "AEP", "CEG", "VST", "EXC", "D", "PCG", "SRE",
+    "DIS", "NFLX", "T", "VZ", "TMUS", "SPOT",
+    # ── Real Estate / Utilities ───────────────────────────────────────────
+    "AMT", "PLD", "EQIX", "NEE", "DUK", "CEG", "VST",
     # ── Critical Materials & Nuclear ──────────────────────────────────────
-    "MP", "LEU", "BWXT", "CCJ", "URA", "USAR",
-    # ── Urban Air Mobility — speculative franchise bets ───────────────────
-    "JOBY", "ACHR", "RKLB", "ASTS",
+    "MP", "LEU", "BWXT", "CCJ",
+    # ── Urban Air Mobility ────────────────────────────────────────────────
+    "JOBY", "ACHR", "RKLB",
     # ── Crypto-adjacent ───────────────────────────────────────────────────
-    "MSTR", "MARA", "RIOT",
+    "MSTR",
 ]
 DISCOVERY_TICKERS_SET = set(DISCOVERY_TICKERS)
 
