@@ -5145,15 +5145,45 @@ _POPULAR_TICKERS = {
     "INTC", "QCOM", "PFE", "T", "VZ", "BA", "GS", "MS", "C",
 }
 
+def _et_now():
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo("America/New_York"))
+
+def _seconds_until_next_market_open() -> int:
+    # Holidays not handled — extra cache lifetime over a holiday is harmless.
+    now_et = _et_now()
+    open_today = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
+    if now_et < open_today and now_et.weekday() < 5:
+        target = open_today
+    else:
+        candidate = open_today + timedelta(days=1)
+        while candidate.weekday() >= 5:
+            candidate += timedelta(days=1)
+        target = candidate
+    return max(int((target - now_et).total_seconds()), 60)
+
+def _is_market_hours() -> bool:
+    now_et = _et_now()
+    if now_et.weekday() >= 5:
+        return False
+    open_t  = now_et.replace(hour=9,  minute=30, second=0, microsecond=0)
+    close_t = now_et.replace(hour=16, minute=0,  second=0, microsecond=0)
+    return open_t <= now_et < close_t
+
+def _market_aware_ttl(base_ttl: int) -> int:
+    if _is_market_hours():
+        return base_ttl
+    return max(base_ttl, _seconds_until_next_market_open())
+
 def _ttl_for_ticker(ticker):
     t = (ticker or "").upper()
     # Discovery tickers cache the longest — the daily cron rebuilds them, and
     # we want every viewer of the heatmap to hit the cache, not pay for compute.
     if t in globals().get("DISCOVERY_TICKERS_SET", set()):
-        return _ANALYZE_CACHE_TTL_DISCOVERY_S
+        return _market_aware_ttl(_ANALYZE_CACHE_TTL_DISCOVERY_S)
     if t in _POPULAR_TICKERS:
-        return _ANALYZE_CACHE_TTL_POPULAR_S
-    return _ANALYZE_CACHE_TTL_S
+        return _market_aware_ttl(_ANALYZE_CACHE_TTL_POPULAR_S)
+    return _market_aware_ttl(_ANALYZE_CACHE_TTL_S)
 
 def _analyze_cache_key(ticker, args):
     relevant = sorted((k, v) for k, v in args.items() if k != "ticker")
@@ -5172,8 +5202,9 @@ def _analyze_cache_get(key):
     entry = _ANALYZE_CACHE.get(key)
     if entry is None: return None
     ts, payload = entry
-    # Use the longer TTL when checking memory — Redis already enforces its own
-    if time.time() - ts < _ANALYZE_CACHE_TTL_POPULAR_S:
+    ticker = (payload.get("ticker") or "").upper() if isinstance(payload, dict) else ""
+    ttl = _ttl_for_ticker(ticker) if ticker else _market_aware_ttl(_ANALYZE_CACHE_TTL_S)
+    if time.time() - ts < ttl:
         return payload
     _ANALYZE_CACHE.pop(key, None)
     return None
