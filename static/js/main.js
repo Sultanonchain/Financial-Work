@@ -2927,6 +2927,14 @@ function setupAuthControl() {
     } catch {}
     sessionStorage.removeItem("valus.claimed");
     _ME = null;
+    // Clear the local portfolio view — it's tied to the signed-in
+    // identity. The server copy is preserved (keyed to the user's sub)
+    // and will be pulled back on next sign-in.
+    localStorage.removeItem(PF_KEY);
+    pfUpdateBadge();
+    if (typeof renderPortfolioPage === "function") {
+      try { renderPortfolioPage(); } catch {}
+    }
     updateAuthControl();
   };
 
@@ -2948,6 +2956,28 @@ function setupAuthControl() {
         $("addPortfolioBtn")?.click();
       }
     }, 400);
+  }
+
+  // Surface OAuth failures so the user understands why they're back on
+  // the home page without being signed in. Common reasons: misconfigured
+  // SECRET_KEY (state mismatch), Google Console redirect URI mismatch.
+  const _authErr = new URLSearchParams(window.location.search).get("auth_error");
+  if (_authErr) {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("auth_error");
+    window.history.replaceState({}, "", url);
+    const map = {
+      not_configured:        "Google sign-in isn't configured on this deployment.",
+      no_userinfo:           "Google didn't return your profile. Try again.",
+      mismatchingstateerror: "Sign-in session expired mid-flow. Please try again.",
+    };
+    const msg = map[_authErr] || `Sign-in failed (${_authErr}). Please try again.`;
+    const banner = document.createElement("div");
+    banner.className = "auth-error-banner";
+    banner.textContent = "⚠ " + msg;
+    document.body.appendChild(banner);
+    setTimeout(() => banner.classList.add("is-fading"), 6000);
+    setTimeout(() => banner.remove(), 7000);
   }
 }
 

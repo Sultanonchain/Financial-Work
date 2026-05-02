@@ -27,9 +27,27 @@ except Exception:
     pass
 
 app = Flask(__name__)
-# Cookie session signing — falls back to a dev key (sign-in still works
-# locally but cookies don't survive a server restart).
-app.secret_key = os.environ.get("SECRET_KEY") or "dev-only-do-not-use-in-prod-" + str(int(time.time()))
+# Cookie session signing.
+#   - In production (Vercel) we REFUSE to start without SECRET_KEY. Each
+#     lambda instance generates its own per-process random key otherwise,
+#     which means cookies signed by instance A can't be verified by
+#     instance B. OAuth state lives in the session, so the round-trip
+#     to Google fails for any user that happens to land on a different
+#     instance for the callback — exactly the "some people can't sign
+#     in" symptom.
+#   - In local dev we use a deterministic fallback so sessions survive
+#     a `python3 app.py` restart.
+_secret = os.environ.get("SECRET_KEY")
+if not _secret:
+    if os.environ.get("VERCEL"):
+        raise RuntimeError(
+            "SECRET_KEY environment variable is required in production. "
+            "Without it Flask sessions/OAuth state break across lambda "
+            "instances, causing intermittent sign-in failures. Set a "
+            "long random string in the Vercel project env."
+        )
+    _secret = "valus-dev-only-fixed-key-do-not-use-in-prod"
+app.secret_key = _secret
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
@@ -4801,8 +4819,17 @@ def auth_callback():
             redirect_to = f"{next_url}{sep}auth_ok=1"
         return redirect(redirect_to)
     except Exception as e:
-        print(f"[valus] OAuth callback failed: {e}")
-        return redirect("/?auth_error=callback_failed")
+        # Log the full traceback so prod can diagnose. Common causes:
+        # - SECRET_KEY mismatch between instances → state validation fails
+        # - Redirect URI in Google Console doesn't match the one used here
+        # - Clock skew on the lambda
+        import traceback
+        print(f"[valus] OAuth callback failed: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        # Surface a hint in the URL so the frontend can show something
+        # useful, but don't leak internals.
+        reason = type(e).__name__.lower()
+        return redirect(f"/?auth_error={reason}")
 
 
 @app.route("/auth/logout", methods=["POST", "GET"])
