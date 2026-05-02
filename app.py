@@ -5470,6 +5470,84 @@ def leaderboard_delete():
     return jsonify({"ok": True})
 
 
+PORTFOLIO_FILE = "/tmp/.valus_portfolios.json"
+PORTFOLIO_KEY  = "valus:portfolios:v1"
+_PORTFOLIOS_MEM = {}
+
+def _read_portfolios():
+    raw = kv_get(PORTFOLIO_KEY)
+    if raw:
+        try: return _json.loads(raw)
+        except Exception: pass
+    if os.path.exists(PORTFOLIO_FILE):
+        try:
+            with open(PORTFOLIO_FILE) as f:
+                return _json.load(f)
+        except Exception:
+            pass
+    return dict(_PORTFOLIOS_MEM)
+
+def _write_portfolios(d):
+    global _PORTFOLIOS_MEM
+    _PORTFOLIOS_MEM = dict(d)
+    serialized = _json.dumps(d)
+    kv_set(PORTFOLIO_KEY, serialized)
+    try:
+        with open(PORTFOLIO_FILE, "w") as f:
+            f.write(serialized)
+    except Exception:
+        pass
+
+
+@app.route("/api/portfolio", methods=["GET"])
+def portfolio_get():
+    """Return the signed-in user's saved portfolio (list of ticker snapshots)."""
+    user, err = require_user()
+    if err: return err
+    portfolios = _read_portfolios()
+    items = portfolios.get(user["sub"], [])
+    return jsonify({"items": items, "updated_at": portfolios.get(f"{user['sub']}__ts")})
+
+
+@app.route("/api/portfolio", methods=["POST"])
+def portfolio_save():
+    """
+    Persist the user's portfolio server-side. Body: {items: [...]}.
+    Each item is a thin snapshot {ticker, name, sector, price, iv, mos, tier, addedAt}.
+    Server caps the list at 100 entries and trims fields to safe sizes.
+    """
+    user, err = require_user()
+    if err: return err
+    body = request.get_json(silent=True) or {}
+    raw = body.get("items") or []
+    if not isinstance(raw, list):
+        return jsonify({"error": "items must be a list"}), 400
+
+    cleaned = []
+    seen = set()
+    for it in raw[:100]:
+        if not isinstance(it, dict): continue
+        t = str(it.get("ticker") or "").strip().upper()[:12]
+        if not t or t in seen: continue
+        seen.add(t)
+        cleaned.append({
+            "ticker":  t,
+            "name":    str(it.get("name")  or "")[:120],
+            "sector":  str(it.get("sector") or "")[:60],
+            "price":   it.get("price")  if isinstance(it.get("price"),  (int, float)) else None,
+            "iv":      it.get("iv")     if isinstance(it.get("iv"),     (int, float)) else None,
+            "mos":     it.get("mos")    if isinstance(it.get("mos"),    (int, float)) else None,
+            "tier":    str(it.get("tier") or "")[:32],
+            "addedAt": it.get("addedAt") if isinstance(it.get("addedAt"), (int, float)) else None,
+        })
+
+    portfolios = _read_portfolios()
+    portfolios[user["sub"]]            = cleaned
+    portfolios[f"{user['sub']}__ts"]   = time.time()
+    _write_portfolios(portfolios)
+    return jsonify({"ok": True, "count": len(cleaned)})
+
+
 @app.route("/api/leaderboard/claim", methods=["POST"])
 def leaderboard_claim():
     """

@@ -2165,6 +2165,52 @@ function pfRead() {
 function pfWrite(items) {
   localStorage.setItem(PF_KEY, JSON.stringify(items));
   pfUpdateBadge();
+  // If the user is signed in, mirror to the server so the portfolio
+  // follows them across devices. Debounced to coalesce burst writes.
+  pfSyncToServer();
+}
+
+let _PF_SYNC_TIMER = null;
+function pfSyncToServer() {
+  if (!_ME) return;  // signed-out → localStorage-only, no server copy
+  clearTimeout(_PF_SYNC_TIMER);
+  _PF_SYNC_TIMER = setTimeout(async () => {
+    try {
+      await fetch("/api/portfolio", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: pfRead() }),
+      });
+    } catch (e) { /* offline / transient — local copy still authoritative */ }
+  }, 600);
+}
+
+// On sign-in, pull the server copy and union with whatever the user has
+// added locally on this device. Server-stored entries persist across
+// devices; any tickers added while signed-out on this device get pushed up.
+async function pfPullFromServer() {
+  if (!_ME) return;
+  try {
+    const r = await fetch("/api/portfolio", { credentials: "same-origin" });
+    if (!r.ok) return;
+    const data = await r.json();
+    const remote = data.items || [];
+    const local  = pfRead();
+    const byTicker = new Map();
+    // Local first so its more-recent snapshot wins on conflict (price/iv
+    // were freshly computed when the user added it on this device).
+    for (const it of local)  byTicker.set(it.ticker, it);
+    for (const it of remote) if (!byTicker.has(it.ticker)) byTicker.set(it.ticker, it);
+    const merged = Array.from(byTicker.values());
+    localStorage.setItem(PF_KEY, JSON.stringify(merged));
+    pfUpdateBadge();
+    // If we added anything from remote, or local-only entries weren't on
+    // the server yet, push the union back so both sides agree.
+    if (merged.length !== remote.length || merged.length !== local.length) {
+      pfSyncToServer();
+    }
+  } catch (e) { /* network blip — keep local copy */ }
 }
 function pfHas(ticker) {
   return pfRead().some(it => it.ticker === ticker);
@@ -2778,6 +2824,9 @@ async function refreshMe() {
     }
     sessionStorage.setItem("valus.claimed", "1");
   }
+  // When signed in, sync the saved portfolio so it follows the user
+  // across devices/browsers.
+  if (_ME) pfPullFromServer();
 }
 
 function updateAuthControl() {
