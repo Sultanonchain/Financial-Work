@@ -3408,25 +3408,7 @@ a:focus-visible {
 .vh-pill--bad     { background: rgba(248,113,113,0.12); color: #f87171; border-color: rgba(248,113,113,0.30); }
 .vh-pill--neutral { background: rgba(96,165,250,0.10); color: #60a5fa; border-color: rgba(96,165,250,0.25); }
 .vh-stat { font-size: 12px; color: #b6bdcb; font-variant-numeric: tabular-nums; }
-.vh-chart-wrap { position: relative; height: 260px; width: 100%; }
-.vh-chart-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
-@media (max-width: 760px) { .vh-chart-grid { grid-template-columns: 1fr; } }
-.vh-chart-panel {
-  background: var(--bg-elevated-2, rgba(255,255,255,0.02));
-  border: 1px solid rgba(255,255,255,0.04);
-  border-radius: var(--radius-sm, 8px);
-  padding: 10px 12px 6px;
-}
-.vh-chart-panel__head {
-  display: inline-flex; align-items: center; gap: 8px;
-  font-size: 11px; font-family: var(--font-mono); letter-spacing: 0.05em;
-  text-transform: uppercase; color: var(--ink-muted, #8892a3);
-  margin-bottom: 6px;
-}
+.vh-chart-wrap { position: relative; height: 320px; width: 100%; }
 .vh-legend {
   margin-top: 12px; display: flex; align-items: center; gap: 16px;
   flex-wrap: wrap; font-size: 12px; color: #8892a3;
@@ -3435,7 +3417,7 @@ a:focus-visible {
 .vh-legend__hint { color: #6b7382; font-style: italic; }
 .vh-dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
 .vh-dot--price { background: #60a5fa; }
-.vh-dot--iv    { background: transparent; border: 2px dashed #f59e0b; height: 0; width: 14px; border-radius: 0; }
+.vh-dot--iv    { background: transparent; border-top: 1.5px dashed rgba(148,163,184,0.85); height: 0; width: 16px; border-radius: 0; }
 .vh-empty {
   margin-top: 12px; padding: 12px; border-radius: 8px;
   background: rgba(255,255,255,0.02); color: #8892a3;

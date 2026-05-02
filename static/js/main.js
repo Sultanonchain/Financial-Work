@@ -1378,46 +1378,81 @@ function renderValuationHistoryChart(payload) {
 
   const priceSeries = pricePts.map(p => p.price);
 
-  // Shared y-axis range so the two side-by-side charts are directly
-  // comparable. Pad ~5% above/below so lines don't kiss the chart edge.
-  const allVals = priceSeries.concat(ivStep).filter(v => v != null && Number.isFinite(v));
-  const yMin = allVals.length ? Math.min(...allVals) : 0;
-  const yMax = allVals.length ? Math.max(...allVals) : 1;
-  const yPad = (yMax - yMin) * 0.05 || 1;
-  const sharedY = {
-    min: Math.max(0, yMin - yPad),
-    max: yMax + yPad,
-    ticks: { color: "#6b7382", callback: v => `$${fmt(v, 0)}` },
-    grid:  { color: "rgba(255,255,255,0.04)" },
-  };
-  const sharedX = {
-    ticks: { color: "#6b7382", maxRotation: 0, autoSkip: true, maxTicksLimit: 6 },
-    grid:  { display: false },
-  };
-  const sharedTooltip = {
-    backgroundColor: "#11151d",
-    borderColor: "rgba(255,255,255,0.08)",
-    borderWidth: 1,
-    titleColor: "#f5f7fa",
-    bodyColor: "#b6bdcb",
-  };
+  // Smooth IV curve — interpolate between yearly IV anchor points instead
+  // of stepping. Cleaner reference baseline, like AlphaSpread's chart.
+  const ivSmooth = (() => {
+    const out = new Array(labels.length).fill(null);
+    if (!ivByDate.length) return out;
+    const idxByDate = labels.map((d, i) => ({ d, i }));
+    const anchors = ivByDate.map(p => {
+      const a = idxByDate.find(x => x.d >= p.date);
+      return { idx: a ? a.i : labels.length - 1, iv: p.iv };
+    });
+    for (let i = 0; i < anchors.length; i++) {
+      const a = anchors[i];
+      const b = anchors[i + 1];
+      if (!b) {
+        for (let k = a.idx; k < out.length; k++) out[k] = a.iv;
+        break;
+      }
+      const span = Math.max(b.idx - a.idx, 1);
+      for (let k = a.idx; k <= b.idx; k++) {
+        const t = (k - a.idx) / span;
+        out[k] = a.iv + (b.iv - a.iv) * t;
+      }
+    }
+    // Backfill any leading gap with the first anchor value
+    const firstIdx = out.findIndex(v => v != null);
+    if (firstIdx > 0) for (let k = 0; k < firstIdx; k++) out[k] = out[firstIdx];
+    return out;
+  })();
+
+  // Price line color: red if currently overvalued, green if undervalued
+  const latestIv = ivPts[ivPts.length - 1]?.iv;
+  const latestPx = priceSeries[priceSeries.length - 1];
+  const overvalued = latestIv && latestPx ? latestPx > latestIv * 1.10 : false;
+  const undervalued = latestIv && latestPx ? latestPx < latestIv * 0.90 : false;
+  const priceColor = overvalued ? "#ef4444" : undervalued ? "#22c55e" : "#60a5fa";
+  const priceFill  = overvalued ? "rgba(239,68,68,0.08)"
+                   : undervalued ? "rgba(34,197,94,0.08)"
+                   : "rgba(96,165,250,0.08)";
 
   const ctx = canvas.getContext("2d");
   valuationHistoryChartInstance = new Chart(ctx, {
     type: "line",
     data: {
       labels,
-      datasets: [{
-        label: "Price",
-        data: priceSeries,
-        borderColor: "#60a5fa",
-        backgroundColor: "rgba(96,165,250,0.10)",
-        borderWidth: 2,
-        fill: true,
-        tension: 0.25,
-        pointRadius: 0,
-        pointHoverRadius: 4,
-      }],
+      datasets: [
+        // IV — clean dashed gray line, no fill. Acts as the reference
+        // baseline beneath the price.
+        {
+          label: "Intrinsic Value",
+          data: ivSmooth,
+          borderColor: "rgba(148,163,184,0.85)",
+          backgroundColor: "rgba(0,0,0,0)",
+          borderWidth: 1.5,
+          borderDash: [6, 4],
+          fill: false,
+          tension: 0.3,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          order: 2,
+        },
+        // Price — prominent line with subtle fill toward zero. Color
+        // signals current valuation state.
+        {
+          label: "Price",
+          data: priceSeries,
+          borderColor: priceColor,
+          backgroundColor: priceFill,
+          borderWidth: 2,
+          fill: "origin",
+          tension: 0.25,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          order: 1,
+        },
+      ],
     },
     options: {
       responsive: true,
@@ -1426,63 +1461,45 @@ function renderValuationHistoryChart(payload) {
       plugins: {
         legend: { display: false },
         tooltip: {
-          ...sharedTooltip,
-          callbacks: { label: (c) => `Price: $${fmt(c.parsed.y, 2)}` },
-        },
-      },
-      scales: { x: sharedX, y: sharedY },
-    },
-  });
-
-  const ivCanvas = $("valuationHistoryIVChart");
-  if (ivCanvas) {
-    const ivCtx = ivCanvas.getContext("2d");
-    valuationHistoryIVChartInstance = new Chart(ivCtx, {
-      type: "line",
-      data: {
-        labels,
-        datasets: [{
-          label: "Intrinsic Value",
-          data: ivStep,
-          borderColor: "#f59e0b",
-          backgroundColor: "rgba(245,158,11,0.10)",
-          borderWidth: 2,
-          borderDash: [4, 3],
-          stepped: true,
-          fill: true,
-          pointRadius: 0,
-          pointHoverRadius: 4,
-        }],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: "index", intersect: false },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            ...sharedTooltip,
-            callbacks: {
-              label: (c) => c.parsed.y != null ? `IV: $${fmt(c.parsed.y, 2)}` : null,
-              afterBody: (items) => {
-                const lbl = items?.[0]?.label;
-                const ivPt = ivByDate.filter(p => p.date <= lbl).slice(-1)[0];
-                if (!ivPt) return null;
-                const orig = ivPts.find(p => p.date === ivPt.date);
-                if (!orig) return null;
-                const lines = [`As of ${orig.date}:`];
-                if (orig.cagr_at_date != null) lines.push(`Trailing 3y rev CAGR: ${fmt(orig.cagr_at_date,1)}%`);
-                if (orig.growth_used  != null) lines.push(`Growth used: ${fmt(orig.growth_used,1)}%`);
-                if (orig.fcf          != null) lines.push(`FCF: $${fmt(orig.fcf/1e9, 2)}B`);
-                return lines;
-              },
+          backgroundColor: "#11151d",
+          borderColor: "rgba(255,255,255,0.08)",
+          borderWidth: 1,
+          titleColor: "#f5f7fa",
+          bodyColor: "#b6bdcb",
+          callbacks: {
+            label: (c) => {
+              const v = c.parsed.y;
+              if (v == null) return null;
+              return `${c.dataset.label}: $${fmt(v, 2)}`;
+            },
+            afterBody: (items) => {
+              const lbl = items?.[0]?.label;
+              const ivPt = ivByDate.filter(p => p.date <= lbl).slice(-1)[0];
+              if (!ivPt) return null;
+              const orig = ivPts.find(p => p.date === ivPt.date);
+              if (!orig) return null;
+              const lines = [`As of ${orig.date}:`];
+              if (orig.cagr_at_date != null) lines.push(`Trailing 3y rev CAGR: ${fmt(orig.cagr_at_date,1)}%`);
+              if (orig.growth_used  != null) lines.push(`Growth used: ${fmt(orig.growth_used,1)}%`);
+              if (orig.fcf          != null) lines.push(`FCF: $${fmt(orig.fcf/1e9, 2)}B`);
+              return lines;
             },
           },
         },
-        scales: { x: sharedX, y: sharedY },
       },
-    });
-  }
+      scales: {
+        x: {
+          ticks: { color: "#6b7382", maxRotation: 0, autoSkip: true, maxTicksLimit: 6 },
+          grid:  { display: false },
+        },
+        y: {
+          ticks: { color: "#6b7382", callback: v => `$${fmt(v, 0)}` },
+          grid:  { color: "rgba(255,255,255,0.04)" },
+          beginAtZero: false,
+        },
+      },
+    },
+  });
 
   // ── Cyclical-pattern caveat ───────────────────────────────────────────
   // When the deterministic IV is consistently far below price across the

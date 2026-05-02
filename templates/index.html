@@ -749,26 +749,13 @@
         <span class="vh-caveat__icon" aria-hidden="true">⚠</span>
         <span class="vh-caveat__text" id="vhCaveatText"></span>
       </div>
-      <div class="vh-chart-grid">
-        <div class="vh-chart-panel">
-          <div class="vh-chart-panel__head">
-            <span class="vh-dot vh-dot--price"></span>Price
-          </div>
-          <div class="vh-chart-wrap">
-            <canvas id="valuationHistoryChart" aria-label="Price history chart"></canvas>
-          </div>
-        </div>
-        <div class="vh-chart-panel">
-          <div class="vh-chart-panel__head">
-            <span class="vh-dot vh-dot--iv"></span>Intrinsic Value (point-in-time DCF)
-          </div>
-          <div class="vh-chart-wrap">
-            <canvas id="valuationHistoryIVChart" aria-label="Intrinsic value history chart"></canvas>
-          </div>
-        </div>
+      <div class="vh-chart-wrap">
+        <canvas id="valuationHistoryChart" aria-label="Valuation history chart"></canvas>
       </div>
       <div class="vh-legend">
-        <span class="vh-legend__hint">IV recomputed each year using only data filed by that date · charts share the same scale for direct comparison</span>
+        <span class="vh-legend__item"><span class="vh-dot vh-dot--price"></span>Price</span>
+        <span class="vh-legend__item"><span class="vh-dot vh-dot--iv"></span>Intrinsic Value</span>
+        <span class="vh-legend__hint">IV recomputed each year using only data filed by that date</span>
       </div>
       <div class="vh-empty hidden" id="vhEmpty">
         Historical valuation requires SEC EDGAR data — available for US-listed filers with sufficient history.
