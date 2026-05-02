@@ -3323,6 +3323,18 @@ async function loadDiscover(opts = {}) {
     renderDiscoverSkeleton();
   }
   $("discLoading").classList.add("hidden");   // skeleton replaces the spinner
+
+  // Visible feedback on the refresh button so users don't think the click
+  // was lost. fresh=true requests can take 30–90s to revalidate the cache.
+  const refreshBtn = $("discRefreshBtn");
+  let prevLabel;
+  if (refreshBtn) {
+    prevLabel = refreshBtn.textContent;
+    refreshBtn.textContent = fresh ? "↻ Refreshing…" : "↻ Loading…";
+    refreshBtn.disabled = true;
+    refreshBtn.classList.add("is-loading");
+  }
+
   let failed = false;
   try {
     const url = fresh ? "/api/discover?fresh=true" : "/api/discover";
@@ -3338,6 +3350,11 @@ async function loadDiscover(opts = {}) {
       _DISC_DATA = [];
     }
     failed = true;
+  }
+  if (refreshBtn) {
+    refreshBtn.textContent = failed ? "↻ Retry" : (prevLabel || "↻ Refresh");
+    refreshBtn.disabled = false;
+    refreshBtn.classList.remove("is-loading");
   }
   renderDiscover(failed);
 }

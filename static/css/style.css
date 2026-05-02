@@ -544,10 +544,11 @@ button { font-family: inherit; cursor: pointer; }
 .advanced-panel {
   margin-top: var(--space-4);
   padding: var(--space-5);
-  background: var(--bg-elevated);
-  border: 1px solid rgba(255,255,255,0.05);
+  background: var(--bg-elevated-2, var(--bg-elevated));
+  border: 1px solid rgba(255,255,255,0.12);
   border-radius: var(--radius);
   display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-4);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.25);
 }
 .advanced-panel.hidden { display: none; }
 .advanced-field { display: flex; flex-direction: column; gap: 6px; text-align: left; }
@@ -800,6 +801,15 @@ button { font-family: inherit; cursor: pointer; }
   background: rgba(255,255,255,0.08);
   color: var(--ink-primary);
   border-color: rgba(255,255,255,0.12);
+}
+.copy-btn:disabled, .copy-btn.is-loading {
+  opacity: 0.55; cursor: progress;
+  background: rgba(255,255,255,0.06);
+}
+.copy-btn.is-loading { animation: copy-btn-pulse 1.2s ease-in-out infinite; }
+@keyframes copy-btn-pulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 0.85; }
 }
 .copy-btn.success {
   color: var(--positive);
