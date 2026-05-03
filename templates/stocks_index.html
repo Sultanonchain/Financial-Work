@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>All Stocks · DCF Valuation Index · VALUS</title>
+  <meta name="description" content="Browse VALUS DCF stock valuations. Educational intrinsic value estimates and margin of safety for every covered ticker — free, no sign-up required."/>
+  <link rel="canonical" href="/stocks"/>
+  <link rel="stylesheet" href="/static/css/style.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="container site-header__inner">
+    <div class="brand">
+      <a href="/" style="display:flex;align-items:center;gap:8px;text-decoration:none;color:inherit;">
+        <div class="brand-mark" aria-hidden="true">V</div>
+        <span class="brand-name">VALUS</span>
+      </a>
+      <span class="brand-divider"></span>
+      <span class="brand-tag">Educational Stock Valuation Tool</span>
+    </div>
+    <div class="header-actions">
+      <a class="header-btn" href="/"><span class="header-btn__icon">⌕</span><span class="header-btn__label">Search</span></a>
+      <span class="disclaimer-pill">⚠ Not financial advice</span>
+    </div>
+  </div>
+</header>
+
+<main class="container" style="padding:32px 0 48px;max-width:980px;">
+  <h1 style="font-size:32px;font-weight:700;line-height:1.2;margin:0 0 8px;">All stocks</h1>
+  <p style="color:var(--ink-muted);font-size:15px;margin:0 0 28px;line-height:1.55;">Every ticker in the VALUS coverage universe. Click any name for the full DCF valuation, intrinsic value, and margin of safety.</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;">
+    {% for t in tickers %}
+      <a href="/stocks/{{ t.lower() }}" style="display:block;padding:10px 12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:var(--ink-primary);text-decoration:none;font-weight:600;font-size:13px;text-align:center;font-variant-numeric:tabular-nums;">{{ t }}</a>
+    {% endfor %}
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container"><span>VALUS · Educational research tool · Data via Yahoo Finance · Not investment advice · <a href="/how-it-works" style="color:inherit;text-decoration:underline;opacity:0.8;">How it works</a></span></div>
+</footer>
+
+</body>
+</html>

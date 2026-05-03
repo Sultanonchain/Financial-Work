@@ -4714,6 +4714,7 @@ def index():
 
 @app.route("/robots.txt")
 def robots_txt():
+    base = (request.url_root or "/").rstrip("/")
     body = (
         "User-agent: GPTBot\nDisallow: /\n\n"
         "User-agent: ClaudeBot\nDisallow: /\n\n"
@@ -4721,7 +4722,8 @@ def robots_txt():
         "User-agent: CCBot\nDisallow: /\n\n"
         "User-agent: anthropic-ai\nDisallow: /\n\n"
         "User-agent: PerplexityBot\nDisallow: /\n\n"
-        "User-agent: *\nAllow: /\n"
+        "User-agent: *\nAllow: /\n\n"
+        f"Sitemap: {base}/sitemap.xml\n"
     )
     return app.response_class(body, mimetype="text/plain")
 
@@ -4735,6 +4737,184 @@ def docs():
     any device with no auth required.
     """
     return render_template("docs.html")
+
+
+# ── SEO content pages (server-rendered, indexable) ────────────────────────
+@app.route("/how-it-works")
+def how_it_works():
+    return render_template("how_it_works.html")
+
+
+@app.route("/methodology")
+def methodology():
+    return render_template("methodology.html")
+
+
+@app.route("/stocks")
+def stocks_index():
+    """
+    Index of every ticker VALUS covers. Each link is a server-rendered
+    landing page with unique title/meta/JSON-LD — the main lever for
+    long-tail SEO ("AAPL fair value", "MSFT DCF", etc.).
+    """
+    tickers = sorted(DISCOVERY_TICKERS)
+    return render_template("stocks_index.html", tickers=tickers)
+
+
+@app.route("/stocks/<ticker>")
+def stock_page(ticker):
+    """
+    Programmatic per-ticker landing page. Server-rendered with unique
+    title, meta description, JSON-LD FinancialProduct schema, and a
+    plain-HTML summary card so Google can index the content without
+    executing JS. Bootstraps users into the SPA via /?t=<ticker>.
+    """
+    t = (ticker or "").strip().upper()
+    if not t or not re.match(r"^[A-Z][A-Z0-9.\-]{0,11}$", t):
+        return redirect("/stocks", code=302)
+
+    # Try the warm analyze cache first so we render with real numbers when
+    # available — but never block the page render on a slow yfinance call.
+    company_name = t
+    sector = ""
+    price = None
+    iv = None
+    mos = None
+    tier_label = ""
+    has_valuation = False
+    try:
+        ck = _analyze_cache_key(t, {})
+        entry = _ANALYZE_CACHE.get(ck)
+        if entry is not None:
+            _ts, payload = entry
+            if isinstance(payload, dict):
+                company_name = payload.get("company_name") or t
+                sector       = payload.get("sector") or ""
+                price        = payload.get("current_price")
+                iv           = payload.get("intrinsic_value")
+                mos          = payload.get("margin_of_safety")
+                tier_label   = (payload.get("priced_for") or {}).get("label") or ""
+                has_valuation = price is not None
+    except Exception:
+        pass
+
+    jsonld = None
+    if has_valuation:
+        try:
+            jsonld = _json_top.dumps({
+                "@context": "https://schema.org",
+                "@type": "FinancialProduct",
+                "name": f"{company_name} ({t}) DCF Valuation",
+                "description": f"Educational DCF intrinsic value estimate and margin of safety for {company_name} ({t}).",
+                "url": f"/stocks/{t.lower()}",
+                "category": "Stock valuation",
+                "provider": {"@type": "Organization", "name": "VALUS"},
+            })
+        except Exception:
+            jsonld = None
+
+    return render_template(
+        "ticker.html",
+        ticker=t,
+        ticker_lower=t.lower(),
+        company_name=company_name,
+        sector=sector,
+        price=price,
+        iv=iv,
+        mos=mos,
+        tier_label=tier_label,
+        has_valuation=has_valuation,
+        jsonld=jsonld,
+    )
+
+
+# Educational concept pages — each one is a unique URL Google can rank for.
+_LEARN_PAGES = {
+    "dcf-valuation": {
+        "title": "What Is a DCF Valuation? · VALUS",
+        "h1":    "What is a DCF valuation?",
+        "desc":  "A discounted cash flow (DCF) valuation estimates a company's intrinsic value by projecting its future free cash flows and discounting them to today using a required rate of return.",
+        "body": [
+            "A discounted cash flow valuation answers a simple question: if I owned this entire business, how much cash would it generate for me over the next decade and beyond — and what is that stream of cash worth in today's dollars?",
+            "The model has three pieces. First, project free cash flow (operating cash flow minus capital expenditure) for ten years, growing at a plausible rate. Second, calculate a terminal value capturing everything beyond year 10 using a perpetuity growth formula. Third, discount every future cash flow back to today using the weighted average cost of capital (WACC), which represents the return investors require to bear the risk of owning the business.",
+            "The total present value, divided by shares outstanding, gives you a per-share intrinsic value. Compare it to the current price to get your margin of safety. If intrinsic value is meaningfully above price, the stock may be undervalued; if it's below, the market is pricing in growth or quality the cash flows don't yet justify.",
+            "DCF models are powerful but sensitive to inputs — small changes in growth or discount rate produce large swings in fair value. That's why VALUS shows you every assumption transparently and lets you adjust them.",
+        ],
+    },
+    "intrinsic-value": {
+        "title": "What Does Intrinsic Value Mean? · VALUS",
+        "h1":    "What does intrinsic value mean?",
+        "desc":  "Intrinsic value is the present value of all the cash a business will generate for its owners over its lifetime — the price a rational investor would pay if they could see the future perfectly.",
+        "body": [
+            "Intrinsic value is the price an asset is actually worth based on its underlying fundamentals — what it produces, owns, and earns — independent of where the market happens to price it today. For a stock, intrinsic value is the present value of all future cash the business will generate for its owners.",
+            "Benjamin Graham, the father of value investing, framed intrinsic value as a range rather than a single number. Two careful analysts looking at the same company will produce different intrinsic values because they make different assumptions about growth, margins, and risk. The point isn't to be exactly right; it's to be approximately right and to leave a margin of safety so that being wrong doesn't ruin you.",
+            "VALUS estimates intrinsic value with a 10-year DCF model, then sanity-checks the result against analyst consensus and a reverse-DCF that solves for the implied growth rate the current price requires.",
+        ],
+    },
+    "margin-of-safety": {
+        "title": "What Is Margin of Safety? · VALUS",
+        "h1":    "What is margin of safety?",
+        "desc":  "Margin of safety is the gap between a stock's intrinsic value and its current market price — the buffer that protects you if your valuation assumptions turn out to be too optimistic.",
+        "body": [
+            "Margin of safety is the difference between what a stock is worth and what it costs, expressed as a percentage. If intrinsic value is $100 and the price is $70, the margin of safety is +30%. If intrinsic value is $100 and the price is $130, the margin of safety is −30%.",
+            "The concept comes from Benjamin Graham, who argued that because all valuation depends on uncertain forecasts, you should only buy when the price is meaningfully below your estimate of fair value. The bigger the discount, the more your investment is protected if the business underperforms or your assumptions were too rosy.",
+            "Different investors require different margins of safety. A diversified index investor needs less buffer; a concentrated value investor buying a single distressed company needs more. VALUS reports the margin of safety on every stock so you can see the cushion at a glance.",
+        ],
+    },
+    "free-cash-flow": {
+        "title": "What Is Free Cash Flow? · VALUS",
+        "h1":    "What is free cash flow?",
+        "desc":  "Free cash flow is the cash a business generates from operations after paying for the capital expenditure needed to maintain and grow the business — the cash actually available to shareholders.",
+        "body": [
+            "Free cash flow (FCF) is operating cash flow minus capital expenditure. It's the cash the business actually generates for its owners after funding the investments needed to keep operating and growing.",
+            "Why FCF and not earnings? Earnings include non-cash items like depreciation and can be massaged through accounting choices. FCF is harder to fake because it tracks the actual movement of money. Warren Buffett's preferred valuation metric — owner earnings — is a refinement of free cash flow.",
+            "VALUS uses trailing free cash flow as the input to its DCF model, smoothed across multiple years for companies with volatile FCF profiles.",
+        ],
+    },
+    "wacc": {
+        "title": "What Is WACC? · VALUS",
+        "h1":    "What is WACC (weighted average cost of capital)?",
+        "desc":  "WACC is the blended cost of all the capital a company uses — debt and equity — weighted by how much of each it has on its balance sheet. It's the discount rate used in DCF valuation.",
+        "body": [
+            "Weighted average cost of capital is the return investors require to fund a business, blending the cost of debt (after-tax interest) and the cost of equity (typically estimated via the Capital Asset Pricing Model). Each is weighted by its share of the company's total capital.",
+            "WACC is the discount rate in a DCF model — it's how you translate future cash flows into today's dollars. A higher WACC means cash arriving in year 10 is worth less today; a lower WACC means it's worth more. WACC is the single most sensitive lever in any DCF.",
+            "Higher-risk companies (early-stage, leveraged, cyclical) have higher WACCs; mature, predictable businesses have lower ones. VALUS estimates WACC from the company's balance sheet and equity beta, with a sector-typical fallback.",
+        ],
+    },
+}
+
+
+@app.route("/learn/<slug>")
+def learn_page(slug):
+    page = _LEARN_PAGES.get(slug)
+    if not page:
+        return redirect("/how-it-works", code=302)
+    return render_template("learn.html", slug=slug, **page)
+
+
+@app.route("/sitemap.xml")
+def sitemap():
+    """
+    XML sitemap for crawlers. Lists every static SEO page plus the full
+    DISCOVERY_TICKERS universe of /stocks/<ticker> pages — that's the
+    long-tail surface area Google can index.
+    """
+    base = (request.url_root or "/").rstrip("/")
+    today = date.today().isoformat()
+    urls = ["/", "/how-it-works", "/methodology", "/docs", "/stocks"]
+    urls += [f"/learn/{slug}" for slug in _LEARN_PAGES.keys()]
+    urls += [f"/stocks/{t.lower()}" for t in sorted(DISCOVERY_TICKERS)]
+
+    parts = ['<?xml version="1.0" encoding="UTF-8"?>',
+             '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+    for u in urls:
+        priority = "1.0" if u == "/" else ("0.8" if u.startswith("/stocks/") else "0.7")
+        parts.append(
+            f"<url><loc>{base}{u}</loc><lastmod>{today}</lastmod>"
+            f"<changefreq>daily</changefreq><priority>{priority}</priority></url>"
+        )
+    parts.append("</urlset>")
+    return app.response_class("".join(parts), mimetype="application/xml")
 
 
 # ════════════════════════════════════════════════════════════════════════

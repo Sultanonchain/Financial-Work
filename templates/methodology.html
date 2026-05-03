@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>VALUS Methodology · DCF Model, WACC, Terminal Growth, Reverse-DCF</title>
+  <meta name="description" content="Detailed methodology for the VALUS DCF stock valuation model: free cash flow inputs, two-stage growth projection, sector growth ceilings, WACC, terminal growth, reverse-DCF implied growth, confidence flags, and verdict tier assignment."/>
+  <link rel="canonical" href="/methodology"/>
+  <link rel="stylesheet" href="/static/css/style.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="container site-header__inner">
+    <div class="brand">
+      <a href="/" style="display:flex;align-items:center;gap:8px;text-decoration:none;color:inherit;">
+        <div class="brand-mark" aria-hidden="true">V</div>
+        <span class="brand-name">VALUS</span>
+      </a>
+      <span class="brand-divider"></span>
+      <span class="brand-tag">Educational Stock Valuation Tool</span>
+    </div>
+    <div class="header-actions">
+      <a class="header-btn" href="/"><span class="header-btn__icon">⌕</span><span class="header-btn__label">Search</span></a>
+      <span class="disclaimer-pill">⚠ Not financial advice</span>
+    </div>
+  </div>
+</header>
+
+<main class="container" style="padding:32px 0 48px;max-width:780px;">
+
+  <h1 style="font-size:32px;font-weight:700;line-height:1.2;margin:0 0 8px;">Methodology</h1>
+  <p style="color:var(--ink-muted);font-size:15px;margin:0 0 28px;line-height:1.55;">Every assumption VALUS makes when pricing a stock, in detail. Educational only — not investment advice.</p>
+
+  <section style="margin:28px 0;">
+    <h2 style="font-size:20px;font-weight:600;margin:0 0 10px;">DCF model</h2>
+    <p style="color:var(--ink-secondary);line-height:1.7;font-size:14px;">
+      VALUS uses a two-stage discounted free cash flow model with a 10-year explicit projection window and a Gordon growth terminal value. The base equation:
+    </p>
+    <pre style="background:rgba(255,255,255,0.04);border-radius:8px;padding:14px;font-size:12px;color:#a3aab8;overflow-x:auto;line-height:1.6;">IV = Σ (FCF_t / (1+WACC)^t) for t=1..10
+   + (FCF_10 × (1+g_term) / (WACC − g_term)) / (1+WACC)^10
+   + Net cash on balance sheet</pre>
+    <p style="color:var(--ink-secondary);line-height:1.7;font-size:14px;">Each year's projected free cash flow grows at a stage-specific rate (stage 1 = years 1–5, stage 2 = years 6–10), discounted back to today using WACC, then summed.</p>
+  </section>
+
+  <section style="margin:28px 0;">
+    <h2 style="font-size:20px;font-weight:600;margin:0 0 10px;">Free cash flow input</h2>
+    <p style="color:var(--ink-secondary);line-height:1.7;font-size:14px;">VALUS uses trailing free cash flow as reported by Yahoo Finance (operating cash flow minus capital expenditure). For companies with volatile FCF, the model uses a smoothed average across the most recent reported years rather than a single noisy data point.</p>
+  </section>
+
+  <section style="margin:28px 0;">
+    <h2 style="font-size:20px;font-weight:600;margin:0 0 10px;">WACC (discount rate)</h2>
+    <p style="color:var(--ink-secondary);line-height:1.7;font-size:14px;">The weighted average cost of capital combines the company's after-tax cost of debt and its cost of equity (estimated via CAPM). Defaults to a sector-typical value when components aren't reliably available. Users can override WACC interactively from the Customize panel.</p>
+  </section>
+
+  <section style="margin:28px 0;">
+    <h2 style="font-size:20px;font-weight:600;margin:0 0 10px;">Terminal growth</h2>
+    <p style="color:var(--ink-secondary);line-height:1.7;font-size:14px;">Capped at 3% by default — the long-run rate at which a mature company can grow without exceeding global GDP growth indefinitely. Adjustable from 1% to 5% in the Customize panel.</p>
+  </section>
+
+  <section style="margin:28px 0;">
+    <h2 style="font-size:20px;font-weight:600;margin:0 0 10px;">Sector-aware growth ceilings</h2>
+    <p style="color:var(--ink-secondary);line-height:1.7;font-size:14px;">A semiconductor company can plausibly compound at 18% for a few years; a regulated utility cannot. VALUS caps stage 1 and stage 2 growth rates at sector-specific ceilings, derived from observed long-term growth distributions. This prevents the model from extrapolating one good year into a fantasy outcome — the most common DCF failure mode.</p>
+  </section>
+
+  <section style="margin:28px 0;">
+    <h2 style="font-size:20px;font-weight:600;margin:0 0 10px;">Reverse DCF (implied growth)</h2>
+    <p style="color:var(--ink-secondary);line-height:1.7;font-size:14px;">In addition to the forward DCF, VALUS solves for the constant growth rate that would make intrinsic value equal the current price — the "implied growth" the market is pricing in. If a stock trades at a price requiring 25% annual growth for a decade and the sector ceiling is 12%, the verdict tier flags it as "Priced for Miracle." Reverse-DCF is the single most useful sanity check on whether today's price is plausible.</p>
+  </section>
+
+  <section style="margin:28px 0;">
+    <h2 style="font-size:20px;font-weight:600;margin:0 0 10px;">Confidence flags</h2>
+    <p style="color:var(--ink-secondary);line-height:1.7;font-size:14px;">VALUS surfaces low-confidence warnings when the inputs are unreliable: negative or volatile FCF, missing share count, recent IPO with limited history, or financials in a currency yfinance can't fully normalize. Treat the IV with extra skepticism in those cases.</p>
+  </section>
+
+  <section style="margin:28px 0;">
+    <h2 style="font-size:20px;font-weight:600;margin:0 0 10px;">Verdict tier assignment</h2>
+    <p style="color:var(--ink-secondary);line-height:1.7;font-size:14px;">After computing margin of safety, VALUS bins the result into one of seven verdict tiers (Distress through Miracle). For a small set of pre-revenue strategic assets (defense primes, CHIPS Act recipients, DOE-backed projects), VALUS applies a "Strategic Discount" override: pure DCF undervalues these because earnings haven't materialized, but sovereign-backstopped franchises have a credible path the cashflow model can't see.</p>
+  </section>
+
+  <section style="margin:28px 0;">
+    <h2 style="font-size:20px;font-weight:600;margin:0 0 10px;">Reality reconciliation</h2>
+    <p style="color:var(--ink-secondary);line-height:1.7;font-size:14px;">After the raw DCF runs, VALUS blends the result with consensus analyst price targets where they exist, weighted by data quality. This dampens cases where a single noisy FCF data point would otherwise swing IV wildly.</p>
+  </section>
+
+  <p style="margin-top:32px;font-size:14px;"><a href="/how-it-works" style="color:#5eead4;">← Back to How it works</a></p>
+
+</main>
+
+<footer class="site-footer">
+  <div class="container"><span>VALUS · Educational research tool · Data via Yahoo Finance · Not investment advice · <a href="/how-it-works" style="color:inherit;text-decoration:underline;opacity:0.8;">How it works</a></span></div>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{{ title }}</title>
+  <meta name="description" content="{{ desc }}"/>
+  <link rel="canonical" href="/learn/{{ slug }}"/>
+  <link rel="stylesheet" href="/static/css/style.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="container site-header__inner">
+    <div class="brand">
+      <a href="/" style="display:flex;align-items:center;gap:8px;text-decoration:none;color:inherit;">
+        <div class="brand-mark" aria-hidden="true">V</div>
+        <span class="brand-name">VALUS</span>
+      </a>
+      <span class="brand-divider"></span>
+      <span class="brand-tag">Educational Stock Valuation Tool</span>
+    </div>
+    <div class="header-actions">
+      <a class="header-btn" href="/"><span class="header-btn__icon">⌕</span><span class="header-btn__label">Search</span></a>
+      <span class="disclaimer-pill">⚠ Not financial advice</span>
+    </div>
+  </div>
+</header>
+
+<main class="container" style="padding:32px 0 48px;max-width:740px;">
+
+  <nav aria-label="Breadcrumb" style="font-size:13px;color:var(--ink-muted);margin-bottom:16px;">
+    <a href="/" style="color:inherit;text-decoration:none;">VALUS</a>
+    <span style="margin:0 6px;">›</span>
+    <a href="/how-it-works" style="color:inherit;text-decoration:none;">Learn</a>
+    <span style="margin:0 6px;">›</span>
+    <span>{{ h1 }}</span>
+  </nav>
+
+  <h1 style="font-size:32px;font-weight:700;line-height:1.2;margin:0 0 12px;">{{ h1 }}</h1>
+  <p style="color:var(--ink-muted);font-size:15px;margin:0 0 28px;line-height:1.55;">{{ desc }}</p>
+
+  {% for para in body %}
+  <p style="color:var(--ink-secondary);line-height:1.7;font-size:15px;margin:0 0 18px;">{{ para }}</p>
+  {% endfor %}
+
+  <hr style="border:none;border-top:1px solid rgba(255,255,255,0.06);margin:36px 0 24px;"/>
+
+  <h2 style="font-size:18px;font-weight:600;margin:0 0 12px;">Related</h2>
+  <ul style="color:var(--ink-secondary);line-height:1.8;font-size:14px;padding-left:20px;">
+    <li><a href="/learn/dcf-valuation" style="color:#5eead4;">DCF valuation</a></li>
+    <li><a href="/learn/intrinsic-value" style="color:#5eead4;">Intrinsic value</a></li>
+    <li><a href="/learn/margin-of-safety" style="color:#5eead4;">Margin of safety</a></li>
+    <li><a href="/learn/free-cash-flow" style="color:#5eead4;">Free cash flow</a></li>
+    <li><a href="/learn/wacc" style="color:#5eead4;">WACC</a></li>
+    <li><a href="/how-it-works" style="color:#5eead4;">How VALUS works</a></li>
+    <li><a href="/methodology" style="color:#5eead4;">Full methodology</a></li>
+  </ul>
+
+</main>
+
+<footer class="site-footer">
+  <div class="container"><span>VALUS · Educational research tool · Data via Yahoo Finance · Not investment advice</span></div>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>How VALUS Works · DCF Stock Valuation Explained · VALUS</title>
+  <meta name="description" content="How the VALUS educational stock valuation tool works: DCF model inputs, intrinsic value estimation, margin of safety, sector growth ceilings, and the verdict tiers explained in plain English."/>
+  <link rel="canonical" href="/how-it-works"/>
+  <link rel="stylesheet" href="/static/css/style.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="container site-header__inner">
+    <div class="brand">
+      <a href="/" style="display:flex;align-items:center;gap:8px;text-decoration:none;color:inherit;">
+        <div class="brand-mark" aria-hidden="true">V</div>
+        <span class="brand-name">VALUS</span>
+      </a>
+      <span class="brand-divider"></span>
+      <span class="brand-tag">Educational Stock Valuation Tool</span>
+    </div>
+    <div class="header-actions">
+      <a class="header-btn" href="/"><span class="header-btn__icon">⌕</span><span class="header-btn__label">Search</span></a>
+      <span class="disclaimer-pill">⚠ Not financial advice</span>
+    </div>
+  </div>
+</header>
+
+<main class="container" style="padding:32px 0 48px;max-width:780px;">
+
+  <h1 style="font-size:32px;font-weight:700;line-height:1.2;margin:0 0 8px;">How VALUS works</h1>
+  <p style="color:var(--ink-muted);font-size:15px;margin:0 0 28px;line-height:1.55;">A plain-English walkthrough of what happens when you search a ticker. Educational only — VALUS is not investment advice.</p>
+
+  <section style="margin:28px 0;">
+    <h2 style="font-size:20px;font-weight:600;margin:0 0 10px;">What is a DCF valuation?</h2>
+    <p style="color:var(--ink-secondary);line-height:1.7;font-size:14px;">A discounted cash flow (DCF) model estimates what a business is worth today by projecting the cash it will generate over the next 10 years and discounting those future cash flows back to the present using a required rate of return (WACC). The total of all discounted future cash flows — plus a terminal value capturing everything beyond year 10 — is the company's <strong>intrinsic value</strong>. Divided by shares outstanding, that becomes a per-share fair value you can compare to the current price.</p>
+  </section>
+
+  <section style="margin:28px 0;">
+    <h2 style="font-size:20px;font-weight:600;margin:0 0 10px;">How VALUS estimates fair value</h2>
+    <ol style="color:var(--ink-secondary);line-height:1.7;font-size:14px;padding-left:20px;">
+      <li><strong>Pull free cash flow.</strong> VALUS reads the company's reported FCF from Yahoo Finance.</li>
+      <li><strong>Project 10 years of growth.</strong> Two-stage growth — a higher near-term rate that fades into a lower mature rate. Each stage is capped by a sector-aware growth ceiling so high-flyers can't compound at 30% forever.</li>
+      <li><strong>Discount with WACC.</strong> Each year's projected FCF is discounted back to today using the weighted average cost of capital.</li>
+      <li><strong>Add terminal value.</strong> Years 11+ get capped by a terminal growth rate (default 3%) and discounted in.</li>
+      <li><strong>Reality reconciliation.</strong> The model output is sanity-checked against analyst consensus and adjusted for cash on the balance sheet.</li>
+      <li><strong>Reverse-DCF.</strong> VALUS also computes the implied growth rate the current price requires — if a company has to compound at 22% for a decade just to justify today's price, that's a flag.</li>
+    </ol>
+  </section>
+
+  <section style="margin:28px 0;">
+    <h2 style="font-size:20px;font-weight:600;margin:0 0 10px;">What is margin of safety?</h2>
+    <p style="color:var(--ink-secondary);line-height:1.7;font-size:14px;">Margin of safety is the gap between intrinsic value and current price, expressed as a percentage. A +30% margin of safety means VALUS estimates the stock is trading 30% below fair value. A −20% MOS means it's trading 20% above. The bigger the gap, the more buffer there is if the model's growth assumptions don't materialize. Benjamin Graham popularized the concept in <em>The Intelligent Investor</em>; it's the foundation of value investing.</p>
+  </section>
+
+  <section style="margin:28px 0;">
+    <h2 style="font-size:20px;font-weight:600;margin:0 0 10px;">The verdict tiers</h2>
+    <p style="color:var(--ink-secondary);line-height:1.7;font-size:14px;">VALUS labels every stock with one of seven verdict tiers based on margin of safety: <strong>Distress</strong> (MOS &gt; +50%), <strong>Deep Discount</strong> (+40 to +50%), <strong>Discount</strong> (+15 to +40%), <strong>Fair Value</strong> (−10 to +15%), <strong>Growth</strong> (−10 to −25%), <strong>Excellence</strong> (−25 to −50%), and <strong>Miracle</strong> (&lt; −50% or speculative growth). These are descriptions of what the market is pricing in, not buy/sell signals.</p>
+  </section>
+
+  <section style="margin:28px 0;">
+    <h2 style="font-size:20px;font-weight:600;margin:0 0 10px;">Why outputs are educational only</h2>
+    <p style="color:var(--ink-secondary);line-height:1.7;font-size:14px;">DCF models are a useful framework, not a crystal ball. They depend on assumptions about growth, discount rates, and terminal values — change any of those and the answer moves. VALUS shows you the math and the assumptions transparently so you can build your own intuition, but no model can capture management quality, competitive moats, regulatory risk, or every macro variable. Use the output as one input alongside qualitative research, your own conviction, and (when in doubt) a licensed financial advisor.</p>
+  </section>
+
+  <section style="margin:28px 0;">
+    <h2 style="font-size:20px;font-weight:600;margin:0 0 10px;">Data source</h2>
+    <p style="color:var(--ink-secondary);line-height:1.7;font-size:14px;">Price, financial statements, and analyst consensus come from Yahoo Finance via the open-source <code>yfinance</code> library. SEC EDGAR provides 25-year revenue history and insider activity. There may be a several-minute lag versus real-time market data, and yfinance's coverage of foreign-listed names is uneven.</p>
+  </section>
+
+  <section style="margin:28px 0;">
+    <h2 style="font-size:20px;font-weight:600;margin:0 0 10px;">Limitations</h2>
+    <ul style="color:var(--ink-secondary);line-height:1.7;font-size:14px;padding-left:20px;">
+      <li>Pre-revenue, distressed, or highly cyclical companies often produce unreliable DCF outputs — VALUS flags these where it can but isn't perfect.</li>
+      <li>The model assumes the next 10 years look something like a smoothed extrapolation of the last few; structural breaks (regulation, technology shifts, macro regime changes) will surprise it.</li>
+      <li>Financials reported in non-USD currencies are normalized at current rates and may drift over time.</li>
+      <li>Banks and insurance companies are inherently hard to DCF — VALUS shows results but treat them with extra skepticism.</li>
+    </ul>
+  </section>
+
+  <p style="margin-top:32px;font-size:14px;"><a href="/methodology" style="color:#5eead4;">Read the full methodology →</a></p>
+
+</main>
+
+<footer class="site-footer">
+  <div class="container"><span>VALUS · Educational research tool · Data via Yahoo Finance · Not investment advice · <a href="/methodology" style="color:inherit;text-decoration:underline;opacity:0.8;">Methodology</a></span></div>
+</footer>
+
+</body>
+</html>
