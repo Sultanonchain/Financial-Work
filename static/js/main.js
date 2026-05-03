@@ -2462,6 +2462,9 @@ function setupPortfolioPage() {
   const refresh = $("pfRefreshBtn");
   if (refresh) refresh.onclick = refreshPortfolioPrices;
 
+  const tpl = $("pfTemplatesBtn");
+  if (tpl) tpl.onclick = openTemplatesModal;
+
   const start = $("pfStartBtn");
   if (start) start.onclick = () => {
     closePortfolioPage();
@@ -2477,6 +2480,300 @@ function setupPortfolioPage() {
       );
       renderPortfolioPage();
     };
+  });
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Portfolio Templates — Strategies + Investor 13F portfolios
+   ════════════════════════════════════════════════════════════════════════ */
+
+const PF_STRATEGIES = [
+  {
+    id: "60-40",
+    name: "Classic 60/40",
+    blurb: "The textbook balanced portfolio. Equity growth + bond ballast for drawdown protection. Suits long horizons with moderate risk tolerance.",
+    allocation: [
+      { label: "US Equities", pct: 60, ticker: "VTI" },
+      { label: "US Bonds",    pct: 40, ticker: "BND" },
+    ],
+  },
+  {
+    id: "70-30",
+    name: "Equities-heavy 70/30",
+    blurb: "Tilt toward equities for higher expected return, smaller bond sleeve for ballast. Common for investors with a 20+ year horizon.",
+    allocation: [
+      { label: "US Equities", pct: 70, ticker: "VTI" },
+      { label: "US Bonds",    pct: 30, ticker: "BND" },
+    ],
+  },
+  {
+    id: "buffett-90-10",
+    name: "Buffett 90/10",
+    blurb: "From Warren Buffett's 2013 shareholder letter / instructions for his estate: 90% S&P 500 index, 10% short-term Treasuries.",
+    allocation: [
+      { label: "S&P 500",            pct: 90, ticker: "VOO" },
+      { label: "Short-term Treasuries", pct: 10, ticker: "SHV" },
+    ],
+  },
+  {
+    id: "barbell",
+    name: "Taleb Barbell",
+    blurb: "Pair safety with asymmetric upside — most of the portfolio in T-bills, a small sleeve in high-volatility growth.",
+    allocation: [
+      { label: "Short-term Treasuries", pct: 90, ticker: "BIL" },
+      { label: "Aggressive growth",     pct: 10, ticker: "QQQ" },
+    ],
+  },
+  {
+    id: "all-weather",
+    name: "Ray Dalio All-Weather",
+    blurb: "Risk-balanced across regimes (growth, recession, inflation, deflation). Heavier in long bonds than typical balanced funds.",
+    allocation: [
+      { label: "Long-term Treasuries",  pct: 40, ticker: "TLT" },
+      { label: "US Equities",           pct: 30, ticker: "VTI" },
+      { label: "Intermediate Treasuries", pct: 15, ticker: "IEF" },
+      { label: "Commodities",           pct: 7.5, ticker: "DBC" },
+      { label: "Gold",                  pct: 7.5, ticker: "GLD" },
+    ],
+  },
+  {
+    id: "permanent",
+    name: "Browne Permanent Portfolio",
+    blurb: "Equal weights across four asset buckets to perform across any economic environment.",
+    allocation: [
+      { label: "US Equities",          pct: 25, ticker: "VTI" },
+      { label: "Long-term Treasuries", pct: 25, ticker: "TLT" },
+      { label: "Cash / T-bills",       pct: 25, ticker: "BIL" },
+      { label: "Gold",                 pct: 25, ticker: "GLD" },
+    ],
+  },
+  {
+    id: "three-fund",
+    name: "Bogleheads 3-Fund",
+    blurb: "Total US market + international equities + bonds. Cheap, diversified, hands-off.",
+    allocation: [
+      { label: "US Equities",            pct: 60, ticker: "VTI" },
+      { label: "International Equities", pct: 30, ticker: "VXUS" },
+      { label: "US Bonds",               pct: 10, ticker: "BND" },
+    ],
+  },
+];
+
+let _PF_TPL_INVESTORS = null;       // cached registry
+let _PF_TPL_HOLDINGS  = {};         // cik -> payload
+
+function openTemplatesModal() {
+  const modal = $("pfTemplatesModal");
+  if (!modal) return;
+  // Render strategies grid (idempotent)
+  renderStrategiesGrid();
+  // Default to strategies tab
+  switchTemplatesTab("strategies");
+  modal.classList.remove("hidden");
+}
+
+function switchTemplatesTab(name) {
+  document.querySelectorAll("[data-tpl-tab]").forEach(t =>
+    t.classList.toggle("active", t.dataset.tplTab === name)
+  );
+  document.querySelectorAll("[data-tpl-pane]").forEach(p =>
+    p.classList.toggle("hidden", p.dataset.tplPane !== name)
+  );
+  if (name === "investors" && !_PF_TPL_INVESTORS) {
+    loadInvestorRegistry();
+  }
+}
+
+function renderStrategiesGrid() {
+  const grid = $("pfTplStrategiesGrid");
+  if (!grid || grid.dataset.rendered === "1") return;
+  grid.innerHTML = PF_STRATEGIES.map(s => {
+    const segs = s.allocation.map((a, i) => {
+      const color = getSectorColor(i);
+      return `<div class="pf-tpl__seg" style="width:${a.pct}%; background:${color};" title="${escHtml(a.label)} ${a.pct}%"></div>`;
+    }).join("");
+    const legend = s.allocation.map((a, i) => {
+      const color = getSectorColor(i);
+      return `<span class="pf-tpl__legend-item"><span class="pf-tpl__legend-dot" style="background:${color};"></span>${escHtml(a.label)} · <strong>${a.pct}%</strong> <span class="pf-tpl__legend-tkr">(${escHtml(a.ticker)})</span></span>`;
+    }).join("");
+    return `
+      <div class="pf-tpl__card" data-strategy="${escHtml(s.id)}">
+        <div class="pf-tpl__card-head">
+          <div class="pf-tpl__card-name">${escHtml(s.name)}</div>
+        </div>
+        <p class="pf-tpl__card-blurb">${escHtml(s.blurb)}</p>
+        <div class="pf-tpl__bar">${segs}</div>
+        <div class="pf-tpl__legend">${legend}</div>
+        <button class="copy-btn pf-tpl__apply" data-apply-strategy="${escHtml(s.id)}" type="button">Apply as ETFs</button>
+      </div>
+    `;
+  }).join("");
+  grid.querySelectorAll("[data-apply-strategy]").forEach(btn => {
+    btn.onclick = () => applyStrategy(btn.dataset.applyStrategy, btn);
+  });
+  grid.dataset.rendered = "1";
+}
+
+async function applyStrategy(id, btn) {
+  const strat = PF_STRATEGIES.find(s => s.id === id);
+  if (!strat) return;
+  if (!_ME) {
+    if (!(await requireAuthWithRedirectIntent("portfolio"))) return;
+  }
+  const tickers = strat.allocation.map(a => a.ticker);
+  await addTickersToPortfolio(tickers, btn, "Apply as ETFs");
+}
+
+async function loadInvestorRegistry() {
+  const grid = $("pfTplInvestorsGrid");
+  if (!grid) return;
+  grid.innerHTML = `<div class="pf-tpl__loading">Loading investors…</div>`;
+  try {
+    const r = await fetch("/api/templates/investors");
+    const d = await r.json();
+    _PF_TPL_INVESTORS = d.investors || [];
+  } catch {
+    grid.innerHTML = `<div class="pf-tpl__error">Couldn't load investor list. Try again.</div>`;
+    return;
+  }
+  grid.innerHTML = _PF_TPL_INVESTORS.map(inv => `
+    <div class="pf-tpl__inv-card" data-cik="${inv.cik}">
+      <div class="pf-tpl__inv-name">${escHtml(inv.name)}</div>
+      <div class="pf-tpl__inv-mgr">${escHtml(inv.manager)}</div>
+      <p class="pf-tpl__inv-blurb">${escHtml(inv.blurb)}</p>
+      <button class="copy-btn pf-tpl__inv-view" data-view-cik="${inv.cik}" type="button">View latest 13F →</button>
+    </div>
+  `).join("");
+  grid.querySelectorAll("[data-view-cik]").forEach(b => {
+    b.onclick = () => loadInvestor13F(parseInt(b.dataset.viewCik, 10));
+  });
+}
+
+async function loadInvestor13F(cik) {
+  const detail = $("pfTplInvestorDetail");
+  if (!detail) return;
+  detail.classList.remove("hidden");
+  detail.innerHTML = `<div class="pf-tpl__loading">Fetching 13F-HR from EDGAR…</div>`;
+  let data = _PF_TPL_HOLDINGS[cik];
+  if (!data) {
+    try {
+      const r = await fetch(`/api/templates/13f/${cik}`);
+      data = await r.json();
+      if (data.error) {
+        detail.innerHTML = `<div class="pf-tpl__error">${escHtml(data.error)}</div>`;
+        return;
+      }
+      _PF_TPL_HOLDINGS[cik] = data;
+    } catch {
+      detail.innerHTML = `<div class="pf-tpl__error">Network error fetching 13F.</div>`;
+      return;
+    }
+  }
+  renderInvestor13F(data);
+}
+
+function renderInvestor13F(data) {
+  const detail = $("pfTplInvestorDetail");
+  if (!detail) return;
+  const inv = data.investor || {};
+  const rows = (data.holdings || []).map((h, i) => {
+    const tkr = h.ticker || `<span class="pf-tpl__no-ticker">—</span>`;
+    return `
+      <tr class="pf-tpl__hold-row" ${h.ticker ? `data-hold-ticker="${escHtml(h.ticker)}"` : ""}>
+        <td class="pf-tpl__hold-rank">${i + 1}</td>
+        <td class="pf-tpl__hold-tkr">${tkr}</td>
+        <td class="pf-tpl__hold-name">${escHtml(h.name || "")}</td>
+        <td class="pf-tpl__hold-pct numeric">${(h.weight_pct ?? 0).toFixed(2)}%</td>
+      </tr>
+    `;
+  }).join("");
+  const filed = data.filed ? `Filed ${escHtml(data.filed)}` : "";
+  detail.innerHTML = `
+    <div class="pf-tpl__detail-head">
+      <div>
+        <div class="pf-tpl__detail-name">${escHtml(inv.name || "")} — top holdings</div>
+        <div class="pf-tpl__detail-meta">${escHtml(inv.manager || "")} · ${filed}</div>
+      </div>
+      <div class="pf-tpl__detail-actions">
+        <button class="copy-btn" data-copy-top="10" type="button">Copy top 10</button>
+        <button class="copy-btn" data-copy-top="25" type="button">Copy top 25</button>
+      </div>
+    </div>
+    <div class="pf-tpl__hold-tablewrap">
+      <table class="pf-tpl__hold-table">
+        <thead><tr><th>#</th><th>Ticker</th><th>Company</th><th class="numeric">Weight</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+  detail.querySelectorAll("[data-copy-top]").forEach(btn => {
+    btn.onclick = async () => {
+      const n = parseInt(btn.dataset.copyTop, 10);
+      const tickers = (data.holdings || [])
+        .filter(h => h.ticker)
+        .slice(0, n)
+        .map(h => h.ticker);
+      if (tickers.length === 0) {
+        alert("No resolvable tickers in this filing.");
+        return;
+      }
+      if (!_ME) {
+        if (!(await requireAuthWithRedirectIntent("portfolio"))) return;
+      }
+      await addTickersToPortfolio(tickers, btn, btn.textContent);
+    };
+  });
+}
+
+/**
+ * Resolve each ticker via /api/analyze (so the holding gets price/iv/mos/tier
+ * just like a hand-added one) and call pfAdd. Skips already-present tickers.
+ */
+async function addTickersToPortfolio(tickers, btn, restoreLabel) {
+  const before = pfRead().length;
+  const toAdd = tickers.filter(t => !pfHas(t));
+  if (toAdd.length === 0) {
+    if (btn) {
+      btn.textContent = "Already in portfolio ✓";
+      setTimeout(() => { btn.textContent = restoreLabel; }, 1800);
+    }
+    return;
+  }
+  let i = 0;
+  for (const t of toAdd) {
+    i++;
+    if (btn) btn.textContent = `Adding ${i}/${toAdd.length}…`;
+    try {
+      const r = await fetch(`/api/analyze?ticker=${encodeURIComponent(t)}`);
+      const d = await r.json();
+      if (d.error) continue;
+      pfAdd({
+        ticker: t,
+        name:   d.company_name || t,
+        sector: d.sector || (d.is_etf ? "ETF" : ""),
+        price:  d.current_price ?? null,
+        iv:     d.intrinsic_value ?? null,
+        mos:    d.margin_of_safety ?? null,
+        tier:   d.priced_for?.label || (d.is_etf ? "ETF" : ""),
+      });
+    } catch {
+      // keep going — partial success is better than aborting
+    }
+  }
+  const added = pfRead().length - before;
+  if (btn) {
+    btn.textContent = added > 0 ? `Added ${added} ✓` : "No changes";
+    setTimeout(() => { btn.textContent = restoreLabel; }, 1800);
+  }
+  // If portfolio page is visible, re-render
+  if (!$("portfolioPage").classList.contains("hidden")) {
+    renderPortfolioPage();
+  }
+}
+
+function setupTemplatesTabs() {
+  document.querySelectorAll("[data-tpl-tab]").forEach(tab => {
+    tab.onclick = () => switchTemplatesTab(tab.dataset.tplTab);
   });
 }
 
@@ -4011,6 +4308,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupCopyButton();
   setupAddPortfolioButton();
   setupPortfolioPage();
+  setupTemplatesTabs();
   setupTierGlossary();
   setupModalDismiss();
   setupCustomDCFSliders();

@@ -64,6 +64,7 @@
         <p id="pfPageTagline">Real-time DCF tracking across your watchlist.</p>
       </div>
       <div class="pf-page__actions">
+        <button class="copy-btn" id="pfTemplatesBtn" type="button" title="Browse common allocation strategies and famous investor portfolios">🎓 Templates</button>
         <button class="copy-btn starred" id="pfPublishBtn" type="button">🏆 Publish</button>
         <button class="copy-btn" id="pfShareBtn" type="button">↗ Share</button>
         <button class="copy-btn" id="pfRefreshBtn" type="button">↻ Refresh</button>
@@ -235,6 +236,32 @@
       <button class="copy-btn" data-modal-close type="button" style="margin-top: 16px; width: 100%;">
         Maybe later
       </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── PORTFOLIO TEMPLATES MODAL ──────────────────────────────────────── -->
+<div class="modal hidden" id="pfTemplatesModal" role="dialog" aria-modal="true" aria-labelledby="pfTemplatesTitle">
+  <div class="modal__backdrop" data-modal-close></div>
+  <div class="modal__panel pf-templates__panel">
+    <div class="modal__head">
+      <h2 class="modal__title" id="pfTemplatesTitle">Portfolio templates</h2>
+      <button class="modal__close" data-modal-close aria-label="Close">✕</button>
+    </div>
+    <div class="pf-tpl__tabs" role="tablist">
+      <button class="pf-tpl__tab active" data-tpl-tab="strategies" role="tab" type="button">Strategies</button>
+      <button class="pf-tpl__tab"        data-tpl-tab="investors"  role="tab" type="button">Investor portfolios</button>
+    </div>
+    <div class="modal__body">
+      <div class="pf-tpl__pane" data-tpl-pane="strategies" id="pfTplStrategies">
+        <p class="pf-tpl__intro">Classic allocation playbooks. Click <strong>Apply as ETFs</strong> to one-click populate your portfolio with the mapped funds.</p>
+        <div class="pf-tpl__grid" id="pfTplStrategiesGrid"></div>
+      </div>
+      <div class="pf-tpl__pane hidden" data-tpl-pane="investors" id="pfTplInvestors">
+        <p class="pf-tpl__intro">Latest 13F-HR filings from SEC EDGAR. Pick a manager to see their top holdings, then copy any number into your own portfolio.</p>
+        <div class="pf-tpl__grid" id="pfTplInvestorsGrid"></div>
+        <div class="pf-tpl__detail hidden" id="pfTplInvestorDetail"></div>
+      </div>
     </div>
   </div>
 </div>

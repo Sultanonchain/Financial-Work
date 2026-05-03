@@ -5606,6 +5606,294 @@ def portfolio_save():
     return jsonify({"ok": True, "count": len(cleaned)})
 
 
+# ── Portfolio Templates: Strategies (client-side) + Investor 13F ──────────
+# A curated registry of well-known investment managers. CIKs are SEC-assigned
+# and stable. Pulling 13F-HR filings live from EDGAR keeps holdings fresh
+# without us maintaining a manual mirror.
+INVESTOR_REGISTRY = [
+    {"cik": 1067983, "name": "Berkshire Hathaway",      "manager": "Warren Buffett",
+     "blurb": "Concentrated, long-duration value with a quality bias."},
+    {"cik": 1336528, "name": "Pershing Square",         "manager": "Bill Ackman",
+     "blurb": "High-conviction activism — typically 8–12 names."},
+    {"cik": 1649339, "name": "Scion Asset Management",  "manager": "Michael Burry",
+     "blurb": "Contrarian deep-value, often hedged or short-biased."},
+    {"cik": 1061165, "name": "Baupost Group",           "manager": "Seth Klarman",
+     "blurb": "Margin-of-safety value, distressed and special situations."},
+    {"cik": 1079114, "name": "Greenlight Capital",      "manager": "David Einhorn",
+     "blurb": "Long/short value with rigorous fundamental research."},
+    {"cik": 1173334, "name": "Pabrai Investment Funds", "manager": "Mohnish Pabrai",
+     "blurb": "Few bets, big bets, infrequent bets — Buffett-school value."},
+    {"cik": 1656456, "name": "Appaloosa LP",            "manager": "David Tepper",
+     "blurb": "Macro-aware distressed and event-driven equities."},
+    {"cik": 1040273, "name": "Third Point",             "manager": "Dan Loeb",
+     "blurb": "Activist + event-driven — pushes for catalysts."},
+]
+
+INVESTOR_CIK_SET = {row["cik"] for row in INVESTOR_REGISTRY}
+
+# 24h cache for 13F holdings.  Keyed by CIK.
+TEMPLATES_13F_TTL = 24 * 3600
+_TEMPLATES_13F_MEM = {}   # cik -> (ts, payload)
+TEMPLATES_13F_KEY = "valus:templates:13f:v1"
+
+# CUSIP→ticker is the missing link in 13F (filings list CUSIP, not ticker).
+# We invert the SEC ticker map at first use, then memoize. Coverage is good
+# for common large-caps (the universe most managers in our registry hold).
+_CUSIP_TICKER_CACHE = {}
+
+def _build_cik_to_ticker():
+    """Reverse the SEC ticker→CIK map. Useful for filing CIK lookups."""
+    return {cik: tkr for tkr, cik in _sec_get_ticker_cik_map().items()}
+
+
+def _13f_kv_get(cik):
+    raw = kv_get(f"{TEMPLATES_13F_KEY}:{cik}")
+    if not raw:
+        return None
+    try:
+        return _json_top.loads(raw)
+    except Exception:
+        return None
+
+
+def _13f_kv_set(cik, payload):
+    try:
+        kv_set(f"{TEMPLATES_13F_KEY}:{cik}", _json_top.dumps(payload), ttl=TEMPLATES_13F_TTL)
+    except Exception:
+        pass
+
+
+def _fetch_latest_13f_accession(cik):
+    """Find the most recent 13F-HR accession number for a CIK, or None."""
+    url = f"https://data.sec.gov/submissions/CIK{cik:010d}.json"
+    r = requests.get(url, headers={"User-Agent": _SEC_UA}, timeout=10)
+    if r.status_code != 200:
+        return None
+    j = r.json() or {}
+    recent = (j.get("filings") or {}).get("recent") or {}
+    forms     = recent.get("form") or []
+    accs      = recent.get("accessionNumber") or []
+    pdocs     = recent.get("primaryDocument") or []
+    fdates    = recent.get("filingDate") or []
+    for i, form in enumerate(forms):
+        if form == "13F-HR":
+            return {
+                "accession": accs[i],
+                "primary":   pdocs[i] if i < len(pdocs) else None,
+                "filed":     fdates[i] if i < len(fdates) else None,
+            }
+    return None
+
+
+def _fetch_13f_information_table(cik, accession):
+    """
+    Locate and parse the 13F informationtable.xml for a given filing.
+    Returns list of {cusip, name, value, shares} sorted by value desc.
+    """
+    acc_nodash = accession.replace("-", "")
+    # The filing-index lists every document. We want the *.xml that is the
+    # information table (not the primary 13F-HR cover XML).
+    idx_url = (
+        f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany"
+        f"&CIK={cik:010d}&type=13F-HR&dateb=&owner=include&count=10"
+    )
+    # Easier: use the filing's index.json directly.
+    idx_json_url = (
+        f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_nodash}/index.json"
+    )
+    r = requests.get(idx_json_url, headers={"User-Agent": _SEC_UA}, timeout=10)
+    if r.status_code != 200:
+        return []
+    items = ((r.json() or {}).get("directory") or {}).get("item") or []
+    info_xml = None
+    for it in items:
+        nm = (it.get("name") or "").lower()
+        if nm.endswith(".xml") and "primary_doc" not in nm:
+            info_xml = it.get("name")
+            break
+    if not info_xml:
+        return []
+    xml_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_nodash}/{info_xml}"
+    rx = requests.get(xml_url, headers={"User-Agent": _SEC_UA}, timeout=15)
+    if rx.status_code != 200:
+        return []
+    rows = []
+    try:
+        # Strip XML namespaces for simpler parsing — 13F XML uses
+        # `ns1:infoTable` etc., which would otherwise force xpath gymnastics.
+        text = re.sub(r'\sxmlns(:\w+)?="[^"]+"', "", rx.text, count=0)
+        text = re.sub(r"<(/?)\w+:", r"<\1", text)
+        root = ET.fromstring(text)
+        for it in root.findall("infoTable"):
+            name   = (it.findtext("nameOfIssuer") or "").strip()
+            cusip  = (it.findtext("cusip") or "").strip().upper()
+            value  = it.findtext("value")
+            sh_el  = it.find("shrsOrPrnAmt")
+            shares = sh_el.findtext("sshPrnamt") if sh_el is not None else None
+            try: value_f = float(value) if value else 0.0
+            except Exception: value_f = 0.0
+            try: shares_f = float(shares) if shares else 0.0
+            except Exception: shares_f = 0.0
+            rows.append({
+                "cusip":  cusip,
+                "name":   name,
+                # Pre-2022 filings reported value in $thousands; modern
+                # filings (post 2022 Q3) report in actual dollars. Normalize
+                # by detecting magnitude: $thousands sums for a $100B fund
+                # would round to ~1e8. Keep raw — frontend shows percentages.
+                "value":  value_f,
+                "shares": shares_f,
+            })
+    except Exception:
+        return []
+    rows.sort(key=lambda r: r["value"], reverse=True)
+    return rows
+
+
+_SEC_NAME_TICKER_MAP = {}     # normalized-name -> ticker
+_SEC_NAME_TICKER_TS  = 0
+_SEC_NAME_TICKER_TTL = 24 * 3600
+
+
+def _norm_company_name(s):
+    """Normalize company names for fuzzy matching across data sources."""
+    if not s: return ""
+    s = s.upper()
+    # Strip common suffixes that vary across filings (INC vs INC. vs CORP).
+    s = re.sub(r"[.,&'/\\\\\\(\\)]", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    for suf in (" CORPORATION", " CORP", " INCORPORATED", " INC",
+                " COMPANY", " CO", " LIMITED", " LTD", " HOLDINGS",
+                " HLDGS", " GROUP", " CLASS A", " CLASS B", " CLASS C",
+                " COM", " COMMON STOCK", " THE"):
+        if s.endswith(suf):
+            s = s[: -len(suf)].strip()
+    return s
+
+
+def _sec_get_name_ticker_map():
+    """SEC company name → ticker, derived from company_tickers.json. ~10k US filers."""
+    global _SEC_NAME_TICKER_MAP, _SEC_NAME_TICKER_TS
+    if _SEC_NAME_TICKER_MAP and (time.time() - _SEC_NAME_TICKER_TS) < _SEC_NAME_TICKER_TTL:
+        return _SEC_NAME_TICKER_MAP
+    try:
+        r = requests.get(
+            "https://www.sec.gov/files/company_tickers.json",
+            headers={"User-Agent": _SEC_UA},
+            timeout=10,
+        )
+        if r.status_code == 200:
+            j = r.json() or {}
+            m = {}
+            for v in j.values():
+                title = v.get("title")
+                tkr   = v.get("ticker")
+                if not (title and tkr): continue
+                m[_norm_company_name(title)] = tkr.upper()
+            _SEC_NAME_TICKER_MAP = m
+            _SEC_NAME_TICKER_TS = time.time()
+    except Exception:
+        pass
+    return _SEC_NAME_TICKER_MAP or {}
+
+
+def _resolve_cusip_to_ticker(cusip, name_hint=None):
+    """
+    Best-effort CUSIP→ticker. We don't have a CUSIP master file (those are
+    licensed), so we fall back to matching the issuer name from the 13F
+    against SEC's company_tickers map. Cached per-CUSIP.
+    """
+    cache_key = f"{cusip}|{name_hint or ''}"
+    if cache_key in _CUSIP_TICKER_CACHE:
+        return _CUSIP_TICKER_CACHE[cache_key]
+
+    ticker = None
+    if name_hint:
+        name_map = _sec_get_name_ticker_map()
+        norm = _norm_company_name(name_hint)
+        # Exact normalized match first
+        ticker = name_map.get(norm)
+        # Fall back to: 13F name as a prefix of an SEC title (or vice versa)
+        if not ticker and norm:
+            for k, v in name_map.items():
+                if not k: continue
+                if k == norm or k.startswith(norm + " ") or norm.startswith(k + " "):
+                    ticker = v
+                    break
+    _CUSIP_TICKER_CACHE[cache_key] = ticker
+    return ticker
+
+
+@app.route("/api/templates/investors")
+def templates_investors():
+    """Return the curated investor registry (no holdings yet)."""
+    return jsonify({"investors": INVESTOR_REGISTRY})
+
+
+@app.route("/api/templates/13f/<int:cik>")
+def templates_13f(cik):
+    """
+    Return the latest 13F-HR top holdings for a registered manager.
+    Cached 24h. CIK must be in INVESTOR_REGISTRY (avoids open-proxy abuse).
+    """
+    if cik not in INVESTOR_CIK_SET:
+        return jsonify({"error": "Unknown investor"}), 404
+
+    # Memory cache first
+    cached = _TEMPLATES_13F_MEM.get(cik)
+    if cached and (time.time() - cached[0]) < TEMPLATES_13F_TTL:
+        return jsonify(cached[1])
+    # Then KV
+    kv_cached = _13f_kv_get(cik)
+    if kv_cached and (time.time() - (kv_cached.get("_ts") or 0)) < TEMPLATES_13F_TTL:
+        _TEMPLATES_13F_MEM[cik] = (time.time(), kv_cached)
+        return jsonify(kv_cached)
+
+    filing = _fetch_latest_13f_accession(cik)
+    if not filing:
+        # Serve any stale cache if available — better than a hard error.
+        if kv_cached:
+            return jsonify(kv_cached)
+        return jsonify({"error": "No recent 13F-HR filing found"}), 404
+
+    rows = _fetch_13f_information_table(cik, filing["accession"])
+    if not rows:
+        if kv_cached:
+            return jsonify(kv_cached)
+        return jsonify({"error": "Could not parse 13F holdings"}), 502
+
+    total_value = sum(r["value"] for r in rows) or 1.0
+    top = rows[:25]
+
+    # Resolve CUSIPs to tickers (best-effort, cached). Limit lookups to top N
+    # so a cold cache doesn't fan out 200 requests to EDGAR.
+    enriched = []
+    for r in top:
+        tkr = _resolve_cusip_to_ticker(r["cusip"], name_hint=r["name"])
+        enriched.append({
+            "ticker":      tkr,
+            "name":        r["name"],
+            "cusip":       r["cusip"],
+            "value":       r["value"],
+            "shares":      r["shares"],
+            "weight_pct":  round((r["value"] / total_value) * 100.0, 2),
+        })
+
+    investor = next((i for i in INVESTOR_REGISTRY if i["cik"] == cik), None)
+    payload = {
+        "cik":         cik,
+        "investor":    investor,
+        "filed":       filing.get("filed"),
+        "accession":   filing.get("accession"),
+        "holdings":    enriched,
+        "total_value": total_value,
+        "_ts":         time.time(),
+    }
+    _TEMPLATES_13F_MEM[cik] = (time.time(), payload)
+    _13f_kv_set(cik, payload)
+    return jsonify(payload)
+
+
 @app.route("/api/leaderboard/claim", methods=["POST"])
 def leaderboard_claim():
     """

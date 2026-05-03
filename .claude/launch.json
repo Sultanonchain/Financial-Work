@@ -5,7 +5,7 @@
       "name": "valuscope",
       "runtimeExecutable": "/Library/Developer/CommandLineTools/usr/bin/python3",
       "runtimeArgs": ["app.py"],
-      "port": 5050
+      "port": 5054
     }
   ]
 }
