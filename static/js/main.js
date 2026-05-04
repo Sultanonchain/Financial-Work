@@ -3218,6 +3218,16 @@ function setupAuthControl() {
       }
     });
   }
+  const premiumBtn = $("authPremiumBtn");
+  const aboutBtn   = $("authAboutBtn");
+  if (premiumBtn) premiumBtn.onclick = () => {
+    if (menu) menu.classList.add("hidden");
+    alert("Premium tier launching soon — daily AI digest, unlimited searches, and catalyst alerts.");
+  };
+  if (aboutBtn) aboutBtn.onclick = () => {
+    if (menu) menu.classList.add("hidden");
+    window.location.href = "/docs";
+  };
   if (signOutBtn) signOutBtn.onclick = async () => {
     try {
       await fetch("/auth/logout", { method: "POST", credentials: "same-origin" });
