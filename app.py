@@ -6116,12 +6116,24 @@ def _fetch_13f_information_table(cik, accession):
     if r.status_code != 200:
         return []
     items = ((r.json() or {}).get("directory") or {}).get("item") or []
-    info_xml = None
-    for it in items:
-        nm = (it.get("name") or "").lower()
-        if nm.endswith(".xml") and "primary_doc" not in nm:
-            info_xml = it.get("name")
-            break
+    # The information table is a separate XML.  Naming varies across filers:
+    # 'infotable.xml', 'form13fInfoTable.xml', 'informationtable.xml', etc.
+    # First pass: look for filenames containing 'info' (most reliable signal).
+    # Second pass: fall back to any non-primary, non-cover .xml.
+    candidates = [
+        (it.get("name") or "") for it in items
+        if (it.get("name") or "").lower().endswith(".xml")
+    ]
+    info_xml = next(
+        (c for c in candidates if "info" in c.lower()),
+        None,
+    )
+    if not info_xml:
+        info_xml = next(
+            (c for c in candidates
+             if "primary_doc" not in c.lower() and "cover" not in c.lower()),
+            None,
+        )
     if not info_xml:
         return []
     xml_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_nodash}/{info_xml}"
