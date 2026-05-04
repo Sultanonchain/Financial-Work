@@ -60,17 +60,33 @@ CORS(app, supports_credentials=True)
 # missing (local dev with no KV provisioned still works exactly like
 # before).
 _kv = None
-try:
-    if os.environ.get("KV_URL"):
+# Vercel/Upstash integrations vary the env var name depending on which
+# template / integration version was used.  Try every commonly-used name
+# in order — first one that pings successfully wins.  If none are set,
+# we fall back to in-memory (fine for local dev; lossy on serverless).
+_KV_ENV_CANDIDATES = (
+    "KV_URL",                # Vercel KV (Upstash) default
+    "REDIS_URL",             # Standard Redis convention
+    "UPSTASH_REDIS_URL",     # Upstash standalone
+    "STORAGE_REDIS_URL",     # Some Vercel templates
+    "KV_REDIS_URL",          # Older Vercel KV
+)
+_kv_url = next((os.environ[k] for k in _KV_ENV_CANDIDATES if os.environ.get(k)), None)
+_kv_source = next((k for k in _KV_ENV_CANDIDATES if os.environ.get(k)), None)
+if _kv_url:
+    try:
         import redis as _redis
-        _kv = _redis.from_url(os.environ["KV_URL"], decode_responses=True,
+        _kv = _redis.from_url(_kv_url, decode_responses=True,
                               socket_connect_timeout=2, socket_timeout=2)
         # Probe once on startup so a misconfigured KV fails loud at boot
         # rather than at first user action.
         _kv.ping()
-except Exception as _e:
-    print(f"[valus] KV unavailable, falling back to /tmp + in-memory: {_e}")
-    _kv = None
+        print(f"[valus] KV connected via {_kv_source}")
+    except Exception as _e:
+        print(f"[valus] KV connection via {_kv_source} failed, falling back: {_e}")
+        _kv = None
+else:
+    print("[valus] No KV env var set — search-limit + analytics use ephemeral in-memory")
 
 def kv_get(key):
     if _kv:
@@ -4989,6 +5005,25 @@ def require_user():
             "auth_configured": _GOOGLE_CONFIGURED,
         }), 401)
     return user, None
+
+
+@app.route("/api/_diag/kv")
+def diag_kv():
+    """Quick sanity check: is KV connected and writeable?  Public, no PII."""
+    info = {"connected": False, "source": None, "ping": False, "rw": False}
+    info["source"] = next(
+        (k for k in _KV_ENV_CANDIDATES if os.environ.get(k)),
+        None,
+    )
+    if _kv:
+        info["connected"] = True
+        try:
+            info["ping"] = bool(_kv.ping())
+            _kv.setex("valus:_diag:rw", 30, "ok")
+            info["rw"] = (_kv.get("valus:_diag:rw") == "ok")
+        except Exception as e:
+            info["error"] = str(e)[:200]
+    return jsonify(info)
 
 
 @app.route("/api/me")
