@@ -6002,22 +6002,32 @@ def portfolio_save():
 # and stable. Pulling 13F-HR filings live from EDGAR keeps holdings fresh
 # without us maintaining a manual mirror.
 INVESTOR_REGISTRY = [
-    {"cik": 1067983, "name": "Berkshire Hathaway",      "manager": "Warren Buffett",
+    {"cik": 1067983, "name": "Berkshire Hathaway",       "manager": "Warren Buffett",
      "blurb": "Concentrated, long-duration value with a quality bias."},
-    {"cik": 1336528, "name": "Pershing Square",         "manager": "Bill Ackman",
+    {"cik": 1697748, "name": "ARK Investment Management","manager": "Cathie Wood",
+     "blurb": "Disruptive innovation — genomics, AI, robotics, fintech, crypto."},
+    {"cik": 1336528, "name": "Pershing Square",          "manager": "Bill Ackman",
      "blurb": "High-conviction activism — typically 8–12 names."},
-    {"cik": 1649339, "name": "Scion Asset Management",  "manager": "Michael Burry",
+    {"cik": 1649339, "name": "Scion Asset Management",   "manager": "Michael Burry",
      "blurb": "Contrarian deep-value, often hedged or short-biased."},
-    {"cik": 1061165, "name": "Baupost Group",           "manager": "Seth Klarman",
+    {"cik": 1061165, "name": "Baupost Group",            "manager": "Seth Klarman",
      "blurb": "Margin-of-safety value, distressed and special situations."},
-    {"cik": 1079114, "name": "Greenlight Capital",      "manager": "David Einhorn",
+    {"cik": 1079114, "name": "Greenlight Capital",       "manager": "David Einhorn",
      "blurb": "Long/short value with rigorous fundamental research."},
-    {"cik": 1173334, "name": "Pabrai Investment Funds", "manager": "Mohnish Pabrai",
+    {"cik": 1173334, "name": "Pabrai Investment Funds",  "manager": "Mohnish Pabrai",
      "blurb": "Few bets, big bets, infrequent bets — Buffett-school value."},
-    {"cik": 1656456, "name": "Appaloosa LP",            "manager": "David Tepper",
+    {"cik": 1656456, "name": "Appaloosa LP",             "manager": "David Tepper",
      "blurb": "Macro-aware distressed and event-driven equities."},
-    {"cik": 1040273, "name": "Third Point",             "manager": "Dan Loeb",
+    {"cik": 1040273, "name": "Third Point",              "manager": "Dan Loeb",
      "blurb": "Activist + event-driven — pushes for catalysts."},
+    {"cik": 1167483, "name": "Tiger Global Management",  "manager": "Chase Coleman",
+     "blurb": "Tech-heavy growth, public + private crossover."},
+    {"cik": 1037045, "name": "Tudor Investment Corp",    "manager": "Paul Tudor Jones",
+     "blurb": "Macro discretionary — equities, rates, currencies."},
+    {"cik": 1536411, "name": "Duquesne Family Office",   "manager": "Stanley Druckenmiller",
+     "blurb": "Concentrated macro — early on AI and obesity drugs."},
+    {"cik": 1029160, "name": "Soros Fund Management",    "manager": "George Soros",
+     "blurb": "Reflexivity-driven macro and equity positioning."},
 ]
 
 INVESTOR_CIK_SET = {row["cik"] for row in INVESTOR_REGISTRY}
@@ -6055,9 +6065,18 @@ def _13f_kv_set(cik, payload):
 
 
 def _fetch_latest_13f_accession(cik):
-    """Find the most recent 13F-HR accession number for a CIK, or None."""
+    """Find the most recent 13F-HR (or 13F-HR/A amendment) accession for a CIK.
+
+    SEC submissions list the most recent filing first.  Some managers (e.g.
+    Scion under Burry) routinely file amendments which replace the original
+    filing; those carry the form code 13F-HR/A.  We accept either and pick
+    whichever is most recent so the holdings panel always shows live data.
+    """
     url = f"https://data.sec.gov/submissions/CIK{cik:010d}.json"
-    r = requests.get(url, headers={"User-Agent": _SEC_UA}, timeout=10)
+    try:
+        r = requests.get(url, headers={"User-Agent": _SEC_UA}, timeout=10)
+    except Exception:
+        return None
     if r.status_code != 200:
         return None
     j = r.json() or {}
@@ -6067,11 +6086,12 @@ def _fetch_latest_13f_accession(cik):
     pdocs     = recent.get("primaryDocument") or []
     fdates    = recent.get("filingDate") or []
     for i, form in enumerate(forms):
-        if form == "13F-HR":
+        if form in ("13F-HR", "13F-HR/A"):
             return {
                 "accession": accs[i],
                 "primary":   pdocs[i] if i < len(pdocs) else None,
                 "filed":     fdates[i] if i < len(fdates) else None,
+                "amendment": form == "13F-HR/A",
             }
     return None
 
