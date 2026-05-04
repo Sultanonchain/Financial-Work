@@ -173,8 +173,9 @@ function showError(msg) {
   $("error").classList.remove("hidden");
 }
 function showRateLimit(data) {
-  // Anonymous-search-limit responses ship a concrete message; generic 429s
-  // (Flask-Limiter spam protection) fall through to the default copy.
+  // Search-limit responses ship a concrete message + error code so the
+  // CTA matches the user's tier.  Generic 429s (Flask-Limiter spam
+  // protection) fall through to the default copy.
   let msg;
   if (data && data.error === "search_limit_anon") {
     const next = window.location.pathname + window.location.search + window.location.hash;
@@ -182,7 +183,12 @@ function showRateLimit(data) {
     msg =
       `You've used your <strong>${data.used} of ${data.limit}</strong> free searches today. ` +
       `<a href="${href}" style="color:inherit;text-decoration:underline;font-weight:600;">Sign in</a> ` +
-      `for 10 free searches per day plus portfolio tracking.`;
+      `for 10 free searches per day plus portfolio tracking and the Discover heatmap.`;
+  } else if (data && data.error === "search_limit_signed_in") {
+    msg =
+      `You've used your <strong>${data.used} of ${data.limit}</strong> free searches today. ` +
+      `<a href="#" id="rateLimitPremium" style="color:inherit;text-decoration:underline;font-weight:600;">Upgrade to Premium</a> ` +
+      `for unlimited searches plus daily AI digests.`;
   } else {
     msg =
       'Free limit reached. <a href="/auth/login" style="color:inherit;text-decoration:underline;font-weight:600;">Sign in</a> ' +
@@ -190,6 +196,13 @@ function showRateLimit(data) {
   }
   $("errorMsg").innerHTML = msg;
   $("error").classList.remove("hidden");
+  const premiumLink = document.getElementById("rateLimitPremium");
+  if (premiumLink) {
+    premiumLink.onclick = (e) => {
+      e.preventDefault();
+      alert("Premium tier launching soon — daily AI digest, unlimited searches, and catalyst alerts.");
+    };
+  }
 }
 function hideError() { $("error").classList.add("hidden"); }
 

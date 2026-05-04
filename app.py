@@ -5398,13 +5398,15 @@ def _seconds_until_next_market_open() -> int:
         target = candidate
     return max(int((target - now_et).total_seconds()), 60)
 
-# ── Anonymous-user search limit ───────────────────────────────────────────
-# 3 unique tickers per IP per ET-day for users without a Google sign-in.
-# Signed-in users skip this gate (10/day soft cap to be enforced later when
-# the premium tier is wired up). Keyed by IP + ET date so the counter
-# resets at midnight Eastern.
-ANON_SEARCH_LIMIT = 3
-_ANON_SEARCH_MEM: dict = {}  # in-memory fallback when _kv is unavailable
+# ── Daily search limits ───────────────────────────────────────────────────
+# Anonymous (no Google sign-in): 5 unique tickers per IP per ET-day.
+# Signed-in (free):              10 unique tickers per user.sub per ET-day.
+# Premium (future):              unlimited.
+# Re-fetching a ticker already searched today doesn't double-count.
+# Counter resets at midnight Eastern.
+ANON_SEARCH_LIMIT      = 5
+SIGNED_IN_SEARCH_LIMIT = 10
+_SEARCH_LIMIT_MEM: dict = {}  # in-memory fallback when _kv is unavailable
 
 def _client_ip(req) -> str:
     fwd = req.headers.get("X-Forwarded-For") or ""
@@ -5412,12 +5414,13 @@ def _client_ip(req) -> str:
         return fwd.split(",")[0].strip()
     return req.remote_addr or "0.0.0.0"
 
-def _anon_search_key(ip: str) -> str:
+def _search_key(scope: str, ident: str) -> str:
+    """scope: 'anon' | 'user'   ident: ip address or user.sub"""
     today = _et_now().date().isoformat()
-    return f"valus:anon_search:{ip}:{today}"
+    return f"valus:search:{scope}:{ident}:{today}"
 
-def _anon_searches_today(ip: str) -> set:
-    key = _anon_search_key(ip)
+def _searches_today(scope: str, ident: str) -> set:
+    key = _search_key(scope, ident)
     if _kv:
         try:
             raw = _kv.get(key)
@@ -5425,13 +5428,12 @@ def _anon_searches_today(ip: str) -> set:
                 return set(_json_top.loads(raw))
         except Exception:
             pass
-    return set(_ANON_SEARCH_MEM.get(key, []))
+    return set(_SEARCH_LIMIT_MEM.get(key, []))
 
-def _record_anon_search(ip: str, ticker: str) -> None:
-    key = _anon_search_key(ip)
-    seen = _anon_searches_today(ip)
+def _record_search(scope: str, ident: str, ticker: str) -> None:
+    key = _search_key(scope, ident)
+    seen = _searches_today(scope, ident)
     seen.add(ticker)
-    # Expire at midnight ET so the counter resets daily.
     et_now = _et_now()
     midnight = (et_now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     ttl = max(int((midnight - et_now).total_seconds()), 60)
@@ -5441,29 +5443,50 @@ def _record_anon_search(ip: str, ticker: str) -> None:
             return
         except Exception:
             pass
-    _ANON_SEARCH_MEM[key] = list(seen)
+    _SEARCH_LIMIT_MEM[key] = list(seen)
 
 def _check_anon_search_limit(req, ticker: str):
-    """Returns None to allow, or (response, status) tuple to block."""
+    """Returns None to allow, or (response, status) tuple to block.
+
+    Function name kept for backwards compatibility — it now also enforces
+    the signed-in 10/day soft cap.  Premium users (when wired) will set a
+    flag on the user dict to skip the gate.
+    """
     # Internal callers (Discover treemap, hourly cron) bypass the gate.
-    # They invoke analyze() via test_request_context with this header set.
     if req.headers.get("X-Valus-Internal") == "1":
         return None
-    if session.get("user"):
-        return None
-    ip = _client_ip(req)
-    seen = _anon_searches_today(ip)
+
+    user = session.get("user")
+    if user and user.get("premium"):
+        return None  # premium tier: unlimited (placeholder until Stripe)
+
+    if user:
+        scope, ident, limit = "user", user["sub"], SIGNED_IN_SEARCH_LIMIT
+        err_code = "search_limit_signed_in"
+        cta_msg = (
+            f"You've used your {limit} free searches today. "
+            "Upgrade to Premium for unlimited searches plus daily AI digests."
+        )
+    else:
+        scope, ident, limit = "anon", _client_ip(req), ANON_SEARCH_LIMIT
+        err_code = "search_limit_anon"
+        cta_msg = (
+            f"You've used your {limit} free searches today. "
+            f"Sign in for {SIGNED_IN_SEARCH_LIMIT} free searches per day "
+            "plus portfolio tracking and the Discover heatmap."
+        )
+
+    seen = _searches_today(scope, ident)
     if ticker in seen:
-        return None  # already counted today, allow re-fetch
-    if len(seen) >= ANON_SEARCH_LIMIT:
+        return None  # already counted today, re-fetch is free
+    if len(seen) >= limit:
         return (jsonify({
-            "error":   "search_limit_anon",
-            "limit":   ANON_SEARCH_LIMIT,
+            "error":   err_code,
+            "limit":   limit,
             "used":    len(seen),
-            "message": f"You've used your {ANON_SEARCH_LIMIT} free searches today. "
-                       "Sign in for 10 free searches per day plus portfolio tracking.",
+            "message": cta_msg,
         }), 429)
-    _record_anon_search(ip, ticker)
+    _record_search(scope, ident, ticker)
     return None
 
 
