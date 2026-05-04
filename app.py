@@ -6096,81 +6096,121 @@ def _fetch_latest_13f_accession(cik):
     return None
 
 
-def _fetch_13f_information_table(cik, accession):
+def _parse_info_table_xml(xml_text):
     """
-    Locate and parse the 13F informationtable.xml for a given filing.
-    Returns list of {cusip, name, value, shares} sorted by value desc.
+    Parse a 13F information-table XML into rows.  Tolerates:
+      - Namespaced elements (ns1:infoTable, n2:nameOfIssuer, etc.)
+      - Case variations (InfoTable vs infoTable)
+      - Unconventional element names (any element with a cusip child)
+    Returns list of {cusip, name, value, shares} or [] on parse failure.
     """
-    acc_nodash = accession.replace("-", "")
-    # The filing-index lists every document. We want the *.xml that is the
-    # information table (not the primary 13F-HR cover XML).
-    idx_url = (
-        f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany"
-        f"&CIK={cik:010d}&type=13F-HR&dateb=&owner=include&count=10"
-    )
-    # Easier: use the filing's index.json directly.
-    idx_json_url = (
-        f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_nodash}/index.json"
-    )
-    r = requests.get(idx_json_url, headers={"User-Agent": _SEC_UA}, timeout=10)
-    if r.status_code != 200:
-        return []
-    items = ((r.json() or {}).get("directory") or {}).get("item") or []
-    # The information table is a separate XML.  Naming varies across filers:
-    # 'infotable.xml', 'form13fInfoTable.xml', 'informationtable.xml', etc.
-    # First pass: look for filenames containing 'info' (most reliable signal).
-    # Second pass: fall back to any non-primary, non-cover .xml.
-    candidates = [
-        (it.get("name") or "") for it in items
-        if (it.get("name") or "").lower().endswith(".xml")
-    ]
-    info_xml = next(
-        (c for c in candidates if "info" in c.lower()),
-        None,
-    )
-    if not info_xml:
-        info_xml = next(
-            (c for c in candidates
-             if "primary_doc" not in c.lower() and "cover" not in c.lower()),
-            None,
-        )
-    if not info_xml:
-        return []
-    xml_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_nodash}/{info_xml}"
-    rx = requests.get(xml_url, headers={"User-Agent": _SEC_UA}, timeout=15)
-    if rx.status_code != 200:
+    if not xml_text:
         return []
     rows = []
     try:
-        # Strip XML namespaces for simpler parsing — 13F XML uses
-        # `ns1:infoTable` etc., which would otherwise force xpath gymnastics.
-        text = re.sub(r'\sxmlns(:\w+)?="[^"]+"', "", rx.text, count=0)
-        text = re.sub(r"<(/?)\w+:", r"<\1", text)
+        # Strip namespace declarations + namespace prefixes from element names.
+        text = re.sub(r'\sxmlns(:\w+)?="[^"]+"', "", xml_text, count=0)
+        text = re.sub(r"<(/?)[\w-]+:", r"<\1", text)
         root = ET.fromstring(text)
-        for it in root.findall("infoTable"):
-            name   = (it.findtext("nameOfIssuer") or "").strip()
-            cusip  = (it.findtext("cusip") or "").strip().upper()
-            value  = it.findtext("value")
-            sh_el  = it.find("shrsOrPrnAmt")
-            shares = sh_el.findtext("sshPrnamt") if sh_el is not None else None
-            try: value_f = float(value) if value else 0.0
-            except Exception: value_f = 0.0
-            try: shares_f = float(shares) if shares else 0.0
-            except Exception: shares_f = 0.0
+
+        # Helper: case-insensitive child lookup.
+        def child_text(elem, *names):
+            wanted = {n.lower() for n in names}
+            for c in elem:
+                tag = c.tag.split("}", 1)[-1].lower()
+                if tag in wanted:
+                    return (c.text or "").strip()
+            return ""
+
+        def child_elem(elem, *names):
+            wanted = {n.lower() for n in names}
+            for c in elem:
+                tag = c.tag.split("}", 1)[-1].lower()
+                if tag in wanted:
+                    return c
+            return None
+
+        # Walk every element and treat anything with a 'cusip' child as a
+        # holding row.  This catches infoTable / InfoTable / ns1:infoTable /
+        # any custom variation, and ignores wrapper elements.
+        for elem in root.iter():
+            cusip_el = child_elem(elem, "cusip")
+            if cusip_el is None or not (cusip_el.text or "").strip():
+                continue
+            cusip  = (cusip_el.text or "").strip().upper()
+            name   = child_text(elem, "nameOfIssuer", "issuerName", "name")
+            value  = child_text(elem, "value")
+            shares = ""
+            sh_el  = child_elem(elem, "shrsOrPrnAmt", "shareAmount", "sharesOrPrincipal")
+            if sh_el is not None:
+                shares = child_text(sh_el, "sshPrnamt", "shares", "amount")
+            try:
+                value_f = float(value) if value else 0.0
+            except Exception:
+                value_f = 0.0
+            try:
+                shares_f = float(shares) if shares else 0.0
+            except Exception:
+                shares_f = 0.0
             rows.append({
                 "cusip":  cusip,
                 "name":   name,
-                # Pre-2022 filings reported value in $thousands; modern
-                # filings (post 2022 Q3) report in actual dollars. Normalize
-                # by detecting magnitude: $thousands sums for a $100B fund
-                # would round to ~1e8. Keep raw — frontend shows percentages.
                 "value":  value_f,
                 "shares": shares_f,
             })
     except Exception:
         return []
-    rows.sort(key=lambda r: r["value"], reverse=True)
     return rows
+
+
+def _fetch_13f_information_table(cik, accession):
+    """
+    Locate and parse the 13F information table for a given filing.
+    Returns list of {cusip, name, value, shares} sorted by value desc.
+
+    Strategy:
+      1. List the filing's directory via index.json.
+      2. Try every .xml that isn't obviously the cover doc / XSL stylesheet
+         in priority order.  Parse each one until rows come back.
+      3. If nothing parses, return [].
+    """
+    acc_nodash = accession.replace("-", "")
+    idx_json_url = (
+        f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_nodash}/index.json"
+    )
+    try:
+        r = requests.get(idx_json_url, headers={"User-Agent": _SEC_UA}, timeout=10)
+    except Exception:
+        return []
+    if r.status_code != 200:
+        return []
+
+    items = ((r.json() or {}).get("directory") or {}).get("item") or []
+    xml_names = [
+        (it.get("name") or "") for it in items
+        if (it.get("name") or "").lower().endswith(".xml")
+    ]
+    # Skip files that are clearly NOT the info table.
+    skip_substrings = ("primary_doc", "cover", "xslform", "xsl_form")
+    candidates = [n for n in xml_names if not any(s in n.lower() for s in skip_substrings)]
+
+    # Priority: filenames containing 'info' first, then everything else.
+    candidates.sort(key=lambda n: (0 if "info" in n.lower() else 1, n.lower()))
+
+    for fname in candidates:
+        xml_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_nodash}/{fname}"
+        try:
+            rx = requests.get(xml_url, headers={"User-Agent": _SEC_UA}, timeout=15)
+        except Exception:
+            continue
+        if rx.status_code != 200:
+            continue
+        rows = _parse_info_table_xml(rx.text)
+        if rows:
+            rows.sort(key=lambda r: r["value"], reverse=True)
+            return rows
+
+    return []
 
 
 _SEC_NAME_TICKER_MAP = {}     # normalized-name -> ticker
