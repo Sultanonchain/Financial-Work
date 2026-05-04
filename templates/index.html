@@ -675,6 +675,14 @@
         </div>
       </div>
 
+      <!-- Market-implied scenario: contextualizes the price vs fair value gap.
+           Reads d.implied_growth_pct + d.model_growth_pct so users see WHY
+           the market price differs from VALUS fair value, not just THAT it does. -->
+      <div class="iv-scenario hidden" id="vIvScenario">
+        <span class="iv-scenario__icon" aria-hidden="true">↳</span>
+        <span class="iv-scenario__text" id="vIvScenarioText">—</span>
+      </div>
+
       <button class="tier-badge tier-badge--btn" id="vTierBadge" type="button" aria-label="See what this verdict means">
         <span class="tier-badge__dot"></span>
         <span id="vTierLabel">—</span>

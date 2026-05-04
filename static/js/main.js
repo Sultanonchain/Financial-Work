@@ -589,6 +589,25 @@ function renderHeroInsights(d) {
     confWrap.hidden = true;
   }
 
+  // ── Market-implied scenario line (under the fair-value block) ──
+  // Frames the gap between price and fair value as "what the market is
+  // pricing in" — not as the model being wrong.  Lynch's reframe.
+  const scWrap = document.getElementById("vIvScenario");
+  const scTxt  = document.getElementById("vIvScenarioText");
+  if (scWrap && scTxt) {
+    const ig0 = d.implied_growth_pct;
+    const mg0 = d.model_growth_pct;
+    if (ig0 != null && mg0 != null && Math.abs(ig0 - mg0) >= 1) {
+      const verb = ig0 > mg0 ? "is pricing" : "is pricing for only";
+      scTxt.innerHTML =
+        `Market <strong>${verb} ${fmt(ig0, 1)}%</strong> annual growth · ` +
+        `VALUS forecasts <strong>${fmt(mg0, 1)}%</strong>`;
+      scWrap.classList.remove("hidden");
+    } else {
+      scWrap.classList.add("hidden");
+    }
+  }
+
   // ── Implied growth vs sector ceiling ──
   const ig = d.implied_growth_pct;
   const ceil = d.sector_growth_ceiling_pct;
