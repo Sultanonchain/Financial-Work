@@ -2611,10 +2611,11 @@ let _PF_TPL_HOLDINGS  = {};         // cik -> payload
 function openTemplatesModal() {
   const modal = $("pfTemplatesModal");
   if (!modal) return;
-  // Render strategies grid (idempotent)
   renderStrategiesGrid();
-  // Default to strategies tab
   switchTemplatesTab("strategies");
+  // Reset the investor pane to the grid view so we don't reopen on a stale
+  // single-fund detail from a previous session.
+  _setInvestorPaneFocused(false);
   modal.classList.remove("hidden");
 }
 
@@ -2695,23 +2696,49 @@ async function loadInvestorRegistry() {
   });
 }
 
+// Toggles between the investor grid view and the focused single-fund view.
+// On focus: hide grid + intro paragraph, show only the detail pane (which
+// includes its own "Back to investors" button).  Avoids the 'I don't know
+// to scroll' problem.
+function _setInvestorPaneFocused(focused) {
+  const grid   = $("pfTplInvestorsGrid");
+  const intro  = document.querySelector('[data-tpl-pane="investors"] .pf-tpl__intro');
+  const detail = $("pfTplInvestorDetail");
+  if (grid)   grid.classList.toggle("hidden",   focused);
+  if (intro)  intro.classList.toggle("hidden",  focused);
+  if (detail) detail.classList.toggle("hidden", !focused);
+}
+
 async function loadInvestor13F(cik) {
   const detail = $("pfTplInvestorDetail");
   if (!detail) return;
-  detail.classList.remove("hidden");
-  detail.innerHTML = `<div class="pf-tpl__loading">Fetching 13F-HR from EDGAR…</div>`;
+  _setInvestorPaneFocused(true);
+  detail.innerHTML = `
+    <button class="copy-btn pf-tpl__back" id="pfTplInvBack" type="button">← Back to investors</button>
+    <div class="pf-tpl__loading">Fetching 13F-HR from EDGAR…</div>
+  `;
+  document.getElementById("pfTplInvBack").onclick = () => _setInvestorPaneFocused(false);
+
   let data = _PF_TPL_HOLDINGS[cik];
   if (!data) {
     try {
       const r = await fetch(`/api/templates/13f/${cik}`);
       data = await r.json();
       if (data.error) {
-        detail.innerHTML = `<div class="pf-tpl__error">${escHtml(data.error)}</div>`;
+        detail.innerHTML = `
+          <button class="copy-btn pf-tpl__back" id="pfTplInvBack" type="button">← Back to investors</button>
+          <div class="pf-tpl__error">${escHtml(data.error)}</div>
+        `;
+        document.getElementById("pfTplInvBack").onclick = () => _setInvestorPaneFocused(false);
         return;
       }
       _PF_TPL_HOLDINGS[cik] = data;
     } catch {
-      detail.innerHTML = `<div class="pf-tpl__error">Network error fetching 13F.</div>`;
+      detail.innerHTML = `
+        <button class="copy-btn pf-tpl__back" id="pfTplInvBack" type="button">← Back to investors</button>
+        <div class="pf-tpl__error">Network error fetching 13F.</div>
+      `;
+      document.getElementById("pfTplInvBack").onclick = () => _setInvestorPaneFocused(false);
       return;
     }
   }
@@ -2735,6 +2762,7 @@ function renderInvestor13F(data) {
   }).join("");
   const filed = data.filed ? `Filed ${escHtml(data.filed)}` : "";
   detail.innerHTML = `
+    <button class="copy-btn pf-tpl__back" id="pfTplInvBack" type="button">← Back to investors</button>
     <div class="pf-tpl__detail-head">
       <div>
         <div class="pf-tpl__detail-name">${escHtml(inv.name || "")} — top holdings</div>
@@ -2752,6 +2780,8 @@ function renderInvestor13F(data) {
       </table>
     </div>
   `;
+  const backEl = document.getElementById("pfTplInvBack");
+  if (backEl) backEl.onclick = () => _setInvestorPaneFocused(false);
   detail.querySelectorAll("[data-copy-top]").forEach(btn => {
     btn.onclick = async () => {
       const n = parseInt(btn.dataset.copyTop, 10);

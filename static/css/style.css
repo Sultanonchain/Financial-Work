@@ -3766,6 +3766,14 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
 .pf-tpl__hold-rank { color: var(--ink-muted); width: 28px; }
 .pf-tpl__hold-tkr { color: var(--ink-primary); font-weight: 600; width: 80px; }
 .pf-tpl__no-ticker { color: var(--ink-muted); }
+.pf-tpl__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: var(--space-4);
+  font-size: 12px;
+  padding: 6px 12px;
+}
 
 /* ════════════════════════════════════════════════════════════════════════
    Settings modal — accessibility + theme

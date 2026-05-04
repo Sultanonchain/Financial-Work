@@ -6247,10 +6247,38 @@ def _resolve_cusip_to_ticker(cusip, name_hint=None):
     return ticker
 
 
+# Lazy-validated investor registry. On first call we hit each CIK's
+# submissions endpoint in parallel and drop any that don't have a recent
+# 13F-HR or 13F-HR/A filing — catches mistyped CIKs and family offices
+# below the 13F filing threshold (which would otherwise error on click).
+# Cached for 24h.
+_REGISTRY_VALIDATED_TTL = 24 * 3600
+_REGISTRY_VALIDATED_MEM = None  # (ts, [investor_dicts])
+
+def _get_validated_registry():
+    global _REGISTRY_VALIDATED_MEM
+    cached = _REGISTRY_VALIDATED_MEM
+    if cached and (time.time() - cached[0]) < _REGISTRY_VALIDATED_TTL:
+        return cached[1]
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(
+            lambda inv: (inv, _fetch_latest_13f_accession(inv["cik"]) is not None),
+            INVESTOR_REGISTRY,
+        ))
+    valid = [inv for inv, ok in results if ok]
+    # Safety net: if SEC is down and *everything* fails, fall back to the
+    # full registry rather than showing an empty list.
+    if not valid:
+        return INVESTOR_REGISTRY
+    _REGISTRY_VALIDATED_MEM = (time.time(), valid)
+    return valid
+
+
 @app.route("/api/templates/investors")
 def templates_investors():
-    """Return the curated investor registry (no holdings yet)."""
-    return jsonify({"investors": INVESTOR_REGISTRY})
+    """Return the curated registry, filtered to CIKs that actually file 13F."""
+    return jsonify({"investors": _get_validated_registry()})
 
 
 @app.route("/api/templates/13f/<int:cik>")
