@@ -6143,9 +6143,13 @@ def _parse_info_table_xml(xml_text):
         return []
     rows = []
     try:
-        # Strip namespace declarations + namespace prefixes from element names.
-        text = re.sub(r'\sxmlns(:\w+)?="[^"]+"', "", xml_text, count=0)
+        # Strip namespace declarations + namespace prefixes from element AND
+        # attribute names.  Some 13F filings declare xmlns:xsi *after* using
+        # xsi:schemaLocation in the same tag; once we strip the xmlns decl,
+        # the orphan xsi: attribute prefix breaks ET with "unbound prefix".
+        text = re.sub(r'\sxmlns(:[\w-]+)?="[^"]+"', "", xml_text, count=0)
         text = re.sub(r"<(/?)[\w-]+:", r"<\1", text)
+        text = re.sub(r'(\s)[\w-]+:([\w-]+\s*=)', r"\1\2", text)
         root = ET.fromstring(text)
 
         # Helper: case-insensitive child lookup.
