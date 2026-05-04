@@ -5295,6 +5295,22 @@ def valuation_history():
 _QUOTE_CACHE = {}        # {ticker: (timestamp, payload)}
 _QUOTE_CACHE_TTL_S = 30  # short TTL — this is a live-tick endpoint
 
+@app.route("/api/trending")
+@limiter.limit(limit_light)
+def trending():
+    """Public top-N tickers by search count over the last N ET-days."""
+    try:
+        days  = max(1, min(int(request.args.get("days",  "1")),  30))
+        limit = max(1, min(int(request.args.get("limit", "10")), 50))
+    except ValueError:
+        days, limit = 1, 10
+    return jsonify({
+        "items": _get_trending(days=days, limit=limit),
+        "days":  days,
+        "as_of": int(time.time()),
+    })
+
+
 @app.route("/api/quote")
 @limiter.limit(limit_light)
 def quote():
@@ -5477,6 +5493,59 @@ def _check_anon_search_limit(req, ticker: str):
         }), 429)
     _record_search("anon", ip, ticker)
     return None
+
+
+# ── Search popularity tracking ────────────────────────────────────────────
+# Per-ticker daily counter for the public "Trending today" chip row + your
+# private analytics.  No PII, no cookies — just (ticker, ET-date) → count.
+# 8-day TTL covers a full week + buffer for weekend rollovers.
+_TREND_TTL_S = 8 * 86400
+_TREND_MEM: dict = {}  # in-memory fallback when _kv unavailable
+
+def _trend_key(day: str, ticker: str) -> str:
+    return f"valus:trend:day:{day}:{ticker}"
+
+def _track_ticker_search(ticker: str) -> None:
+    """Fire-and-forget INCR on the daily counter for this ticker."""
+    if not ticker:
+        return
+    day = _et_now().date().isoformat()
+    key = _trend_key(day, ticker)
+    if _kv:
+        try:
+            _kv.incr(key)
+            _kv.expire(key, _TREND_TTL_S)
+            return
+        except Exception:
+            pass
+    _TREND_MEM[key] = _TREND_MEM.get(key, 0) + 1
+
+def _get_trending(days: int = 1, limit: int = 10) -> list:
+    """Aggregate ticker counts across the last N ET-days.  Returns sorted desc."""
+    today = _et_now().date()
+    counts: dict = {}
+    for i in range(days):
+        d = (today - timedelta(days=i)).isoformat()
+        prefix = f"valus:trend:day:{d}:"
+        used_redis = False
+        if _kv:
+            try:
+                for k in _kv.scan_iter(match=f"{prefix}*", count=500):
+                    raw = _kv.get(k)
+                    if raw is None:
+                        continue
+                    t = k.rsplit(":", 1)[-1]
+                    counts[t] = counts.get(t, 0) + int(raw)
+                used_redis = True
+            except Exception:
+                used_redis = False
+        if not used_redis:
+            for k, v in _TREND_MEM.items():
+                if k.startswith(prefix):
+                    t = k.rsplit(":", 1)[-1]
+                    counts[t] = counts.get(t, 0) + v
+    ranked = sorted(counts.items(), key=lambda kv: -kv[1])[:limit]
+    return [{"ticker": t, "count": c} for t, c in ranked]
 
 
 def _is_market_hours() -> bool:
@@ -6300,10 +6369,15 @@ def analyze():
     if not ticker:
         return jsonify({"error": "Ticker is required"}), 400
 
-    # Anonymous-user daily search gate (3/day per IP). Signed-in users skip.
+    # Anonymous-user daily search gate. Signed-in users skip.
     gate = _check_anon_search_limit(request, ticker)
     if gate is not None:
         return gate
+
+    # Popularity tracking (skip internal cron warm-up calls so trending
+    # reflects real user interest, not background refresh).
+    if request.headers.get("X-Valus-Internal") != "1":
+        _track_ticker_search(ticker)
 
     # Cache lookup
     _ck = _analyze_cache_key(ticker, dict(request.args))

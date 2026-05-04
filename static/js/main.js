@@ -3246,7 +3246,11 @@ const ACCENT_PALETTE = {
   amber:  { accent: "#fbbf24", soft: "rgba(251,191,36,0.12)",  glow: "rgba(251,191,36,0.25)",  strong: "rgba(251,191,36,0.55)" },
   rose:   { accent: "#fb7185", soft: "rgba(251,113,133,0.12)", glow: "rgba(251,113,133,0.25)", strong: "rgba(251,113,133,0.55)" },
 };
-const SETTINGS_DEFAULTS = { accent: "mint", textsize: "medium", contrast: false, motion: false };
+const SETTINGS_DEFAULTS = {
+  accent: "mint", textsize: "medium",
+  contrast: false, motion: false,
+  dyslexia: false, underline: false, touch: false, focusRing: false,
+};
 
 function loadUserSettings() {
   try {
@@ -3266,12 +3270,19 @@ function applyUserSettings(s) {
   root.style.setProperty("--accent-soft",   palette.soft);
   root.style.setProperty("--accent-glow",   palette.glow);
   root.style.setProperty("--accent-strong", palette.strong);
-  // Text size → set base font-size scale.
-  const scale = s.textsize === "small" ? "14px" : s.textsize === "large" ? "18px" : "16px";
-  root.style.setProperty("font-size", scale);
-  // Toggle classes for high contrast + reduced motion.
-  root.classList.toggle("hc-on",  !!s.contrast);
-  root.classList.toggle("rm-on",  !!s.motion);
+  // Text size → class-based body zoom (CSS zoom: 0.90 / 1.0 / 1.15).
+  // The codebase has zero rem/em font-sizes, so root font-size has no
+  // effect; zoom on body rescales the entire UI like browser zoom.
+  root.style.removeProperty("font-size");
+  root.classList.toggle("text-small", s.textsize === "small");
+  root.classList.toggle("text-large", s.textsize === "large");
+  // Toggle classes for accessibility modes.
+  root.classList.toggle("hc-on",    !!s.contrast);
+  root.classList.toggle("rm-on",    !!s.motion);
+  root.classList.toggle("dys-on",   !!s.dyslexia);
+  root.classList.toggle("ul-on",    !!s.underline);
+  root.classList.toggle("touch-on", !!s.touch);
+  root.classList.toggle("focus-on", !!s.focusRing);
 }
 
 function openSettingsModal() {
@@ -3288,6 +3299,11 @@ function openSettingsModal() {
   });
   $("settingsContrast").checked = !!s.contrast;
   $("settingsMotion").checked   = !!s.motion;
+  const setIfPresent = (id, v) => { const el = $(id); if (el) el.checked = !!v; };
+  setIfPresent("settingsDyslexia",  s.dyslexia);
+  setIfPresent("settingsUnderline", s.underline);
+  setIfPresent("settingsTouch",     s.touch);
+  setIfPresent("settingsFocus",     s.focusRing);
   modal.classList.remove("hidden");
 }
 
@@ -3323,12 +3339,54 @@ function setupSettings() {
     const s = loadUserSettings(); s.motion = !!motionEl.checked;
     saveUserSettings(s); applyUserSettings(s);
   };
+  // Wire the four additional a11y toggles (dyslexia / underline / touch / focus).
+  const a11yToggles = [
+    ["settingsDyslexia",  "dyslexia"],
+    ["settingsUnderline", "underline"],
+    ["settingsTouch",     "touch"],
+    ["settingsFocus",     "focusRing"],
+  ];
+  a11yToggles.forEach(([id, key]) => {
+    const el = $(id);
+    if (!el) return;
+    el.onchange = () => {
+      const s = loadUserSettings(); s[key] = !!el.checked;
+      saveUserSettings(s); applyUserSettings(s);
+    };
+  });
   const resetBtn = $("settingsResetBtn");
   if (resetBtn) resetBtn.onclick = () => {
     saveUserSettings({ ...SETTINGS_DEFAULTS });
     applyUserSettings({ ...SETTINGS_DEFAULTS });
     openSettingsModal();  // re-render controls in default state
   };
+}
+
+// ── Trending today ────────────────────────────────────────────────────────
+// Fetches the public /api/trending endpoint and renders a clickable chip
+// row under the home search bar.  Hidden until ≥3 tickers are tracked so
+// we never show an empty state on cold start.
+async function loadTrending() {
+  const row = document.getElementById("trendingRow");
+  const chipsEl = document.getElementById("trendingChips");
+  if (!row || !chipsEl) return;
+  try {
+    const r = await fetch("/api/trending?days=1&limit=7");
+    if (!r.ok) return;
+    const j = await r.json();
+    if (!Array.isArray(j.items) || j.items.length < 3) return;
+    chipsEl.innerHTML = j.items.map(it =>
+      `<button class="trending-chip" type="button" data-ticker="${escHtml(it.ticker)}">${escHtml(it.ticker)}</button>`
+    ).join("");
+    chipsEl.querySelectorAll(".trending-chip").forEach(b => {
+      b.onclick = () => {
+        const t = b.dataset.ticker;
+        $("tickerInput").value = t;
+        analyze(t);
+      };
+    });
+    row.classList.remove("hidden");
+  } catch {}
 }
 
 function setupAuthControl() {
@@ -4482,6 +4540,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupLeaderboard();
   setupAuthControl();
   setupSettings();
+  loadTrending();
   pfUpdateBadge();
   // Fetch identity in parallel with bootFromURL — non-blocking
   refreshMe();

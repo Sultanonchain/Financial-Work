@@ -169,6 +169,13 @@
         <div class="search-dropdown hidden" id="searchDropdown" role="listbox"></div>
       </form>
 
+      <!-- Trending today — populated from /api/trending. Hidden until ≥3
+           tickers are tracked so we never show an empty state. -->
+      <div class="trending-row hidden" id="trendingRow">
+        <span class="trending-row__label">Trending today</span>
+        <div class="trending-row__chips" id="trendingChips"></div>
+      </div>
+
       <button type="button" class="advanced-toggle" id="advancedToggle">
         <span>⚙</span> Customize DCF assumptions
       </button>
@@ -310,6 +317,54 @@
         </div>
         <label class="settings-switch">
           <input type="checkbox" id="settingsMotion"/>
+          <span class="settings-switch__track"></span>
+        </label>
+      </div>
+
+      <!-- Dyslexia-friendly font -->
+      <div class="settings-row settings-row--toggle">
+        <div>
+          <div class="settings-row__label">Dyslexia-friendly font</div>
+          <div class="settings-row__hint">Wider letter-spacing + high-readability typeface.</div>
+        </div>
+        <label class="settings-switch">
+          <input type="checkbox" id="settingsDyslexia"/>
+          <span class="settings-switch__track"></span>
+        </label>
+      </div>
+
+      <!-- Always-underline links -->
+      <div class="settings-row settings-row--toggle">
+        <div>
+          <div class="settings-row__label">Always-underline links</div>
+          <div class="settings-row__hint">Don't rely on color alone to mark links.</div>
+        </div>
+        <label class="settings-switch">
+          <input type="checkbox" id="settingsUnderline"/>
+          <span class="settings-switch__track"></span>
+        </label>
+      </div>
+
+      <!-- Larger touch targets -->
+      <div class="settings-row settings-row--toggle">
+        <div>
+          <div class="settings-row__label">Larger touch targets</div>
+          <div class="settings-row__hint">Minimum 44×44px buttons (WCAG 2.2).</div>
+        </div>
+        <label class="settings-switch">
+          <input type="checkbox" id="settingsTouch"/>
+          <span class="settings-switch__track"></span>
+        </label>
+      </div>
+
+      <!-- Prominent focus rings -->
+      <div class="settings-row settings-row--toggle">
+        <div>
+          <div class="settings-row__label">Prominent focus rings</div>
+          <div class="settings-row__hint">Thicker outline when navigating with keyboard.</div>
+        </div>
+        <label class="settings-switch">
+          <input type="checkbox" id="settingsFocus"/>
           <span class="settings-switch__track"></span>
         </label>
       </div>

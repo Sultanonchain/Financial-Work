@@ -3903,3 +3903,86 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
   transition-duration: 0.001ms !important;
   scroll-behavior: auto !important;
 }
+
+/* ── Text-size scaling via body zoom ─ codebase has zero rem/em font-sizes,
+       so root font-size doesn't propagate.  zoom on body rescales the entire
+       UI exactly like the browser's built-in zoom. ─────────────────────── */
+:root.text-small body { zoom: 0.90; }
+:root.text-large body { zoom: 1.15; }
+
+/* ── Dyslexia-friendly font ─ Atkinson Hyperlegible if available, else
+       Verdana/Tahoma which ship with most OSes.  Bumps letter + word
+       spacing for readability. ────────────────────────────────────────── */
+:root.dys-on {
+  --font-display: "Atkinson Hyperlegible", "Verdana", "Tahoma", system-ui, sans-serif;
+}
+:root.dys-on body {
+  letter-spacing: 0.012em;
+  word-spacing: 0.05em;
+}
+
+/* ── Always-underline links ─ WCAG: don't rely on color alone to mark a
+       link.  Excludes button-styled anchors so we don't double-decorate. ─ */
+:root.ul-on a:not(.copy-btn):not(.header-btn):not(.modal__close):not(.disc-tier-pill):not(.trending-chip) {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ── Larger touch targets ─ WCAG 2.2 minimum 44×44px on every
+       interactive element. ────────────────────────────────────────────── */
+:root.touch-on button,
+:root.touch-on a.copy-btn,
+:root.touch-on .header-btn,
+:root.touch-on input[type="checkbox"] + .settings-switch__track {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* ── Prominent focus rings ─ thicker outline + glow for keyboard users. ─ */
+:root.focus-on :focus-visible {
+  outline: 3px solid var(--accent) !important;
+  outline-offset: 3px !important;
+  box-shadow: 0 0 0 6px var(--accent-soft) !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Trending today — chip row under the home search bar
+   ════════════════════════════════════════════════════════════════════════ */
+.trending-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.trending-row.hidden { display: none; }
+.trending-row__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-muted);
+  flex-shrink: 0;
+}
+.trending-row__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.trending-chip {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--bg-elevated-2);
+  border: 1px solid rgba(255,255,255,0.06);
+  color: var(--ink-secondary);
+  padding: 5px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 120ms var(--ease-out);
+}
+.trending-chip:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
