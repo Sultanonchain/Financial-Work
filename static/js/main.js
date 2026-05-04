@@ -3235,6 +3235,102 @@ function showSignInModal(intent) {
   modal.classList.remove("hidden");
 }
 
+// ── User settings (accessibility + theme) ──────────────────────────────────
+// Persisted to localStorage, applied to <html> via data attributes that map
+// to CSS custom properties + utility classes.  No backend dependency.
+const SETTINGS_KEY = "valus.settings.v1";
+const ACCENT_PALETTE = {
+  mint:   { accent: "#5eead4", soft: "rgba(94,234,212,0.12)",  glow: "rgba(94,234,212,0.25)",  strong: "rgba(94,234,212,0.55)" },
+  blue:   { accent: "#60a5fa", soft: "rgba(96,165,250,0.12)",  glow: "rgba(96,165,250,0.25)",  strong: "rgba(96,165,250,0.55)" },
+  purple: { accent: "#a78bfa", soft: "rgba(167,139,250,0.12)", glow: "rgba(167,139,250,0.25)", strong: "rgba(167,139,250,0.55)" },
+  amber:  { accent: "#fbbf24", soft: "rgba(251,191,36,0.12)",  glow: "rgba(251,191,36,0.25)",  strong: "rgba(251,191,36,0.55)" },
+  rose:   { accent: "#fb7185", soft: "rgba(251,113,133,0.12)", glow: "rgba(251,113,133,0.25)", strong: "rgba(251,113,133,0.55)" },
+};
+const SETTINGS_DEFAULTS = { accent: "mint", textsize: "medium", contrast: false, motion: false };
+
+function loadUserSettings() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return { ...SETTINGS_DEFAULTS };
+    return { ...SETTINGS_DEFAULTS, ...(JSON.parse(raw) || {}) };
+  } catch { return { ...SETTINGS_DEFAULTS }; }
+}
+function saveUserSettings(s) {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch {}
+}
+function applyUserSettings(s) {
+  const root = document.documentElement;
+  // Accent color → override the four --accent-* tokens at runtime.
+  const palette = ACCENT_PALETTE[s.accent] || ACCENT_PALETTE.mint;
+  root.style.setProperty("--accent",        palette.accent);
+  root.style.setProperty("--accent-soft",   palette.soft);
+  root.style.setProperty("--accent-glow",   palette.glow);
+  root.style.setProperty("--accent-strong", palette.strong);
+  // Text size → set base font-size scale.
+  const scale = s.textsize === "small" ? "14px" : s.textsize === "large" ? "18px" : "16px";
+  root.style.setProperty("font-size", scale);
+  // Toggle classes for high contrast + reduced motion.
+  root.classList.toggle("hc-on",  !!s.contrast);
+  root.classList.toggle("rm-on",  !!s.motion);
+}
+
+function openSettingsModal() {
+  const modal = $("settingsModal");
+  if (!modal) return;
+  const s = loadUserSettings();
+
+  // Reflect current state in the controls.
+  document.querySelectorAll("#settingsAccent .settings-swatch").forEach(b => {
+    b.classList.toggle("active", b.dataset.accent === s.accent);
+  });
+  document.querySelectorAll("#settingsTextSize .settings-segment").forEach(b => {
+    b.classList.toggle("active", b.dataset.textsize === s.textsize);
+  });
+  $("settingsContrast").checked = !!s.contrast;
+  $("settingsMotion").checked   = !!s.motion;
+  modal.classList.remove("hidden");
+}
+
+function setupSettings() {
+  // Apply persisted settings on page load (before paint where possible).
+  applyUserSettings(loadUserSettings());
+
+  document.querySelectorAll("#settingsAccent .settings-swatch").forEach(b => {
+    b.onclick = () => {
+      const s = loadUserSettings();
+      s.accent = b.dataset.accent;
+      saveUserSettings(s); applyUserSettings(s);
+      document.querySelectorAll("#settingsAccent .settings-swatch").forEach(x =>
+        x.classList.toggle("active", x === b));
+    };
+  });
+  document.querySelectorAll("#settingsTextSize .settings-segment").forEach(b => {
+    b.onclick = () => {
+      const s = loadUserSettings();
+      s.textsize = b.dataset.textsize;
+      saveUserSettings(s); applyUserSettings(s);
+      document.querySelectorAll("#settingsTextSize .settings-segment").forEach(x =>
+        x.classList.toggle("active", x === b));
+    };
+  });
+  const contrastEl = $("settingsContrast");
+  if (contrastEl) contrastEl.onchange = () => {
+    const s = loadUserSettings(); s.contrast = !!contrastEl.checked;
+    saveUserSettings(s); applyUserSettings(s);
+  };
+  const motionEl = $("settingsMotion");
+  if (motionEl) motionEl.onchange = () => {
+    const s = loadUserSettings(); s.motion = !!motionEl.checked;
+    saveUserSettings(s); applyUserSettings(s);
+  };
+  const resetBtn = $("settingsResetBtn");
+  if (resetBtn) resetBtn.onclick = () => {
+    saveUserSettings({ ...SETTINGS_DEFAULTS });
+    applyUserSettings({ ...SETTINGS_DEFAULTS });
+    openSettingsModal();  // re-render controls in default state
+  };
+}
+
 function setupAuthControl() {
   const signInBtn  = $("signInBtn");
   const avatar     = $("authAvatar");
@@ -3274,6 +3370,11 @@ function setupAuthControl() {
   if (aboutBtn) aboutBtn.onclick = () => {
     if (menu) menu.classList.add("hidden");
     window.location.href = "/docs";
+  };
+  const settingsBtn = $("authSettingsBtn");
+  if (settingsBtn) settingsBtn.onclick = () => {
+    if (menu) menu.classList.add("hidden");
+    openSettingsModal();
   };
   if (signOutBtn) signOutBtn.onclick = async () => {
     try {
@@ -4380,6 +4481,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupSubmitToLeaderboard();
   setupLeaderboard();
   setupAuthControl();
+  setupSettings();
   pfUpdateBadge();
   // Fetch identity in parallel with bootFromURL — non-blocking
   refreshMe();

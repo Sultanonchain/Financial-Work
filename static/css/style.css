@@ -3766,3 +3766,140 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
 .pf-tpl__hold-rank { color: var(--ink-muted); width: 28px; }
 .pf-tpl__hold-tkr { color: var(--ink-primary); font-weight: 600; width: 80px; }
 .pf-tpl__no-ticker { color: var(--ink-muted); }
+
+/* ════════════════════════════════════════════════════════════════════════
+   Settings modal — accessibility + theme
+   ════════════════════════════════════════════════════════════════════════ */
+.settings-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.settings-row:last-of-type { border-bottom: none; }
+.settings-row--toggle {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.settings-row__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-muted);
+}
+.settings-row__hint {
+  font-size: 12px;
+  color: var(--ink-muted);
+  margin-top: 2px;
+}
+.settings-swatches { display: flex; gap: 10px; }
+.settings-swatch {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  background: var(--sw);
+  cursor: pointer;
+  transition: transform 120ms var(--ease-out), border-color 120ms var(--ease-out);
+}
+.settings-swatch:hover { transform: scale(1.08); }
+.settings-swatch.active {
+  border-color: var(--ink-primary);
+  box-shadow: 0 0 0 3px rgba(255,255,255,0.06);
+}
+.settings-segments {
+  display: flex;
+  background: var(--bg-elevated-2);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+  gap: 2px;
+}
+.settings-segment {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--ink-secondary);
+  padding: 8px 12px;
+  border-radius: calc(var(--radius-sm) - 2px);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 120ms var(--ease-out);
+}
+.settings-segment:hover { color: var(--ink-primary); }
+.settings-segment.active {
+  background: var(--bg-elevated);
+  color: var(--ink-primary);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06);
+}
+.settings-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px; height: 22px;
+  flex-shrink: 0;
+}
+.settings-switch input { opacity: 0; width: 0; height: 0; }
+.settings-switch__track {
+  position: absolute; inset: 0;
+  background: var(--bg-elevated-2);
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.08);
+  cursor: pointer;
+  transition: background 160ms var(--ease-out);
+}
+.settings-switch__track::before {
+  content: "";
+  position: absolute;
+  left: 3px; top: 50%;
+  transform: translateY(-50%);
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--ink-secondary);
+  transition: all 160ms var(--ease-out);
+}
+.settings-switch input:checked + .settings-switch__track {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.settings-switch input:checked + .settings-switch__track::before {
+  left: calc(100% - 19px);
+  background: var(--accent);
+}
+.settings-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 20px;
+}
+.copy-btn--primary {
+  background: var(--accent);
+  color: var(--bg-deep);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.copy-btn--primary:hover { filter: brightness(1.08); }
+
+/* ── High-contrast mode ─ boosts ink and border tokens for readability ── */
+:root.hc-on {
+  --ink-primary:   #ffffff;
+  --ink-secondary: #e8ecf3;
+  --ink-muted:     #a4adba;
+  --bg-deep:       #05070b;
+  --bg-elevated:   #0d1117;
+  --bg-elevated-2: #141923;
+}
+:root.hc-on .card,
+:root.hc-on .modal__panel { border: 1px solid rgba(255,255,255,0.20); }
+
+/* ── Reduced-motion mode ─ disables animations + transitions globally ── */
+:root.rm-on *,
+:root.rm-on *::before,
+:root.rm-on *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}

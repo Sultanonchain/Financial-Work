@@ -53,6 +53,10 @@
             <span class="auth-menu__label">Upgrade to Premium</span>
             <span class="auth-menu__hint">Soon</span>
           </button>
+          <button class="auth-menu__btn auth-menu__btn--neutral" id="authSettingsBtn" type="button">
+            <span class="auth-menu__icon">⚙</span>
+            <span class="auth-menu__label">Settings</span>
+          </button>
           <button class="auth-menu__btn auth-menu__btn--neutral" id="authAboutBtn" type="button">
             <span class="auth-menu__icon">?</span>
             <span class="auth-menu__label">About VALUS</span>
@@ -251,6 +255,69 @@
       <button class="copy-btn" data-modal-close type="button" style="margin-top: 16px; width: 100%;">
         Maybe later
       </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── SETTINGS MODAL — accessibility + customization ─────────────────── -->
+<div class="modal hidden" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+  <div class="modal__backdrop" data-modal-close></div>
+  <div class="modal__panel" style="max-width: 480px;">
+    <div class="modal__head">
+      <h2 class="modal__title" id="settingsTitle">Settings</h2>
+      <button class="modal__close" data-modal-close aria-label="Close">✕</button>
+    </div>
+    <div class="modal__body">
+      <!-- Accent color -->
+      <div class="settings-row">
+        <div class="settings-row__label">Accent color</div>
+        <div class="settings-swatches" id="settingsAccent">
+          <button class="settings-swatch" data-accent="mint"   style="--sw: #5eead4" aria-label="Mint"></button>
+          <button class="settings-swatch" data-accent="blue"   style="--sw: #60a5fa" aria-label="Blue"></button>
+          <button class="settings-swatch" data-accent="purple" style="--sw: #a78bfa" aria-label="Purple"></button>
+          <button class="settings-swatch" data-accent="amber"  style="--sw: #fbbf24" aria-label="Amber"></button>
+          <button class="settings-swatch" data-accent="rose"   style="--sw: #fb7185" aria-label="Rose"></button>
+        </div>
+      </div>
+
+      <!-- Text size -->
+      <div class="settings-row">
+        <div class="settings-row__label">Text size</div>
+        <div class="settings-segments" id="settingsTextSize">
+          <button class="settings-segment" data-textsize="small">Small</button>
+          <button class="settings-segment" data-textsize="medium">Medium</button>
+          <button class="settings-segment" data-textsize="large">Large</button>
+        </div>
+      </div>
+
+      <!-- High contrast -->
+      <div class="settings-row settings-row--toggle">
+        <div>
+          <div class="settings-row__label">High contrast</div>
+          <div class="settings-row__hint">Boosts text + border contrast for readability.</div>
+        </div>
+        <label class="settings-switch">
+          <input type="checkbox" id="settingsContrast"/>
+          <span class="settings-switch__track"></span>
+        </label>
+      </div>
+
+      <!-- Reduce motion -->
+      <div class="settings-row settings-row--toggle">
+        <div>
+          <div class="settings-row__label">Reduce motion</div>
+          <div class="settings-row__hint">Disables animations for vestibular sensitivity.</div>
+        </div>
+        <label class="settings-switch">
+          <input type="checkbox" id="settingsMotion"/>
+          <span class="settings-switch__track"></span>
+        </label>
+      </div>
+
+      <div class="settings-actions">
+        <button class="copy-btn" id="settingsResetBtn" type="button">↺ Reset to defaults</button>
+        <button class="copy-btn copy-btn--primary" data-modal-close type="button">Done</button>
+      </div>
     </div>
   </div>
 </div>
