@@ -5445,6 +5445,10 @@ def _record_anon_search(ip: str, ticker: str) -> None:
 
 def _check_anon_search_limit(req, ticker: str):
     """Returns None to allow, or (response, status) tuple to block."""
+    # Internal callers (Discover treemap, hourly cron) bypass the gate.
+    # They invoke analyze() via test_request_context with this header set.
+    if req.headers.get("X-Valus-Internal") == "1":
+        return None
     if session.get("user"):
         return None
     ip = _client_ip(req)
@@ -5606,7 +5610,10 @@ def discover():
                     cached_at_age = int(age)
 
             if d is None:
-                with app.test_request_context(f"/api/analyze?ticker={t}"):
+                with app.test_request_context(
+                    f"/api/analyze?ticker={t}",
+                    headers={"X-Valus-Internal": "1"},
+                ):
                     resp = analyze()
                 if isinstance(resp, tuple):
                     resp = resp[0]
@@ -5696,7 +5703,10 @@ def cron_refresh_heatmap():
             if _kv:
                 try: _kv.delete(ck)
                 except Exception: pass
-            with app.test_request_context(f"/api/analyze?ticker={t}"):
+            with app.test_request_context(
+                f"/api/analyze?ticker={t}",
+                headers={"X-Valus-Internal": "1"},
+            ):
                 resp = analyze()
             if isinstance(resp, tuple):
                 resp = resp[0]
@@ -8236,7 +8246,10 @@ def _warm_discovery_cache():
                     ck = _analyze_cache_key(t, {})
                     if _analyze_cache_get(ck) is None:
                         try:
-                            with app.test_request_context(f"/api/analyze?ticker={t}"):
+                            with app.test_request_context(
+                                f"/api/analyze?ticker={t}",
+                                headers={"X-Valus-Internal": "1"},
+                            ):
                                 analyze()
                         except Exception:
                             pass
