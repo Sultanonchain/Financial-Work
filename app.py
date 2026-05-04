@@ -5582,15 +5582,14 @@ DISCOVERY_TICKERS_SET = set(DISCOVERY_TICKERS)
 def discover():
     """
     Returns a thin summary for every ticker in DISCOVERY_TICKERS using the
-    cached analyze pipeline.  Each entry carries a `cached_at` timestamp
-    so the UI can show freshness ("Updated 4m ago") and users understand
-    that values may slightly differ from a real-time analyze call.
+    cached analyze pipeline.
 
-    Stale-while-revalidate: by default any cache entry counts (even past
-    the 15-min TTL) so the heatmap returns sub-second once the daily cron
-    has warmed the cache.  Pass `?fresh=true` (used by the manual ↻ Refresh
-    button) to force a re-fetch of expired entries.
+    Sign-in required: the Discover heatmap is a signed-in-only feature.
+    Internal callers (the hourly warm cron) bypass via X-Valus-Internal.
     """
+    if request.headers.get("X-Valus-Internal") != "1":
+        user, err = require_user()
+        if err: return err
     now = time.time()
     force_fresh = request.args.get("fresh", "").lower() in ("1", "true", "yes")
 

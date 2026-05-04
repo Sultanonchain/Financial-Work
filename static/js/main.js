@@ -3196,9 +3196,10 @@ async function requireAuth(intent) {
 }
 
 const INTENT_COPY = {
-  portfolio: "Sign in to save your portfolio across devices.",
+  portfolio: "Sign in to track your portfolio. Free account also gives you 10 searches/day and access to the Discover heatmap.",
+  discover:  "Sign in to view the Discover heatmap. Free account includes 10 searches/day and portfolio tracking.",
   publish:   "Sign in to publish your portfolio to the public leaderboard.",
-  default:   "Sign in to continue.",
+  default:   "Sign in for 10 free searches/day, the Discover heatmap, and portfolio tracking.",
 };
 
 function showSignInModal(intent) {
@@ -3646,6 +3647,11 @@ function saveDiscoverToLocalStorage(items) {
 }
 
 async function openDiscoverPage() {
+  // Sign-in gate — Discover heatmap is for authenticated users only
+  if (!_ME) {
+    const ok = await requireAuthWithRedirectIntent("discover");
+    if (!ok) return;
+  }
   hideAllViews();
   $("discoverPage").classList.remove("hidden");
   setViewHash("discover");
