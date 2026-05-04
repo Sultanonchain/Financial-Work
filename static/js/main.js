@@ -183,7 +183,7 @@ function showRateLimit(data) {
     msg =
       `You've used your <strong>${data.used} of ${data.limit}</strong> free searches today. ` +
       `<a href="${href}" style="color:inherit;text-decoration:underline;font-weight:600;">Sign in</a> ` +
-      `for 10 free searches per day plus portfolio tracking and the Discover heatmap.`;
+      `for unlimited searches plus portfolio tracking and the Discover heatmap.`;
   } else if (data && data.error === "search_limit_signed_in") {
     msg =
       `You've used your <strong>${data.used} of ${data.limit}</strong> free searches today. ` +
@@ -3209,10 +3209,10 @@ async function requireAuth(intent) {
 }
 
 const INTENT_COPY = {
-  portfolio: "Sign in to track your portfolio. Free account also gives you 10 searches/day and access to the Discover heatmap.",
-  discover:  "Sign in to view the Discover heatmap. Free account includes 10 searches/day and portfolio tracking.",
+  portfolio: "Sign in to track your portfolio. Free account also unlocks unlimited searches and the Discover heatmap.",
+  discover:  "Sign in to view the Discover heatmap. Free account includes unlimited searches and portfolio tracking.",
   publish:   "Sign in to publish your portfolio to the public leaderboard.",
-  default:   "Sign in for 10 free searches/day, the Discover heatmap, and portfolio tracking.",
+  default:   "Sign in for unlimited searches, the Discover heatmap, and portfolio tracking.",
 };
 
 function showSignInModal(intent) {

@@ -5448,45 +5448,34 @@ def _record_search(scope: str, ident: str, ticker: str) -> None:
 def _check_anon_search_limit(req, ticker: str):
     """Returns None to allow, or (response, status) tuple to block.
 
-    Function name kept for backwards compatibility — it now also enforces
-    the signed-in 10/day soft cap.  Premium users (when wired) will set a
-    flag on the user dict to skip the gate.
+    Pre-Stripe policy:
+      • Anonymous: 5 unique tickers per IP per ET-day.
+      • Signed-in: unlimited.
+      • Internal callers (Discover treemap, hourly cron): bypass.
+
+    Once Stripe lands, swap the early-return below to enforce
+    SIGNED_IN_SEARCH_LIMIT for non-premium signed-in users.
     """
-    # Internal callers (Discover treemap, hourly cron) bypass the gate.
     if req.headers.get("X-Valus-Internal") == "1":
         return None
+    if session.get("user"):
+        return None
 
-    user = session.get("user")
-    if user and user.get("premium"):
-        return None  # premium tier: unlimited (placeholder until Stripe)
-
-    if user:
-        scope, ident, limit = "user", user["sub"], SIGNED_IN_SEARCH_LIMIT
-        err_code = "search_limit_signed_in"
-        cta_msg = (
-            f"You've used your {limit} free searches today. "
-            "Upgrade to Premium for unlimited searches plus daily AI digests."
-        )
-    else:
-        scope, ident, limit = "anon", _client_ip(req), ANON_SEARCH_LIMIT
-        err_code = "search_limit_anon"
-        cta_msg = (
-            f"You've used your {limit} free searches today. "
-            f"Sign in for {SIGNED_IN_SEARCH_LIMIT} free searches per day "
-            "plus portfolio tracking and the Discover heatmap."
-        )
-
-    seen = _searches_today(scope, ident)
+    ip = _client_ip(req)
+    seen = _searches_today("anon", ip)
     if ticker in seen:
         return None  # already counted today, re-fetch is free
-    if len(seen) >= limit:
+    if len(seen) >= ANON_SEARCH_LIMIT:
         return (jsonify({
-            "error":   err_code,
-            "limit":   limit,
+            "error":   "search_limit_anon",
+            "limit":   ANON_SEARCH_LIMIT,
             "used":    len(seen),
-            "message": cta_msg,
+            "message": (
+                f"You've used your {ANON_SEARCH_LIMIT} free searches today. "
+                "Sign in for unlimited searches plus portfolio tracking and the Discover heatmap."
+            ),
         }), 429)
-    _record_search(scope, ident, ticker)
+    _record_search("anon", ip, ticker)
     return None
 
 
