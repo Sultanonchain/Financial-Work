@@ -12,3 +12,4 @@ build/
 .idea/
 .vscode/
 .valus_leaderboard.json
+.claude/worktrees/

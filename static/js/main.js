@@ -130,7 +130,7 @@ async function analyze(ticker, params = {}) {
     const res = await fetch(url);
     const data = await res.json();
     if (res.status === 429) {
-      showRateLimit();
+      showRateLimit(data);
       return;
     }
     if (!res.ok || data.error) {
@@ -172,9 +172,23 @@ function showError(msg) {
   $("errorMsg").textContent = msg;
   $("error").classList.remove("hidden");
 }
-function showRateLimit() {
-  $("errorMsg").innerHTML =
-    'Free limit reached. <a href="/auth/login" style="color:inherit;text-decoration:underline;font-weight:600;">Sign in</a> to get more free lookups and unlock full access.';
+function showRateLimit(data) {
+  // Anonymous-search-limit responses ship a concrete message; generic 429s
+  // (Flask-Limiter spam protection) fall through to the default copy.
+  let msg;
+  if (data && data.error === "search_limit_anon") {
+    const next = window.location.pathname + window.location.search + window.location.hash;
+    const href = `/auth/login?next=${encodeURIComponent(next)}`;
+    msg =
+      `You've used your <strong>${data.used} of ${data.limit}</strong> free searches today. ` +
+      `<a href="${href}" style="color:inherit;text-decoration:underline;font-weight:600;">Sign in</a> ` +
+      `for 10 free searches per day plus portfolio tracking.`;
+  } else {
+    msg =
+      'Free limit reached. <a href="/auth/login" style="color:inherit;text-decoration:underline;font-weight:600;">Sign in</a> ' +
+      'to get more free lookups and unlock full access.';
+  }
+  $("errorMsg").innerHTML = msg;
   $("error").classList.remove("hidden");
 }
 function hideError() { $("error").classList.add("hidden"); }

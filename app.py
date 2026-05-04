@@ -5366,7 +5366,7 @@ def statements():
 # Repeated visits to the same ticker (e.g. portfolio refresh, share-link
 # clicks, discovery heatmap) hit the cache for sub-100ms responses.
 _ANALYZE_CACHE = {}      # {(ticker, params_str): (timestamp, response_dict)}
-_ANALYZE_CACHE_TTL_S = 1800        # 30 min default — fresh for one-off lookups
+_ANALYZE_CACHE_TTL_S = 3600        # 1 hour default during market hours; market-aware TTL extends overnight to next 9:30 AM ET
 _ANALYZE_CACHE_TTL_POPULAR_S = 7200  # 2 hours for popular mega-caps
 _ANALYZE_CACHE_TTL_DISCOVERY_S = 93600  # 26 hours — bridges daily cron cycles
 _ANALYZE_CACHE_MAX = 500     # cap to bound memory
@@ -5397,6 +5397,71 @@ def _seconds_until_next_market_open() -> int:
             candidate += timedelta(days=1)
         target = candidate
     return max(int((target - now_et).total_seconds()), 60)
+
+# ── Anonymous-user search limit ───────────────────────────────────────────
+# 3 unique tickers per IP per ET-day for users without a Google sign-in.
+# Signed-in users skip this gate (10/day soft cap to be enforced later when
+# the premium tier is wired up). Keyed by IP + ET date so the counter
+# resets at midnight Eastern.
+ANON_SEARCH_LIMIT = 3
+_ANON_SEARCH_MEM: dict = {}  # in-memory fallback when _kv is unavailable
+
+def _client_ip(req) -> str:
+    fwd = req.headers.get("X-Forwarded-For") or ""
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return req.remote_addr or "0.0.0.0"
+
+def _anon_search_key(ip: str) -> str:
+    today = _et_now().date().isoformat()
+    return f"valus:anon_search:{ip}:{today}"
+
+def _anon_searches_today(ip: str) -> set:
+    key = _anon_search_key(ip)
+    if _kv:
+        try:
+            raw = _kv.get(key)
+            if raw:
+                return set(_json_top.loads(raw))
+        except Exception:
+            pass
+    return set(_ANON_SEARCH_MEM.get(key, []))
+
+def _record_anon_search(ip: str, ticker: str) -> None:
+    key = _anon_search_key(ip)
+    seen = _anon_searches_today(ip)
+    seen.add(ticker)
+    # Expire at midnight ET so the counter resets daily.
+    et_now = _et_now()
+    midnight = (et_now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    ttl = max(int((midnight - et_now).total_seconds()), 60)
+    if _kv:
+        try:
+            _kv.setex(key, ttl, _json_top.dumps(sorted(seen)))
+            return
+        except Exception:
+            pass
+    _ANON_SEARCH_MEM[key] = list(seen)
+
+def _check_anon_search_limit(req, ticker: str):
+    """Returns None to allow, or (response, status) tuple to block."""
+    if session.get("user"):
+        return None
+    ip = _client_ip(req)
+    seen = _anon_searches_today(ip)
+    if ticker in seen:
+        return None  # already counted today, allow re-fetch
+    if len(seen) >= ANON_SEARCH_LIMIT:
+        return (jsonify({
+            "error":   "search_limit_anon",
+            "limit":   ANON_SEARCH_LIMIT,
+            "used":    len(seen),
+            "message": f"You've used your {ANON_SEARCH_LIMIT} free searches today. "
+                       "Sign in for 10 free searches per day plus portfolio tracking.",
+        }), 429)
+    _record_anon_search(ip, ticker)
+    return None
+
 
 def _is_market_hours() -> bool:
     now_et = _et_now()
@@ -6213,6 +6278,11 @@ def analyze():
     ticker = request.args.get("ticker", "").strip().upper()
     if not ticker:
         return jsonify({"error": "Ticker is required"}), 400
+
+    # Anonymous-user daily search gate (3/day per IP). Signed-in users skip.
+    gate = _check_anon_search_limit(request, ticker)
+    if gate is not None:
+        return gate
 
     # Cache lookup
     _ck = _analyze_cache_key(ticker, dict(request.args))
