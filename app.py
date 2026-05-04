@@ -494,18 +494,44 @@ def _claude_interpret_headline(ticker, sector, title, summary):
 
     try:
         prompt = (
-            "You are a buyside equity analyst.  Score the impact of this "
-            "headline on the company's intrinsic value.\n\n"
+            "You are a buyside equity analyst trained in Peter Lynch's method "
+            "from One Up On Wall Street.  Read this headline through Lynch's lens.\n\n"
+            "LYNCH'S SIX CATEGORIES (classify the company first):\n"
+            "  slowGrower  — large, mature, low single-digit growth, bought for dividend.\n"
+            "  stalwart    — multibillion-dollar, 10–12% earnings growth, recession-resilient (KO, PG).\n"
+            "                Realistic upside: 30–50% over 1–2 years; not a tenbagger.\n"
+            "  fastGrower  — small/aggressive, 20–25%+ growth, room to expand.  Tenbagger territory.\n"
+            "                Risk: outgrowing the industry or running out of runway.\n"
+            "  cyclical    — earnings rise/fall with macro (autos, airlines, steel, chemicals).\n"
+            "                Timing is everything; can lose 80% in a downturn.\n"
+            "  turnaround  — battered/near-bankruptcy companies that may rebound (Chrysler-style).\n"
+            "  assetPlay   — hidden assets (real estate, cash, brand) not reflected in price.\n\n"
+            "LYNCH'S CHECKLIST (weight headlines by what matters per category):\n"
+            "  • P/E vs growth (PEG): low PEG = bullish, high = bearish.\n"
+            "  • Insider buying / company buybacks = strong positive.\n"
+            "  • Low institutional ownership = positive (room to be discovered).\n"
+            "  • Strong balance sheet (low debt/equity, net cash) = resilience.\n"
+            "  • Consistent earnings > sporadic earnings.\n"
+            "  • For stalwarts: dividend safety, payout ratio.\n"
+            "  • For fast growers: replicable concept, room to expand, earnings durability.\n"
+            "  • For cyclicals: where in the cycle (top = bearish even on good news).\n"
+            "  • For turnarounds: cash to survive, debt structure, plan credibility.\n\n"
+            "LYNCH'S RED FLAGS (treat as bearish even if news sounds positive):\n"
+            "  • Hot stock in a hot industry with no earnings.\n"
+            "  • 'The next [Microsoft/Tesla]' framing.\n"
+            "  • Diworsification — acquisitions outside core competence.\n"
+            "  • Whisper stocks, hyped 'sure things,' takeover speculation as the thesis.\n"
+            "  • Heavy debt taken on to fund growth or acquisitions.\n\n"
             f"Ticker: {ticker}\nSector: {sector or '?'}\n"
             f"Headline: {title}\n"
             f"Summary: {(summary or '')[:400]}\n\n"
             "Return ONLY a single-line JSON object with keys:\n"
-            "  score: -1.0 to +1.0 (negative = bearish, positive = bullish, 0 = neutral)\n"
+            "  category: one of \"slowGrower\", \"stalwart\", \"fastGrower\", \"cyclical\", \"turnaround\", \"assetPlay\"\n"
+            "  score: -1.0 to +1.0 (Lynch-weighted: a 'strong earnings beat' is huge for a stalwart, modest for a fast grower)\n"
             "  durability: one of \"oneTime\", \"stage1\", \"terminal\"\n"
             "  confidence: one of \"low\", \"med\", \"high\"\n"
-            "  reason: under 60 characters\n"
-            "If the headline is generic press-release filler or unrelated, "
-            "return score=0 and confidence=low."
+            "  reason: under 60 characters, Lynch-flavored (e.g. 'PEG <1, insider buying' or 'cyclical near peak')\n"
+            "If the headline is press-release filler, hot-stock hype, or unrelated, return score near 0 and confidence=low."
         )
         body = {
             "model":      "claude-haiku-4-5-20251001",
@@ -536,7 +562,11 @@ def _claude_interpret_headline(ticker, sector, title, summary):
             return None
         parsed = _json_loads.loads(m.group(0))
         # Normalize + clamp
+        _VALID_CATEGORIES = {"slowGrower", "stalwart", "fastGrower",
+                             "cyclical", "turnaround", "assetPlay"}
+        cat = str(parsed.get("category", ""))
         result = {
+            "category":   cat if cat in _VALID_CATEGORIES else None,
             "score":      max(-1.0, min(1.0, float(parsed.get("score", 0.0)))),
             "durability": str(parsed.get("durability", "oneTime")),
             "confidence": str(parsed.get("confidence", "low")),
@@ -632,6 +662,9 @@ def _score_headline(title: str, summary: str, ticker: str, sector: str, industry
     # into structured signal instead of dropping them on the floor.
     claude_used = False
     claude_reason = None
+    claude_overrode = False
+    claude_category = None
+    # Path 1 — ambiguous band: heuristic gave nothing useful, let Claude decide.
     if -0.2 <= score <= 0.2 and not matched:
         ai = _claude_interpret_headline(ticker, sector, title, summary)
         if ai is not None:
@@ -642,7 +675,28 @@ def _score_headline(title: str, summary: str, ticker: str, sector: str, industry
                 is_transformative = True
             claude_used = True
             claude_reason = ai.get("reason")
+            claude_category = ai.get("category")
             matched.append("claude")
+    # Path 2 — high-stakes second opinion: heuristic is confidently strong on a
+    # durable tag; ask Claude to sanity-check.  Only override if Claude returns
+    # high-confidence opposite sign — catches false positives like "Tesla recalls
+    # 2 vehicles" being scored as a major risk.
+    elif abs(score) >= 0.5 and durability in ("stage1", "terminal"):
+        ai = _claude_interpret_headline(ticker, sector, title, summary)
+        if ai is not None:
+            claude_category = ai.get("category")
+            if ai.get("confidence") == "high":
+                ai_score = ai["score"]
+                # Opposite sign with meaningful magnitude → override
+                if (score > 0 and ai_score < -0.3) or (score < 0 and ai_score > 0.3):
+                    score = ai_score
+                    if ai.get("durability") in ("stage1", "terminal", "oneTime"):
+                        durability = ai["durability"]
+                    is_transformative = (score > 0.4 and durability == "stage1")
+                    claude_overrode = True
+                    claude_reason = ai.get("reason")
+                    matched.append("claude_override")
+                claude_used = True
 
     return {
         "score":             round(score, 3),
@@ -650,7 +704,9 @@ def _score_headline(title: str, summary: str, ticker: str, sector: str, industry
         "is_transformative": is_transformative,
         "matched":           matched,
         "claude_used":       claude_used,
+        "claude_overrode":   claude_overrode,
         "claude_reason":     claude_reason,
+        "claude_category":   claude_category,
     }
 
 

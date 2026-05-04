@@ -2583,7 +2583,7 @@ table.dt tfoot td { font-weight: 600; color: var(--ink-primary); border-top: 1px
 .dcf-chart-footer span strong { color: var(--ink-primary); font-weight: 600; }
 
 /* ── Custom DCF assumptions card (live sliders) ─────────────────────── */
-.custom-dcf { padding: var(--space-5) var(--space-6); }
+.custom-dcf { padding: var(--space-5) var(--space-6); overflow: visible; }
 .copy-btn--small {
   font-size: 11px; padding: 5px 10px;
 }
