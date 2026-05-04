@@ -4817,6 +4817,11 @@ def how_it_works():
     return render_template("how_it_works.html")
 
 
+@app.route("/privacy")
+def privacy():
+    return render_template("privacy.html")
+
+
 @app.route("/methodology")
 def methodology():
     return render_template("methodology.html")

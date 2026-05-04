@@ -3459,6 +3459,11 @@ function setupAuthControl() {
     if (menu) menu.classList.add("hidden");
     window.location.href = "/docs";
   };
+  const privacyBtn = $("authPrivacyBtn");
+  if (privacyBtn) privacyBtn.onclick = () => {
+    if (menu) menu.classList.add("hidden");
+    window.location.href = "/privacy";
+  };
   const settingsBtn = $("authSettingsBtn");
   if (settingsBtn) settingsBtn.onclick = () => {
     if (menu) menu.classList.add("hidden");
