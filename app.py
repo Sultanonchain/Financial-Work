@@ -4999,7 +4999,15 @@ def robots_txt():
         "User-agent: CCBot\nDisallow: /\n\n"
         "User-agent: anthropic-ai\nDisallow: /\n\n"
         "User-agent: PerplexityBot\nDisallow: /\n\n"
-        "User-agent: *\nAllow: /\n\n"
+        "User-agent: Bytespider\nDisallow: /\n\n"
+        "User-agent: Amazonbot\nDisallow: /\n\n"
+        "User-agent: Applebot-Extended\nDisallow: /\n\n"
+        # Default: humans + general search engines welcome, but keep them
+        # out of the JSON APIs so crawler indexing doesn't burn analyze
+        # cycles or duplicate Anthropic/yfinance traffic.
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Disallow: /api/\n\n"
         f"Sitemap: {base}/sitemap.xml\n"
     )
     return app.response_class(body, mimetype="text/plain")
@@ -8342,28 +8350,49 @@ def analyze():
         # ── Per-ticker Lynch Verdict via Claude Haiku ─────────────────────────
         # Always best-effort: a Haiku outage must NEVER break the valuation.
         # Built from data already on hand (no extra yfinance calls).
+        #
+        # Token-burn protection — skip the Haiku call entirely when the request
+        # looks like a scraper / AI agent / headless tool.  Real browsers send
+        # standard "Mozilla/..." User-Agents; bots commonly send curl, python-
+        # requests, Go-http-client, scrapy, bot/crawler/spider strings, or no
+        # UA at all.  The rest of /api/analyze still works for them — they
+        # just don't get a free Lynch verdict that would burn API credits.
+        _ua = (request.headers.get("User-Agent") or "").lower()
+        _BOT_UA_SUBSTR = (
+            "bot", "crawl", "spider", "scrape", "curl", "wget",
+            "python-requests", "python-urllib", "httpx", "aiohttp",
+            "go-http-client", "java/", "okhttp", "axios", "node-fetch",
+            "headless", "phantomjs", "puppeteer", "playwright",
+            "gptbot", "claude-web", "anthropic-ai", "perplexitybot",
+            "ccbot", "googleother", "bytespider",
+        )
+        _ua_is_bot = (not _ua) or any(s in _ua for s in _BOT_UA_SUBSTR)
+        # Internal warmup hits set X-Valus-Internal so the discovery cache
+        # still gets primed — those are safe and rate-limited at the source.
+        _is_internal = bool(request.headers.get("X-Valus-Internal"))
         lynch_verdict = None
-        try:
-            _qm_for_lynch = _build_quality_metrics(info, base_fcf, rev_ttm)
-            lynch_verdict = _claude_lynch_verdict(
-                ticker                 = ticker,
-                sector                 = sector,
-                industry               = industry,
-                price                  = price,
-                iv                     = intrinsic_value,
-                mos                    = margin_of_safety,
-                implied_growth_pct     = implied_growth_pct,
-                model_growth_pct       = round(s1 * 100, 1) if s1 is not None else None,
-                quality_metrics        = _qm_for_lynch,
-                risk_labels            = risk_labels,
-                catalyst_labels        = catalyst_labels,
-                confidence_weaknesses  = dcf_conf_warnings,
-                iv_confidence          = iv_confidence,
-                strategic_info         = strategic,
-                priced_for_label       = (priced_for or {}).get("label") if priced_for else None,
-            )
-        except Exception:
-            lynch_verdict = None
+        if not (_ua_is_bot and not _is_internal):
+            try:
+                _qm_for_lynch = _build_quality_metrics(info, base_fcf, rev_ttm)
+                lynch_verdict = _claude_lynch_verdict(
+                    ticker                 = ticker,
+                    sector                 = sector,
+                    industry               = industry,
+                    price                  = price,
+                    iv                     = intrinsic_value,
+                    mos                    = margin_of_safety,
+                    implied_growth_pct     = implied_growth_pct,
+                    model_growth_pct       = round(s1 * 100, 1) if s1 is not None else None,
+                    quality_metrics        = _qm_for_lynch,
+                    risk_labels            = risk_labels,
+                    catalyst_labels        = catalyst_labels,
+                    confidence_weaknesses  = dcf_conf_warnings,
+                    iv_confidence          = iv_confidence,
+                    strategic_info         = strategic,
+                    priced_for_label       = (priced_for or {}).get("label") if priced_for else None,
+                )
+            except Exception:
+                lynch_verdict = None
 
         # ── Methodology Steps (for the new "How VALUS calculated this" panel)
         # Each step is a row showing the actual numbers used for THIS stock.
