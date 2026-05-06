@@ -944,7 +944,30 @@
       </div>
     </section>
 
-    <!-- INSIGHTS GRID: quality scorecard + insider activity + news summary -->
+    <!-- LYNCH LENS: per-ticker Haiku verdict (full-width, hero-adjacent) -->
+    <section class="lynch-card card hidden" id="lynchCard">
+      <div class="lynch-head">
+        <div class="lynch-title">Lynch Lens <span class="lynch-badge">Haiku</span></div>
+        <div class="lynch-pill-row">
+          <span class="lynch-cat" id="lynchCategory"></span>
+          <span class="lynch-verdict" id="lynchVerdict"></span>
+        </div>
+      </div>
+      <div class="lynch-thesis" id="lynchThesis"></div>
+      <div class="lynch-cols">
+        <div class="lynch-col lynch-col--bull">
+          <div class="lynch-col__hd">Bull case</div>
+          <ul class="lynch-list" id="lynchBulls"></ul>
+        </div>
+        <div class="lynch-col lynch-col--bear">
+          <div class="lynch-col__hd">Bear case</div>
+          <ul class="lynch-list" id="lynchBears"></ul>
+        </div>
+      </div>
+      <div class="lynch-backstop hidden" id="lynchBackstop"></div>
+    </section>
+
+    <!-- INSIGHTS GRID: quality scorecard + risk + insider + congress + news -->
     <section class="insights-grid hidden" id="insightsGrid">
       <div class="card insights-card" id="qualityCard" hidden>
         <div class="ic-head">
@@ -953,6 +976,15 @@
         </div>
         <div class="quality-grid" id="qualityGrid"></div>
       </div>
+      <div class="card insights-card" id="riskCard" hidden>
+        <div class="ic-head">
+          <div class="ic-title">Risk analysis</div>
+          <div class="ic-sub" id="riskSub">Confidence, leverage, policy &amp; news flags</div>
+        </div>
+        <div class="risk-summary" id="riskSummary"></div>
+        <div class="risk-chips" id="riskChips"></div>
+        <ul class="risk-bullets" id="riskBullets"></ul>
+      </div>
       <div class="card insights-card" id="insiderCard" hidden>
         <div class="ic-head">
           <div class="ic-title">Insider activity (90d)</div>
@@ -960,6 +992,14 @@
         </div>
         <div class="insider-summary" id="insiderSummary"></div>
         <div class="insider-list" id="insiderList"></div>
+      </div>
+      <div class="card insights-card" id="congressCard" hidden>
+        <div class="ic-head">
+          <div class="ic-title">Congressional trades (180d)</div>
+          <div class="ic-sub" id="congressSub">STOCK Act PTRs — House + Senate</div>
+        </div>
+        <div class="insider-summary" id="congressSummary"></div>
+        <div class="insider-list" id="congressList"></div>
       </div>
       <div class="card insights-card" id="newsSummaryCard" hidden>
         <div class="ic-head">

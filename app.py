@@ -599,6 +599,211 @@ def _claude_interpret_headline(ticker, sector, title, summary):
         return None
 
 
+# ── Per-ticker Claude Haiku Lynch Verdict ───────────────────────────────────
+# Whereas _claude_interpret_headline() runs only on ambiguous individual
+# headlines, this runs once per ticker on the assembled valuation snapshot
+# (price, IV, MOS, quality metrics, risk labels, strategic-asset profile).
+# It returns a Peter-Lynch-style verdict the UI surfaces just under the hero.
+# Strategic-asset narrative is fed in explicitly so Haiku does NOT issue a
+# distress verdict on a CHIPS-Act semi or a defense prime just because near-
+# term FCF is weak — the sovereign backstop is part of the thesis.
+_LYNCH_CACHE = {}
+_LYNCH_CACHE_TTL = 24 * 3600   # 24h — verdict only changes when price moves
+
+
+def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
+                          implied_growth_pct, model_growth_pct,
+                          quality_metrics, risk_labels, catalyst_labels,
+                          confidence_weaknesses, iv_confidence,
+                          strategic_info, priced_for_label):
+    """
+    Per-ticker Lynch-flavored verdict via Claude Haiku.
+    Returns dict or None on failure / no API key.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key or not ticker:
+        return None
+
+    # Cache bucket — re-key every $1 of price movement and every 1pp of MOS
+    # so a 5-minute reload doesn't re-bill, but a real intraday move does.
+    try:
+        bucket = (
+            ticker.upper(),
+            int(round(float(price or 0.0))),
+            int(round(float(mos or 0.0))),
+        )
+    except Exception:
+        bucket = (ticker.upper(), 0, 0)
+    cached = _LYNCH_CACHE.get(bucket)
+    if cached and (time.time() - cached[0]) < _LYNCH_CACHE_TTL:
+        return cached[1]
+    redis_key = f"valus:lynch:{bucket[0]}:{bucket[1]}:{bucket[2]}"
+    if _kv:
+        try:
+            raw = _kv.get(redis_key)
+            if raw:
+                parsed = _json_top.loads(raw)
+                _LYNCH_CACHE[bucket] = (time.time(), parsed)
+                return parsed
+        except Exception:
+            pass
+
+    # Compact the inputs so the prompt stays small — Haiku is cheap but the
+    # Anthropic JSON-mode parser is more reliable on focused context.
+    qm_lines = []
+    for m in (quality_metrics or [])[:6]:
+        try:
+            label = m.get("label") or m.get("key") or ""
+            tier  = m.get("tier") or "?"
+            if m.get("value_pct") is not None:
+                qm_lines.append(f"  • {label}: {m['value_pct']:.1f}% ({tier})")
+            elif m.get("value_ratio") is not None:
+                qm_lines.append(f"  • {label}: {m['value_ratio']:.2f}x ({tier})")
+            elif m.get("value") is not None:
+                qm_lines.append(f"  • {label}: {m['value']} ({tier})")
+        except Exception:
+            continue
+    qm_block = "\n".join(qm_lines) or "  • (no quality metrics available)"
+
+    risks_block     = "; ".join((risk_labels or [])[:4])      or "(none flagged)"
+    catalysts_block = "; ".join((catalyst_labels or [])[:4])  or "(none flagged)"
+    weak_block      = "; ".join((confidence_weaknesses or [])[:4]) or "(none)"
+
+    if strategic_info and strategic_info.get("is_strategic"):
+        strat_block = (
+            f"YES — {strategic_info.get('strategic_label')}\n"
+            f"  Reason: {strategic_info.get('strategic_reason')}\n"
+            f"  Sovereign capital backstop applies (e.g. CHIPS Act grants, defense\n"
+            f"  prime sole-source contracts, energy-sovereignty PPAs).  Treat near-\n"
+            f"  term FCF weakness as transitory; do NOT issue an Avoid verdict on\n"
+            f"  weak fundamentals alone — the floor is real.  Step the verdict\n"
+            f"  down at most one notch and explain the backstop in the thesis."
+        )
+    else:
+        strat_block = "NO sovereign backstop on file."
+
+    try:
+        prompt = (
+            "You are a buyside equity analyst trained in Peter Lynch's method "
+            "from One Up On Wall Street.  You're issuing a one-line verdict on "
+            "this stock based on the snapshot below.\n\n"
+            "LYNCH'S SIX CATEGORIES — pick the one that fits best:\n"
+            "  slowGrower  — large, mature, low single-digit growth, dividend.\n"
+            "  stalwart    — multibillion, 10–12% growth, recession-resilient.\n"
+            "  fastGrower  — small/aggressive 20%+ growth, tenbagger territory.\n"
+            "  cyclical    — earnings rise/fall with macro (autos, airlines, semis).\n"
+            "  turnaround  — battered names that may rebound.\n"
+            "  assetPlay   — hidden assets (real estate, cash, brand) understated.\n\n"
+            "LYNCH'S PRINCIPLES (apply when scoring):\n"
+            "  • PEG < 1 + clean balance sheet = strong buy signal.\n"
+            "  • Insider buying / buybacks > 1 quarter = positive.\n"
+            "  • Diworsification, hot-stock hype, debt-funded growth = red flag.\n"
+            "  • Cyclicals near peak earnings = sell EVEN on good headlines.\n"
+            "  • Stalwarts realistically deliver 30–50% over 1–2 years, not 10x.\n"
+            "  • Turnarounds need cash to survive AND a credible plan.\n\n"
+            "STRATEGIC BACKSTOP RULE (critical):\n"
+            f"{strat_block}\n\n"
+            "SNAPSHOT:\n"
+            f"  Ticker: {ticker}\n"
+            f"  Sector / Industry: {sector or '?'} / {industry or '?'}\n"
+        )
+        # Build the rest of the snapshot block
+        snap_extra = (f"  Price: ${price:.2f}\n" if price else "  Price: n/a\n")
+        snap_extra += (f"  VALUS Intrinsic Value: ${iv:.2f}\n" if iv else "  VALUS IV: n/a\n")
+        if mos is not None:
+            snap_extra += f"  Margin of Safety: {mos:+.1f}%\n"
+        if implied_growth_pct is not None:
+            snap_extra += f"  Market-implied growth: {implied_growth_pct:.1f}%/yr\n"
+        if model_growth_pct is not None:
+            snap_extra += f"  VALUS modeled growth: {model_growth_pct:.1f}%/yr\n"
+        if priced_for_label:
+            snap_extra += f"  VALUS verdict tier: {priced_for_label}\n"
+        snap_extra += f"  IV confidence: {iv_confidence or 'n/a'}\n"
+        snap_extra += f"  Quality scorecard:\n{qm_block}\n"
+        snap_extra += f"  Catalyst headlines: {catalysts_block}\n"
+        snap_extra += f"  Risk headlines: {risks_block}\n"
+        snap_extra += f"  Confidence weaknesses: {weak_block}\n\n"
+
+        instructions = (
+            "Return ONLY a single-line JSON object with these keys (no prose):\n"
+            "  category: one of slowGrower|stalwart|fastGrower|cyclical|turnaround|assetPlay\n"
+            "  verdict:  one of Buy|Accumulate|Hold|Watch|Avoid\n"
+            "  thesis:   <= 220 chars, plain English, Lynch-flavored\n"
+            "  bull_points: array of 2-3 strings (each <= 70 chars)\n"
+            "  bear_points: array of 2-3 strings (each <= 70 chars)\n"
+            "  sovereign_backstop: short string if a strategic backstop applies, else null\n"
+            "Be honest.  If numbers are weak AND no backstop applies, say Avoid.  "
+            "If a backstop applies, soften by one notch and explain why.\n"
+        )
+        full_prompt = prompt + snap_extra + instructions
+
+        body = {
+            "model":      "claude-haiku-4-5-20251001",
+            "max_tokens": 500,
+            "messages":   [{"role": "user", "content": full_prompt}],
+        }
+        resp = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key":         api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type":      "application/json",
+            },
+            json=body, timeout=10,
+        )
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        txt = ""
+        for block in data.get("content", []):
+            if block.get("type") == "text":
+                txt += block.get("text", "")
+        # Match the outermost JSON object — Haiku occasionally wraps in prose
+        m = re.search(r"\{.*\}", txt, re.DOTALL)
+        if not m:
+            return None
+        import json as _json_loads
+        parsed = _json_loads.loads(m.group(0))
+
+        _VALID_CATS = {"slowGrower", "stalwart", "fastGrower",
+                       "cyclical", "turnaround", "assetPlay"}
+        _VALID_VERDICTS = {"Buy", "Accumulate", "Hold", "Watch", "Avoid"}
+        cat = str(parsed.get("category", "")).strip()
+        verdict = str(parsed.get("verdict", "")).strip()
+
+        def _coerce_str_list(v, max_n=3, max_chars=70):
+            if not isinstance(v, list):
+                return []
+            out = []
+            for item in v[:max_n]:
+                s = str(item).strip()
+                if s:
+                    out.append(s[:max_chars])
+            return out
+
+        sb = parsed.get("sovereign_backstop")
+        sb_str = (str(sb).strip()[:120] if sb else None) or None
+
+        result = {
+            "category":           cat if cat in _VALID_CATS else None,
+            "verdict":            verdict if verdict in _VALID_VERDICTS else "Hold",
+            "thesis":             str(parsed.get("thesis", ""))[:240],
+            "bull_points":        _coerce_str_list(parsed.get("bull_points")),
+            "bear_points":        _coerce_str_list(parsed.get("bear_points")),
+            "sovereign_backstop": sb_str,
+            "model":              "claude-haiku-4-5-20251001",
+        }
+        _LYNCH_CACHE[bucket] = (time.time(), result)
+        if _kv:
+            try:
+                _kv.setex(redis_key, _LYNCH_CACHE_TTL, _json_top.dumps(result))
+            except Exception:
+                pass
+        return result
+    except Exception:
+        return None
+
+
 def _score_headline(title: str, summary: str, ticker: str, sector: str, industry: str):
     """
     Returns dict { score, durability, is_transformative, matched }.
@@ -5289,6 +5494,167 @@ def api_insider():
     return jsonify(payload)
 
 
+# ── Congressional STOCK Act Trades (House + Senate PTRs) ──────────────────────
+# Members of Congress disclose stock + option trades under the STOCK Act on
+# House Clerk / Senate eFD portals (Periodic Transaction Reports).  Free
+# JSON mirrors are maintained by the community ("stock-watcher") and are
+# the same data sources Quiver Quantitative et al. ingest.  Cached 6h in
+# Redis; if both feeds are unreachable the endpoint returns
+# {available: false} rather than 500.
+_CONGRESS_FEED_CACHE = {}                # {chamber: (ts, list[dict])}
+_CONGRESS_FEED_TTL   = 6 * 3600
+_CONGRESS_HOUSE_URL  = os.environ.get(
+    "STOCK_WATCHER_HOUSE_URL",
+    "https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json",
+)
+_CONGRESS_SENATE_URL = os.environ.get(
+    "STOCK_WATCHER_SENATE_URL",
+    "https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/aggregate/all_transactions.json",
+)
+
+
+def _fetch_congress_feed(chamber: str):
+    """Fetch + cache the chamber-wide JSON feed; returns list (possibly empty)."""
+    cached = _CONGRESS_FEED_CACHE.get(chamber)
+    if cached and (time.time() - cached[0]) < _CONGRESS_FEED_TTL:
+        return cached[1]
+    url = _CONGRESS_HOUSE_URL if chamber == "house" else _CONGRESS_SENATE_URL
+    redis_key = f"valus:congress:{chamber}"
+    if _kv:
+        try:
+            raw = _kv.get(redis_key)
+            if raw:
+                data = _json_top.loads(raw)
+                _CONGRESS_FEED_CACHE[chamber] = (time.time(), data)
+                return data
+        except Exception:
+            pass
+    try:
+        r = requests.get(url, timeout=15, headers={"User-Agent": _SEC_UA})
+        if r.status_code != 200:
+            _CONGRESS_FEED_CACHE[chamber] = (time.time(), [])
+            return []
+        data = r.json()
+        if not isinstance(data, list):
+            data = []
+        _CONGRESS_FEED_CACHE[chamber] = (time.time(), data)
+        if _kv:
+            try:
+                # Cap stored payload to avoid blowing past Upstash free-tier limits;
+                # 5000 most recent rows are plenty to cover any single ticker.
+                trimmed = data[-5000:] if len(data) > 5000 else data
+                _kv.setex(redis_key, _CONGRESS_FEED_TTL, _json_top.dumps(trimmed))
+            except Exception:
+                pass
+        return data
+    except Exception:
+        _CONGRESS_FEED_CACHE[chamber] = (time.time(), [])
+        return []
+
+
+def _normalize_congress_row(row, chamber):
+    """Map a stock-watcher row into our common shape; returns None on bad input."""
+    try:
+        tkr = (row.get("ticker") or row.get("Ticker") or "").upper().strip()
+        if not tkr or tkr in ("--", "N/A"):
+            return None
+        # Date keys differ slightly between House and Senate feeds
+        d_str = (row.get("transaction_date")
+                 or row.get("date")
+                 or row.get("disclosure_date")
+                 or "")
+        try:
+            d = datetime.fromisoformat(d_str[:10]).date()
+        except Exception:
+            try:
+                d = datetime.strptime(d_str[:10], "%m/%d/%Y").date()
+            except Exception:
+                return None
+        member = (row.get("representative")
+                  or row.get("senator")
+                  or row.get("member")
+                  or "Unknown")
+        ttype = (row.get("type") or row.get("transaction_type") or "").lower()
+        if "purchase" in ttype or ttype == "buy":
+            tx = "buy"
+        elif "sale" in ttype or ttype == "sell":
+            tx = "sell"
+        else:
+            tx = ttype or "other"
+        amount = row.get("amount") or row.get("amount_range") or row.get("range") or ""
+        return {
+            "ticker":  tkr,
+            "date":    d.isoformat(),
+            "member":  member,
+            "chamber": chamber,
+            "type":    tx,
+            "amount":  str(amount)[:60],
+        }
+    except Exception:
+        return None
+
+
+def _fetch_congress_trades(ticker: str, days: int = 180, max_items: int = 10):
+    """
+    Returns dict:
+      {
+        items: [{date, member, chamber, type, amount}],
+        buys: int, sells: int, members: int,
+        as_of: iso,
+      }
+    or None if both feeds are unavailable / no matching trades.
+    """
+    if not ticker:
+        return None
+    t = ticker.upper().strip()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).date()
+    rows = []
+    for chamber in ("house", "senate"):
+        feed = _fetch_congress_feed(chamber)
+        for r in feed or []:
+            norm = _normalize_congress_row(r, chamber)
+            if not norm:
+                continue
+            if norm["ticker"] != t:
+                continue
+            try:
+                if datetime.fromisoformat(norm["date"]).date() < cutoff:
+                    continue
+            except Exception:
+                continue
+            rows.append(norm)
+    if not rows:
+        return None
+    rows.sort(key=lambda x: x["date"], reverse=True)
+    buys  = sum(1 for r in rows if r["type"] == "buy")
+    sells = sum(1 for r in rows if r["type"] == "sell")
+    members = len({r["member"] for r in rows})
+    return {
+        "items":   rows[:max_items],
+        "buys":    buys,
+        "sells":   sells,
+        "members": members,
+        "filings": len(rows),
+        "as_of":   date.today().isoformat(),
+    }
+
+
+@app.route("/api/congress")
+@limiter.limit(limit_medium)
+def api_congress():
+    ticker = request.args.get("ticker", "").strip().upper()
+    if not ticker:
+        return jsonify({"error": "ticker required"}), 400
+    payload = _fetch_congress_trades(ticker)
+    if not payload:
+        return jsonify({
+            "available": False,
+            "reason": "No recent Congressional trades for this ticker (or feed unreachable).",
+        })
+    payload["available"] = True
+    return jsonify(payload)
+
+
 @app.route("/api/valuation-history")
 @limiter.limit(limit_medium)
 def valuation_history():
@@ -7973,6 +8339,32 @@ def analyze():
         except Exception:
             verdict_summary = None
 
+        # ── Per-ticker Lynch Verdict via Claude Haiku ─────────────────────────
+        # Always best-effort: a Haiku outage must NEVER break the valuation.
+        # Built from data already on hand (no extra yfinance calls).
+        lynch_verdict = None
+        try:
+            _qm_for_lynch = _build_quality_metrics(info, base_fcf, rev_ttm)
+            lynch_verdict = _claude_lynch_verdict(
+                ticker                 = ticker,
+                sector                 = sector,
+                industry               = industry,
+                price                  = price,
+                iv                     = intrinsic_value,
+                mos                    = margin_of_safety,
+                implied_growth_pct     = implied_growth_pct,
+                model_growth_pct       = round(s1 * 100, 1) if s1 is not None else None,
+                quality_metrics        = _qm_for_lynch,
+                risk_labels            = risk_labels,
+                catalyst_labels        = catalyst_labels,
+                confidence_weaknesses  = dcf_conf_warnings,
+                iv_confidence          = iv_confidence,
+                strategic_info         = strategic,
+                priced_for_label       = (priced_for or {}).get("label") if priced_for else None,
+            )
+        except Exception:
+            lynch_verdict = None
+
         # ── Methodology Steps (for the new "How VALUS calculated this" panel)
         # Each step is a row showing the actual numbers used for THIS stock.
         # Steps that didn't fire are emitted as `active: False` so the UI can
@@ -8444,6 +8836,10 @@ def analyze():
             "fifty_two_week_high":       safe(info.get("fiftyTwoWeekHigh")),
             "fifty_two_week_low":        safe(info.get("fiftyTwoWeekLow")),
             "quality_metrics": _build_quality_metrics(info, base_fcf, rev_ttm),
+            # ── Per-ticker Haiku Lynch verdict (Buy/Hold/Avoid + thesis) ──
+            # Generated once per ticker from the assembled snapshot above.
+            # Null when ANTHROPIC_API_KEY is unset or Claude is unreachable.
+            "lynch_verdict":             lynch_verdict,
         }
 
         cleaned = clean(result)

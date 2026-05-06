@@ -249,11 +249,14 @@ function renderResults(d) {
   }
 
   renderHeroVerdict(d);
+  renderHaikuVerdict(d);
   renderMethodology(d);
   renderScenarios(d);
   renderMiniStats(d);
   renderQualityCard(d);
+  renderRiskCard(d);
   renderInsiderCard(d.ticker);
+  renderCongressCard(d.ticker);
   renderNewsSummaryCard(d);
   renderDrawerContent(d);
   syncAddPortfolioButtonForCurrent();
@@ -1313,6 +1316,171 @@ function destroyValuationHistoryChart() {
 // ── Quality scorecard ────────────────────────────────────────────────────
 // Server emits an array of metrics with {label, value_pct|value_ratio, tier}.
 // Tier ∈ {weak, ok, strong, elite} drives colour.
+// ── Per-ticker Haiku Lynch Verdict ───────────────────────────────────────
+// Renders d.lynch_verdict (set by /api/analyze when ANTHROPIC_API_KEY is
+// configured server-side).  Hidden entirely when null so the page degrades
+// gracefully on free deployments without an API key.
+function renderHaikuVerdict(d) {
+  const card = document.getElementById("lynchCard");
+  if (!card) return;
+  const lv = d && d.lynch_verdict;
+  if (!lv || (!lv.thesis && !lv.bull_points && !lv.bear_points)) {
+    card.classList.add("hidden");
+    return;
+  }
+  const catLabel = {
+    slowGrower:  "Slow Grower",
+    stalwart:    "Stalwart",
+    fastGrower:  "Fast Grower",
+    cyclical:    "Cyclical",
+    turnaround:  "Turnaround",
+    assetPlay:   "Asset Play",
+  }[lv.category] || (lv.category || "Lynch");
+
+  // Map verdict to existing tier-color CSS so it matches the hero theme.
+  const verdictClass = ({
+    Buy:        "tier-positive",
+    Accumulate: "tier-positive",
+    Hold:       "tier-info",
+    Watch:      "tier-warning",
+    Avoid:      "tier-negative",
+  })[lv.verdict] || "tier-info";
+
+  const cat  = document.getElementById("lynchCategory");
+  const verd = document.getElementById("lynchVerdict");
+  const thes = document.getElementById("lynchThesis");
+  const bulls = document.getElementById("lynchBulls");
+  const bears = document.getElementById("lynchBears");
+  const back  = document.getElementById("lynchBackstop");
+  if (cat)  cat.textContent  = catLabel;
+  if (verd) {
+    verd.textContent = lv.verdict || "Hold";
+    verd.className   = "lynch-verdict " + verdictClass;
+  }
+  if (thes) thes.textContent = lv.thesis || "";
+  if (bulls) bulls.innerHTML = (lv.bull_points || [])
+    .map(p => `<li>${escHtml(p)}</li>`).join("");
+  if (bears) bears.innerHTML = (lv.bear_points || [])
+    .map(p => `<li>${escHtml(p)}</li>`).join("");
+  if (back) {
+    if (lv.sovereign_backstop) {
+      back.textContent = "Sovereign backstop: " + lv.sovereign_backstop;
+      back.classList.remove("hidden");
+    } else {
+      back.classList.add("hidden");
+    }
+  }
+  card.classList.remove("hidden");
+}
+
+// ── Risk analysis card ──────────────────────────────────────────────────
+// Surfaces the risk signals already computed server-side: IV confidence,
+// risk_labels, policy headwinds/tailwinds, dcf_confidence_warnings, and the
+// WACC risk surcharge flag.  Empty-state shows a single clean-read line.
+function renderRiskCard(d) {
+  const card     = document.getElementById("riskCard");
+  const summary  = document.getElementById("riskSummary");
+  const chips    = document.getElementById("riskChips");
+  const bullets  = document.getElementById("riskBullets");
+  const insightsGrid = document.getElementById("insightsGrid");
+  if (!card || !summary || !chips || !bullets) return;
+
+  const conf  = (d.iv_confidence || "").toLowerCase();
+  const risks = (d.risk_labels || []).filter(Boolean);
+  const head  = (d.policy_headwind_labels || []).filter(Boolean);
+  const tail  = (d.policy_tailwind_labels || []).filter(Boolean);
+  const warns = (d.dcf_confidence_warnings || []).filter(Boolean);
+  const waccRisk = !!d.wacc_risk_applied;
+
+  const hasAnything = risks.length || head.length || warns.length || waccRisk
+    || (conf && conf !== "high");
+
+  if (!hasAnything) {
+    summary.innerHTML = `<span class="risk-pill risk-pill--clean">Clean read — no material risk flags</span>`;
+    chips.innerHTML = "";
+    bullets.innerHTML = "";
+    card.hidden = false;
+    if (insightsGrid) insightsGrid.classList.remove("hidden");
+    return;
+  }
+
+  // Confidence pill
+  const confTone = conf === "high" ? "clean"
+                 : conf === "moderate" || conf === "medium" ? "warn"
+                 : conf === "low" ? "neg" : "info";
+  const confLabel = conf ? `Confidence: ${conf}` : "Confidence: n/a";
+  const surchargePill = waccRisk
+    ? `<span class="risk-pill risk-pill--neg">WACC surcharge +100bp</span>`
+    : "";
+  summary.innerHTML =
+    `<span class="risk-pill risk-pill--${confTone}">${escHtml(confLabel)}</span>` +
+    surchargePill;
+
+  // Chips: red for risk + headwinds, green for tailwinds
+  const chipParts = [];
+  for (const r of risks)
+    chipParts.push(`<span class="risk-chip risk-chip--neg">${escHtml(r)}</span>`);
+  for (const h of head)
+    chipParts.push(`<span class="risk-chip risk-chip--neg">Policy headwind: ${escHtml(h)}</span>`);
+  for (const t of tail)
+    chipParts.push(`<span class="risk-chip risk-chip--pos">Tailwind: ${escHtml(t)}</span>`);
+  chips.innerHTML = chipParts.join("");
+
+  // Bullets from confidence warnings (leverage, FCF inconsistency, cyclical, etc.)
+  bullets.innerHTML = warns.slice(0, 5).map(w =>
+    `<li>${escHtml(w)}</li>`
+  ).join("");
+
+  card.hidden = false;
+  if (insightsGrid) insightsGrid.classList.remove("hidden");
+}
+
+// ── Congressional STOCK Act trades ───────────────────────────────────────
+// Fetches /api/congress?ticker=… separately so a slow community feed never
+// blocks the main analyze render.  Hides on no data.
+async function renderCongressCard(ticker) {
+  const card    = document.getElementById("congressCard");
+  const summary = document.getElementById("congressSummary");
+  const list    = document.getElementById("congressList");
+  const insightsGrid = document.getElementById("insightsGrid");
+  if (!card || !ticker) return;
+  card.hidden = true;
+  try {
+    const r = await fetch(`/api/congress?ticker=${encodeURIComponent(ticker)}`);
+    const j = await r.json();
+    if (!j.available || !Array.isArray(j.items) || j.items.length === 0) {
+      card.hidden = true;
+      return;
+    }
+    const buys  = j.buys  || 0;
+    const sells = j.sells || 0;
+    let tone = "quiet", pill = "Quiet";
+    if (buys + sells >= 5)        { tone = "active";   pill = "Active"; }
+    else if (buys + sells >= 2)   { tone = "moderate"; pill = "Moderate"; }
+    if (buys > sells * 2)         { pill = "Net buying"; tone = "active"; }
+    else if (sells > buys * 2)    { pill = "Net selling"; tone = "moderate"; }
+
+    summary.innerHTML =
+      `<span class="insider-pill insider-pill--${tone}">` +
+      `${j.filings} filing${j.filings === 1 ? "" : "s"} · ${j.members || "?"} member${(j.members||0) === 1 ? "" : "s"} · ${pill}</span>`;
+
+    list.innerHTML = j.items.slice(0, 6).map(it => {
+      const txClass = it.type === "buy" ? "pos" : it.type === "sell" ? "neg" : "info";
+      const chamberTag = (it.chamber || "").charAt(0).toUpperCase() + (it.chamber || "").slice(1);
+      return `
+        <div class="insider-row">
+          <span class="insider-row__date">${escHtml(it.date)}</span>
+          <span class="insider-row__name">${escHtml(it.member || "Unknown")}</span>
+          <span class="insider-row__role">${escHtml(chamberTag)} · <span class="risk-chip risk-chip--${txClass}">${escHtml(it.type)}</span> ${escHtml(it.amount || "")}</span>
+        </div>`;
+    }).join("");
+    card.hidden = false;
+    if (insightsGrid) insightsGrid.classList.remove("hidden");
+  } catch {
+    card.hidden = true;
+  }
+}
+
 function renderQualityCard(d) {
   const card = document.getElementById("qualityCard");
   const grid = document.getElementById("qualityGrid");
