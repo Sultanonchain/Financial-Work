@@ -8402,15 +8402,30 @@ def analyze():
                 net_debt=net_debt, shares_out=_shares_for_floor,
                 strategic=strategic,
             )
-            new_floor = None
-            if strategic_floor_payload and strategic_floor_payload.get("applied"):
-                new_floor = strategic_floor_payload["floor_iv"]
-            # Legacy price-multiple floor — only fires when the new
-            # subsidy/book floor didn't trigger AND there's a cheap_signal.
+            # IV becomes the MAX of: DCF, new subsidy/book/peer floor, AND
+            # the legacy price-multiple floor (which still gates on
+            # cheap_signal).  Taking max guarantees this commit can never
+            # *lower* IV vs. the pre-commit behavior — strategic floors
+            # only ever lift the number.
+            floor_candidates = [intrinsic_value]
+            if strategic_floor_payload and strategic_floor_payload.get("floor_iv"):
+                floor_candidates.append(strategic_floor_payload["floor_iv"])
             legacy_floor = price * strategic["iv_floor_mult"]
-            if (new_floor is None and intrinsic_value < legacy_floor
-                    and cheap_signal):
-                new_floor = legacy_floor
+            if intrinsic_value < legacy_floor and cheap_signal:
+                floor_candidates.append(legacy_floor)
+            new_floor = max(floor_candidates)
+            # Mirror the chosen floor into the breakdown payload so the UI
+            # always shows the legacy multiple when it's the winning method.
+            if (strategic_floor_payload is not None
+                    and new_floor > (strategic_floor_payload.get("floor_iv") or 0)):
+                strategic_floor_payload["floor_iv"] = round(new_floor, 2)
+                strategic_floor_payload["components"]["legacy_price_mult"] = round(legacy_floor, 2)
+                strategic_floor_payload["reasons"].append(
+                    f"Legacy price-multiple floor: ${legacy_floor:.2f} "
+                    f"(price ${price:.2f} × {strategic['iv_floor_mult']:.2f} — "
+                    f"protects against distress verdicts on cheap-multiple sovereign names)."
+                )
+                strategic_floor_payload["applied"] = new_floor > (intrinsic_value or 0)
             if new_floor is not None and new_floor > intrinsic_value:
                 _iv_pre = intrinsic_value
                 intrinsic_value = round(new_floor, 2)
