@@ -1675,6 +1675,23 @@ button { font-family: inherit; cursor: pointer; }
 .iv-scenario__icon { color: var(--ink-muted); font-size: 13px; }
 .iv-scenario__text strong { color: var(--ink-primary); font-weight: 600; }
 
+/* Strategic IV floor breakdown — sits between the IV value and the
+   tier badge when survival_floor lifted DCF. Shows the math transparently. */
+.iv-floor-breakdown {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px;
+  margin-top: 6px; padding: 8px 12px;
+  background: rgba(96,165,250,0.06);
+  border-left: 2px solid #60a5fa;
+  border-radius: 6px;
+  font-size: 11.5px; font-variant-numeric: tabular-nums;
+}
+.iv-floor-breakdown.hidden { display: none; }
+.iv-floor__lbl  { color: #8892a3; text-transform: uppercase; font-size: 10px; letter-spacing: 0.04em; }
+.iv-floor__val  { color: #d8dde6; font-weight: 600; }
+.iv-floor__sep  { color: #6b7382; }
+.iv-floor__val--floor { color: #fbbf24; }
+.iv-floor__val--used  { color: #34d399; font-weight: 700; }
+
 .pi-block { display: flex; flex-direction: column; gap: 4px; }
 .pi-block.right { text-align: right; }
 

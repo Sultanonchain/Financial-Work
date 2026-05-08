@@ -2271,6 +2271,44 @@ _STRATEGIC_TIER_DELTAS = {
     "urban_air_mobility": (-0.0050, 0.08, 0.75, "Urban Air Mobility"),
 }
 
+# Tiers that trigger a "survival floor" — Lynch-style override that says
+# pure DCF underestimates these names because government capital and policy
+# anchor survival probability.  Used by the strategic IV floor and verdict
+# phrasing below.
+_SURVIVAL_FLOOR_TIERS = {
+    "semi_sovereignty",
+    "defense_prime",
+    "energy_sovereignty",
+    "critical_material",
+}
+
+# Per-ticker subsidy / grant present-value, USD.  Adds to DCF before per-share
+# conversion so the IV reflects citable government capital that pure DCF
+# never sees.  Conservative: only the announced dollar amount, not implied
+# tax credits.
+STRATEGIC_SUBSIDY_PV = {
+    "INTC": 19_500_000_000,   # $8.5B CHIPS grant + $11B subsidized loan PV
+    "MU":    6_100_000_000,   # CHIPS Act grant
+    "TXN":   1_600_000_000,   # CHIPS Act grant
+    "GFS":   1_500_000_000,   # CHIPS Act grant
+    "ON":      300_000_000,   # NY fab DPA framework
+    "MP":      150_000_000,   # DPA Title III rare-earth funding
+    "LEU":     150_000_000,   # DOE HALEU contract value (approx)
+    "BWXT":    300_000_000,   # Naval reactor contract framework
+}
+
+# Tier-level book-value floor multipliers.  Reflects the principle that
+# the U.S. will not let strategically-anchored assets trade at distressed
+# book value: defense primes (sole-source on strategic platforms) get a
+# higher multiplier than commodity-cyclical semi names.
+_STRATEGIC_BOOK_FLOOR_MULT = {
+    "semi_sovereignty":   1.5,
+    "defense_prime":      2.0,
+    "energy_sovereignty": 1.4,
+    "critical_material":  1.5,
+    # UAM tier intentionally absent — pre-revenue eVTOL has no book anchor.
+}
+
 
 def _strategic_classifier(ticker):
     """
@@ -2300,12 +2338,100 @@ def _strategic_classifier(ticker):
         "wacc_delta":       wacc_delta,
         "ceiling_lift":     ceiling_lift,
         "iv_floor_mult":    iv_floor_mult,
+        "survival_floor":   tier in _SURVIVAL_FLOOR_TIERS,
+        "subsidy_pv":       STRATEGIC_SUBSIDY_PV.get(ticker.upper(), 0),
+        "book_floor_mult":  _STRATEGIC_BOOK_FLOOR_MULT.get(tier),
         "narrative": (
             f"VALUS recognizes {ticker.upper()} as a strategic US asset — "
             f"{tier_label}.  Pure DCF systematically undervalues these names "
             "because the discount rate ignores government backstops and "
             "policy-driven capital flows."
         ),
+    }
+
+
+# ── Strategic IV Floor ─────────────────────────────────────────────────────
+# Solves Prof Shelton's "Intel-$24" problem: pure DCF can spit out a number
+# that looks unfairly low for strategically-anchored names because DCF
+# doesn't price the U.S. government's structural backstop.  When the tier
+# has a `survival_floor` flag, we compute three flooring methods and take
+# the maximum:
+#
+#   1. Subsidy-adjusted DCF: DCF + (subsidy_pv / shares).  For tickers with
+#      named, citable government capital (CHIPS Act grants, DPA Title III
+#      contracts), we add the announced dollar amount.
+#   2. Book-value floor: tangible_book × tier_multiplier.  Reflects fact
+#      that strategically-anchored assets won't trade at distressed book.
+#   3. Peer EV/Revenue floor: peer median × revenue, equity-converted.
+#
+# We surface every component in the payload so the override is transparent
+# (the UI shows: DCF model: $X · Strategic floor: $Y · Used: $Z).
+
+def _compute_strategic_iv_floor(ticker, info, dcf_iv, base_fcf, fx_rate,
+                                  net_debt, shares_out, strategic, peers_payload=None):
+    """
+    Returns dict {floor_iv, components, reasons, dcf_iv, applied} or None.
+    Conservative — only fires when at least one citable input is available.
+    """
+    if not strategic or not strategic.get("survival_floor"):
+        return None
+    if not shares_out or shares_out <= 0:
+        return None
+
+    components = {"dcf": round(dcf_iv, 2) if dcf_iv else None}
+    reasons = []
+
+    # 1. Subsidy-adjusted DCF
+    subsidy_iv = None
+    subsidy_pv = strategic.get("subsidy_pv", 0) or 0
+    if dcf_iv and subsidy_pv > 0 and shares_out > 0:
+        subsidy_iv = round(dcf_iv + (subsidy_pv * fx_rate / shares_out), 2)
+        components["subsidy_adj"] = subsidy_iv
+        reasons.append(
+            f"Subsidy-adjusted DCF: ${subsidy_iv:.2f} (DCF ${dcf_iv:.2f} + "
+            f"${subsidy_pv/1e9:.1f}B in citable government capital ÷ "
+            f"{shares_out/1e9:.2f}B shares)."
+        )
+
+    # 2. Book-value floor
+    book_iv = None
+    book_mult = strategic.get("book_floor_mult")
+    book_value_per_share = safe(info.get("bookValue"))
+    if book_value_per_share and book_value_per_share > 0 and book_mult:
+        book_iv = round(book_value_per_share * book_mult, 2)
+        components["book"] = book_iv
+        reasons.append(
+            f"Book floor: ${book_iv:.2f} (book value ${book_value_per_share:.2f}/sh × "
+            f"{book_mult:.1f}× — {strategic['strategic_label']} tier won't trade at distressed book)."
+        )
+
+    # 3. Peer EV/Revenue floor (optional — populated by caller if peers known)
+    peer_iv = None
+    if peers_payload and isinstance(peers_payload, dict):
+        peer_ev_rev = peers_payload.get("peer_median_ev_rev")
+        revenue = safe(info.get("totalRevenue"))
+        if peer_ev_rev and peer_ev_rev > 0 and revenue and revenue > 0:
+            implied_ev = peer_ev_rev * revenue
+            implied_equity = implied_ev - (net_debt or 0)
+            if shares_out > 0:
+                peer_iv = round(max(0, implied_equity / shares_out), 2)
+                components["peer"] = peer_iv
+                if peer_iv > 0:
+                    reasons.append(
+                        f"Peer EV/Revenue floor: ${peer_iv:.2f} "
+                        f"(median peer multiple {peer_ev_rev:.1f}× × ${revenue/1e9:.1f}B revenue)."
+                    )
+
+    candidates = [c for c in [dcf_iv, subsidy_iv, book_iv, peer_iv] if c is not None and c > 0]
+    if not candidates:
+        return None
+    floor_iv = max(candidates)
+    return {
+        "floor_iv":   round(floor_iv, 2),
+        "components": components,
+        "reasons":    reasons,
+        "dcf_iv":     round(dcf_iv, 2) if dcf_iv else None,
+        "applied":    floor_iv > (dcf_iv or 0),
     }
 
 
@@ -2576,7 +2702,8 @@ def _build_verdict_summary(ticker, priced_for, implied_growth_pct, model_growth_
                             sector_ceiling_pct, sector_ceiling_label, price, iv,
                             margin_of_safety, analyst_target,
                             debt_momentum, is_cash_rich, cash_pct_of_mcap,
-                            is_mag7, is_structural_transformer):
+                            is_mag7, is_structural_transformer,
+                            survival_floor=False, strategic_floor=None):
     """
     Distil the full analysis into a clean numbered explanation users can
     actually read.  Replaces the dense flag list with: a one-line headline,
@@ -2753,7 +2880,22 @@ def _build_verdict_summary(ticker, priced_for, implied_growth_pct, model_growth_
     # Verdict line — always matches the sign of margin_of_safety so it's
     # consistent with the OVERVALUED/UNDERVALUED tag at the top of the page.
     mos = margin_of_safety or 0
-    if tier == "deep_discount":
+    # Survival-floor names get distinct phrasing — Prof Shelton's note that
+    # strategically-anchored stocks shouldn't be tagged "overvalued" in the
+    # standard sense even when MOS is negative; the strategic backstop is
+    # what's missing from the DCF, not value to be skeptical of.
+    if survival_floor and mos < 0:
+        floor_applied = bool(strategic_floor and strategic_floor.get("applied"))
+        if floor_applied and mos > -10:
+            verdict = (f"Strategic re-rating opportunity — government-backed tier; "
+                       f"DCF lifts ${strategic_floor.get('dcf_iv'):.2f} → "
+                       f"${strategic_floor.get('floor_iv'):.2f} via subsidy, "
+                       f"book floor, and peer multiples.")
+        else:
+            verdict = (f"Premium for strategic floor — pure DCF undercounts the "
+                       f"government backstop on this name; survival probability "
+                       f"is anchored, not market-driven.")
+    elif tier == "deep_discount":
         verdict = (f"VALUS sees this stock as undervalued by {abs(mos):.0f}% — market is "
                    f"overly pessimistic; meaningful upside if fundamentals hold.")
     elif tier == "discount":
@@ -8242,6 +8384,7 @@ def analyze():
         # the floor.  This refuses to print a distress verdict on a name
         # the government is structurally backstopping.
         strategic_floor_applied = False
+        strategic_floor_payload = None
         if (strategic and intrinsic_value is not None and price and price > 0):
             forward_pe   = safe(info.get("forwardPE"))
             sector_fwd   = safe(info.get("trailingPE"))   # rough proxy when no sector avg
@@ -8249,10 +8392,28 @@ def analyze():
                 (forward_pe is not None and forward_pe > 0 and forward_pe < 20) or
                 (analyst_target_price and analyst_target_price > price * 1.05)
             )
-            iv_floor = price * strategic["iv_floor_mult"]
-            if intrinsic_value < iv_floor and cheap_signal:
+            # New: substantive floor for survival_floor tiers — combines
+            # subsidy-adjusted DCF, book-value floor, and (when peers
+            # available) peer EV/Revenue floor.  Surfaces the math.
+            _shares_for_floor = safe(bal_data.get("shares"), 0) if bal_data else 0
+            strategic_floor_payload = _compute_strategic_iv_floor(
+                ticker=ticker, info=info, dcf_iv=intrinsic_value,
+                base_fcf=base_fcf, fx_rate=fx_rate,
+                net_debt=net_debt, shares_out=_shares_for_floor,
+                strategic=strategic,
+            )
+            new_floor = None
+            if strategic_floor_payload and strategic_floor_payload.get("applied"):
+                new_floor = strategic_floor_payload["floor_iv"]
+            # Legacy price-multiple floor — only fires when the new
+            # subsidy/book floor didn't trigger AND there's a cheap_signal.
+            legacy_floor = price * strategic["iv_floor_mult"]
+            if (new_floor is None and intrinsic_value < legacy_floor
+                    and cheap_signal):
+                new_floor = legacy_floor
+            if new_floor is not None and new_floor > intrinsic_value:
                 _iv_pre = intrinsic_value
-                intrinsic_value = round(iv_floor, 2)
+                intrinsic_value = round(new_floor, 2)
                 margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
                 strategic_floor_applied = True
                 if scenarios:
@@ -8343,6 +8504,8 @@ def analyze():
                 cash_pct_of_mcap       = cash_pct_of_mcap,
                 is_mag7                = is_mag7,
                 is_structural_transformer = is_structural_transformer,
+                survival_floor         = bool(strategic and strategic.get("survival_floor")),
+                strategic_floor        = strategic_floor_payload,
             )
         except Exception:
             verdict_summary = None
@@ -8843,6 +9006,8 @@ def analyze():
             "strategic_narrative":       strategic["narrative"]        if strategic else None,
             "strategic_wacc_delta_pp":   round(strategic_wacc_delta * 100, 2) if strategic else 0.0,
             "strategic_floor_applied":   strategic_floor_applied,
+            "strategic_floor":           strategic_floor_payload,
+            "survival_floor":            bool(strategic and strategic.get("survival_floor")),
             "strategic_live_amplified":  bool(strategic and strategic.get("live_policy_amplifier")),
             # ── Policy news signals ──────────────────────────────────────
             "policy_tailwind":           policy_tailwind,

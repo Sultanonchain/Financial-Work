@@ -543,6 +543,28 @@ function renderHeroVerdict(d) {
   tierBadge.classList.add(tierCls);
   $("vTierLabel").textContent = pf.label || "Verdict pending";
 
+  // Strategic IV floor breakdown — only when survival_floor tier lifted DCF.
+  // Format: DCF model: $X · Strategic floor: $Y · Used: $Z
+  const floorEl = $("vIvFloorBreakdown");
+  if (floorEl) {
+    const sf = d.strategic_floor;
+    if (sf && sf.applied && sf.dcf_iv != null && sf.floor_iv != null) {
+      floorEl.classList.remove("hidden");
+      floorEl.innerHTML = `
+        <span class="iv-floor__lbl">DCF model</span>
+        <span class="iv-floor__val">${fmtPrice(sf.dcf_iv)}</span>
+        <span class="iv-floor__sep">·</span>
+        <span class="iv-floor__lbl">Strategic floor</span>
+        <span class="iv-floor__val iv-floor__val--floor">${fmtPrice(sf.floor_iv)}</span>
+        <span class="iv-floor__sep">·</span>
+        <span class="iv-floor__lbl">Used</span>
+        <span class="iv-floor__val iv-floor__val--used">${fmtPrice(d.intrinsic_value)}</span>`;
+    } else {
+      floorEl.classList.add("hidden");
+      floorEl.innerHTML = "";
+    }
+  }
+
   // ── Strategic Asset banner ───────────────────────────────────────────
   // Renders only when the backend tags this ticker as a strategic asset
   // (CHIPS Act recipient, defense prime, energy sovereignty, critical
