@@ -2309,6 +2309,16 @@ _STRATEGIC_BOOK_FLOOR_MULT = {
     # UAM tier intentionally absent — pre-revenue eVTOL has no book anchor.
 }
 
+# Per-ticker book-floor overrides: CHIPS Act foundries the DoD has formally
+# designated as "trusted foundries" get the defense-grade 2.0× book multiplier
+# regardless of their semi_sovereignty tier classification.  Same logic as
+# defense primes — sole-source for strategic platforms.
+_STRATEGIC_BOOK_FLOOR_OVERRIDE = {
+    "INTC": 2.0,  # CHIPS Act $19.5B + DoD trusted-foundry pivot under DPA Title III
+    "MU":   2.0,  # CHIPS Act $6.1B + sole US producer of HBM (AI inference bottleneck)
+    "GFS":  2.0,  # CHIPS Act $1.5B foundry
+}
+
 
 def _strategic_classifier(ticker):
     """
@@ -2340,7 +2350,8 @@ def _strategic_classifier(ticker):
         "iv_floor_mult":    iv_floor_mult,
         "survival_floor":   tier in _SURVIVAL_FLOOR_TIERS,
         "subsidy_pv":       STRATEGIC_SUBSIDY_PV.get(ticker.upper(), 0),
-        "book_floor_mult":  _STRATEGIC_BOOK_FLOOR_MULT.get(tier),
+        "book_floor_mult":  _STRATEGIC_BOOK_FLOOR_OVERRIDE.get(
+            ticker.upper(), _STRATEGIC_BOOK_FLOOR_MULT.get(tier)),
         "narrative": (
             f"VALUS recognizes {ticker.upper()} as a strategic US asset — "
             f"{tier_label}.  Pure DCF systematically undervalues these names "
@@ -2891,6 +2902,19 @@ def _build_verdict_summary(ticker, priced_for, implied_growth_pct, model_growth_
                        f"DCF lifts ${strategic_floor.get('dcf_iv'):.2f} → "
                        f"${strategic_floor.get('floor_iv'):.2f} via subsidy, "
                        f"book floor, and peer multiples.")
+        elif floor_applied and mos < -25:
+            # Honest framing: even with the strategic floor lifting IV
+            # toward sovereign-backstopped levels, the market price is
+            # *still* well above. This is the "Intel at $109 ATH" case
+            # where math is math — strategic backing matters but doesn't
+            # justify any price.
+            verdict = (f"Market is paying {abs(mos):.0f}% above the strategic "
+                       f"floor. DCF says ${strategic_floor.get('dcf_iv'):.2f}; "
+                       f"sovereign-backed floor lifts it to "
+                       f"${strategic_floor.get('floor_iv'):.2f}; market still "
+                       f"at ${price:.2f}. Even acknowledging CHIPS-Act / DoD "
+                       f"backing, this is priced for outcomes most companies "
+                       f"don't deliver.")
         else:
             verdict = (f"Premium for strategic floor — pure DCF undercounts the "
                        f"government backstop on this name; survival probability "
