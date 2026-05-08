@@ -807,6 +807,10 @@
         </div>
       </div>
 
+      <!-- Strategic IV floor breakdown — only shown when survival_floor tier
+           lifted DCF. Format: DCF model: $X · Strategic floor: $Y · Used: $Z -->
+      <div class="iv-floor-breakdown hidden" id="vIvFloorBreakdown"></div>
+
       <!-- Market-implied scenario: contextualizes the price vs fair value gap.
            Reads d.implied_growth_pct + d.model_growth_pct so users see WHY
            the market price differs from VALUS fair value, not just THAT it does. -->
@@ -944,7 +948,21 @@
       </div>
     </section>
 
-    <!-- INSIGHTS GRID: quality scorecard + insider activity + news summary -->
+    <!-- AI THESIS (Haiku synthesis — runs once per ticker, full-width hero) -->
+    <section class="card ai-thesis-card hidden" id="aiThesisCard">
+      <div class="ai-thesis-head">
+        <div class="ai-thesis-title-row">
+          <div class="ai-thesis-title">AI thesis</div>
+          <span class="ai-thesis-badge" id="aiThesisCategory">—</span>
+        </div>
+        <div class="ai-thesis-sub">Lynch-style read · powered by Claude Haiku</div>
+      </div>
+      <div class="ai-thesis-body" id="aiThesisBody"></div>
+      <div class="ai-thesis-strategic hidden" id="aiThesisStrategic"></div>
+      <div class="ai-thesis-risks" id="aiThesisRisks"></div>
+    </section>
+
+    <!-- INSIGHTS GRID: quality scorecard + risk profile + smart money + insider + news -->
     <section class="insights-grid hidden" id="insightsGrid">
       <div class="card insights-card" id="qualityCard" hidden>
         <div class="ic-head">
@@ -952,6 +970,35 @@
           <div class="ic-sub" id="qualitySub">Profitability, returns, leverage</div>
         </div>
         <div class="quality-grid" id="qualityGrid"></div>
+      </div>
+      <div class="card insights-card" id="riskProfileCard" hidden>
+        <div class="ic-head">
+          <div class="ic-title">Risk profile</div>
+          <div class="ic-sub">Unified score · leverage · catalysts · structural</div>
+        </div>
+        <div class="risk-score-wrap" id="riskScoreWrap"></div>
+        <ul class="risk-reasons" id="riskReasons"></ul>
+        <div class="risk-components" id="riskComponents"></div>
+      </div>
+      <div class="card insights-card insights-card--wide" id="smartMoneyCard" hidden>
+        <div class="ic-head">
+          <div class="ic-title">Smart money</div>
+          <div class="ic-sub">Institutional · Insiders · Congressional</div>
+        </div>
+        <div class="smart-money-grid">
+          <div class="smart-lane" id="smartLaneInst">
+            <div class="smart-lane__title">Institutional</div>
+            <div class="smart-lane__body" id="smartLaneInstBody">—</div>
+          </div>
+          <div class="smart-lane" id="smartLaneInsiders">
+            <div class="smart-lane__title">Insiders (90d)</div>
+            <div class="smart-lane__body" id="smartLaneInsidersBody">—</div>
+          </div>
+          <div class="smart-lane" id="smartLaneCongress">
+            <div class="smart-lane__title">Congressional (180d)</div>
+            <div class="smart-lane__body" id="smartLaneCongressBody">—</div>
+          </div>
+        </div>
       </div>
       <div class="card insights-card" id="insiderCard" hidden>
         <div class="ic-head">

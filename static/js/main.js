@@ -252,7 +252,10 @@ function renderResults(d) {
   renderMethodology(d);
   renderScenarios(d);
   renderMiniStats(d);
+  renderAiThesis(d);
   renderQualityCard(d);
+  renderRiskProfile(d);
+  renderSmartMoney(d);
   renderInsiderCard(d.ticker);
   renderNewsSummaryCard(d);
   renderDrawerContent(d);
@@ -539,6 +542,27 @@ function renderHeroVerdict(d) {
   tierBadge.classList.remove("tier-positive","tier-info","tier-warning","tier-negative");
   tierBadge.classList.add(tierCls);
   $("vTierLabel").textContent = pf.label || "Verdict pending";
+
+  // Strategic IV floor breakdown — only when survival_floor tier lifted DCF
+  const floorEl = $("vIvFloorBreakdown");
+  if (floorEl) {
+    const sf = d.strategic_floor;
+    if (sf && sf.applied && sf.dcf_iv != null && sf.floor_iv != null) {
+      floorEl.classList.remove("hidden");
+      floorEl.innerHTML = `
+        <span class="iv-floor__lbl">DCF model</span>
+        <span class="iv-floor__val">${fmtPrice(sf.dcf_iv)}</span>
+        <span class="iv-floor__sep">·</span>
+        <span class="iv-floor__lbl">Strategic floor</span>
+        <span class="iv-floor__val iv-floor__val--floor">${fmtPrice(sf.floor_iv)}</span>
+        <span class="iv-floor__sep">·</span>
+        <span class="iv-floor__lbl">Used</span>
+        <span class="iv-floor__val iv-floor__val--used">${fmtPrice(d.intrinsic_value)}</span>`;
+    } else {
+      floorEl.classList.add("hidden");
+      floorEl.innerHTML = "";
+    }
+  }
 
   // ── Strategic Asset banner ───────────────────────────────────────────
   // Renders only when the backend tags this ticker as a strategic asset
@@ -1120,11 +1144,27 @@ function renderDrawerContent(d) {
   const drawer  = $("drawer");
   const triggerTxt = $("drawerTriggerTxt");
   if (trigger && drawer) {
+    // Restore prior collapse state from localStorage so power users don't
+    // re-expand on every visit.  Default = closed (Prof Shelton wants the
+    // simplified view to lead).
+    try {
+      if (localStorage.getItem("valus.drawer.open") === "1") {
+        drawer.classList.add("open");
+        trigger.classList.add("open");
+        trigger.setAttribute("aria-expanded", "true");
+        if (triggerTxt) triggerTxt.textContent = "Hide detailed analysis";
+        if (!drawer.dataset.statementsLoaded) {
+          renderFinancialsTabs(d).catch(() => {});
+          drawer.dataset.statementsLoaded = "1";
+        }
+      }
+    } catch (_) { /* localStorage unavailable */ }
     trigger.onclick = () => {
       const isOpen = drawer.classList.toggle("open");
       trigger.classList.toggle("open", isOpen);
       trigger.setAttribute("aria-expanded", isOpen ? "true" : "false");
       if (triggerTxt) triggerTxt.textContent = isOpen ? "Hide detailed analysis" : "View detailed analysis";
+      try { localStorage.setItem("valus.drawer.open", isOpen ? "1" : "0"); } catch (_) {}
       // Lazy-load financial statements on first open (Yahoo-sourced)
       if (isOpen && !drawer.dataset.statementsLoaded) {
         renderFinancialsTabs(d).catch(() => {});
@@ -1334,6 +1374,174 @@ function renderQualityCard(d) {
       </div>`;
   }).join("");
   card.hidden = false;
+  if (insightsGrid) insightsGrid.classList.remove("hidden");
+}
+
+// ── AI Thesis (per-ticker Haiku synthesis) ───────────────────────────────
+// Lynch-style thesis + risks + strategic_note when a survival_floor name.
+// Fails silent if backend skipped synthesis (no API key, ETF, error).
+function renderAiThesis(d) {
+  const card = document.getElementById("aiThesisCard");
+  if (!card) return;
+  const synth = d.ai_synthesis;
+  if (!synth || !synth.thesis) {
+    card.classList.add("hidden");
+    return;
+  }
+  const catEl   = document.getElementById("aiThesisCategory");
+  const bodyEl  = document.getElementById("aiThesisBody");
+  const stratEl = document.getElementById("aiThesisStrategic");
+  const risksEl = document.getElementById("aiThesisRisks");
+  const labelMap = {
+    slowGrower: "Slow Grower", stalwart: "Stalwart",
+    fastGrower: "Fast Grower", cyclical: "Cyclical",
+    turnaround: "Turnaround", assetPlay: "Asset Play",
+  };
+  if (catEl) {
+    const cat = synth.category;
+    catEl.textContent = labelMap[cat] || (cat || "—");
+    catEl.dataset.cat = cat || "";
+  }
+  if (bodyEl) bodyEl.textContent = synth.thesis;
+  if (stratEl) {
+    if (synth.strategic_note) {
+      stratEl.textContent = synth.strategic_note;
+      stratEl.classList.remove("hidden");
+    } else {
+      stratEl.classList.add("hidden");
+    }
+  }
+  if (risksEl) {
+    const risks = Array.isArray(synth.risks) ? synth.risks : [];
+    risksEl.innerHTML = risks.length
+      ? `<div class="ai-risks-title">Key risks</div><ul>${risks.map(r => `<li>${escHtml(r)}</li>`).join("")}</ul>`
+      : "";
+  }
+  card.classList.remove("hidden");
+  const insightsGrid = document.getElementById("insightsGrid");
+  if (insightsGrid) insightsGrid.classList.remove("hidden");
+}
+
+// ── Risk Profile (unified score + reasons + components) ──────────────────
+function renderRiskProfile(d) {
+  const card = document.getElementById("riskProfileCard");
+  if (!card) return;
+  const rp = d.risk_profile;
+  if (!rp || rp.score == null) {
+    card.hidden = true;
+    return;
+  }
+  const wrap = document.getElementById("riskScoreWrap");
+  const reasonsEl = document.getElementById("riskReasons");
+  const compsEl = document.getElementById("riskComponents");
+  const colorClass = `risk-score--${rp.color || "amber"}`;
+  if (wrap) {
+    wrap.innerHTML = `
+      <div class="risk-score ${colorClass}">
+        <span class="risk-score__num">${fmt(rp.score, 1)}</span>
+        <span class="risk-score__scale">/ 5</span>
+      </div>
+      <div class="risk-score__label">${escHtml(rp.label || "—")}</div>`;
+  }
+  if (reasonsEl) {
+    const reasons = Array.isArray(rp.reasons) ? rp.reasons : [];
+    reasonsEl.innerHTML = reasons.map(r => `<li>${escHtml(r)}</li>`).join("");
+  }
+  if (compsEl) {
+    const c = rp.components || {};
+    const labelMap = {
+      leverage: "Leverage", volatility: "Volatility",
+      catalyst: "Catalyst", policy: "Policy", structural: "Structural",
+    };
+    compsEl.innerHTML = Object.keys(labelMap).map(k => `
+      <div class="risk-comp">
+        <span class="risk-comp__lbl">${labelMap[k]}</span>
+        <span class="risk-comp__val">${c[k] != null ? fmt(c[k], 1) : "—"}</span>
+      </div>`).join("");
+  }
+  card.hidden = false;
+  const insightsGrid = document.getElementById("insightsGrid");
+  if (insightsGrid) insightsGrid.classList.remove("hidden");
+}
+
+// ── Smart Money (Institutional / Insiders / Congressional) ───────────────
+function renderSmartMoney(d) {
+  const card = document.getElementById("smartMoneyCard");
+  if (!card) return;
+  const instBody    = document.getElementById("smartLaneInstBody");
+  const insBody     = document.getElementById("smartLaneInsidersBody");
+  const conBody     = document.getElementById("smartLaneCongressBody");
+
+  // Institutional: derive from is_strategic / strategic_label until per-ticker
+  // 13F roll-up exists. For now, surface analyst recommendation as a soft signal.
+  if (instBody) {
+    const rec = d.analyst_rating;
+    const ct  = d.analyst_count;
+    if (rec && rec !== "N/A") {
+      instBody.innerHTML = `<span class="sm-line">${escHtml(rec.replace(/_/g, ' '))} · ${ct || 0} analysts</span>`;
+    } else {
+      instBody.textContent = "—";
+    }
+  }
+
+  // Insiders — fetched async via /api/insider; populate placeholder now,
+  // upgrade after fetch completes.
+  if (insBody) {
+    insBody.textContent = "Loading…";
+    fetch(`/api/insider?ticker=${encodeURIComponent(d.ticker)}`)
+      .then(r => r.json())
+      .then(j => {
+        if (j && j.available && j.filings) {
+          const tone = j.filings >= 5 ? "active" : j.filings >= 2 ? "moderate" : "quiet";
+          insBody.innerHTML = `<span class="sm-pill sm-pill--${tone}">${j.filings} filing${j.filings === 1 ? "" : "s"}</span>`;
+        } else {
+          insBody.textContent = "No recent filings";
+        }
+      })
+      .catch(() => { insBody.textContent = "—"; });
+  }
+
+  // Congressional — payload has it inline OR marked "deferred" (cold
+  // upstream cache).  When deferred, we fetch async so the analyze
+  // response stays fast.
+  if (conBody) {
+    const con = d.congressional;
+    const renderCongress = (con) => {
+      if (!con) { conBody.textContent = "—"; return; }
+      if (con.summary && (con.items && con.items.length)) {
+        const s = con.summary;
+        const top = (con.items || []).slice(0, 3).map(it => {
+          const party = it.party ? ` (${it.party})` : "";
+          const action = it.action === "buy" ? "↑" : it.action === "sell" ? "↓" : "·";
+          const range = it.amount_range ? ` ${escHtml(it.amount_range)}` : "";
+          return `<div class="sm-row sm-row--${it.action}">${action} ${escHtml(it.name)}${party}${range}</div>`;
+        }).join("");
+        conBody.innerHTML = `
+          <div class="sm-summary">${s.buy_count || 0} buys · ${s.sell_count || 0} sells · ${escHtml(s.net_label || "—")}</div>
+          ${top}`;
+      } else {
+        conBody.textContent = con.reason || "No recent disclosures";
+      }
+    };
+    if (con && con.deferred) {
+      conBody.textContent = "Loading…";
+      fetch(`/api/congressional/${encodeURIComponent(d.ticker)}`)
+        .then(r => r.json())
+        .then(j => {
+          if (j && j.available) {
+            renderCongress({summary: j.summary, items: j.items});
+          } else {
+            renderCongress({reason: (j && j.reason) || "No recent disclosures"});
+          }
+        })
+        .catch(() => { conBody.textContent = "—"; });
+    } else {
+      renderCongress(con);
+    }
+  }
+
+  card.hidden = false;
+  const insightsGrid = document.getElementById("insightsGrid");
   if (insightsGrid) insightsGrid.classList.remove("hidden");
 }
 

@@ -91,6 +91,61 @@ VALUS recognizes 25+ curated tickers across five tiers.  Each entry has a per-ti
 
 For these names, the model lowers WACC modestly (50–100bp), lifts the sector growth ceiling, applies an IV floor (so distress signals don't override the franchise thesis), and surfaces the curation reason in a banner above the verdict.
 
+### Strategic IV Floor (the "Intel-$24" fix)
+
+Pure DCF can spit out a number that looks unfairly low for strategically-anchored names — Intel at $24 when the market trades it at $30+ — because DCF doesn't price the U.S. government's structural backstop.  When the curated tier is `semi_sovereignty`, `defense_prime`, `energy_sovereignty`, or `critical_material`, VALUS computes a **strategic floor** as the maximum of three flooring methods:
+
+1. **Subsidy-adjusted DCF** — `DCF + (subsidy_PV ÷ shares)`.  For tickers with named, citable government capital (CHIPS Act grants, DPA Title III contracts, naval reactor framework agreements), we add the announced dollar amount to enterprise value before per-share conversion.
+2. **Book-value floor** — `tangible_book_per_share × tier_multiplier` (1.5× semi/critical, 2.0× defense, 1.4× energy).  Reflects the principle that the U.S. won't let strategically-anchored assets trade at distressed book value.
+3. **Peer EV/Revenue floor** — `peer_median_ev_revenue × revenue ÷ shares`, equity-converted.  Captures replacement-value floor for strategic infrastructure.
+
+Final IV = `max(DCF, subsidy_DCF, book_floor, peer_floor)`.  The verdict pill displays both numbers — *DCF model: $24 · Strategic floor: $32 · Used: $32* — so the override is transparent, never a black box.
+
+When this floor flips MOS from negative to slightly positive, the verdict reads "Strategic re-rating opportunity"; when MOS stays negative even after the floor, it reads "Premium for strategic floor" rather than the standard "Overvalued by N%".
+
+---
+
+## Per-Ticker AI Synthesis (Lynch Lens)
+
+Every analyzed ticker gets a Claude Haiku 4.5 synthesis (with `ANTHROPIC_API_KEY` configured).  This is *not* the headline tie-breaker — it runs once per `/api/analyze` call after all the DCF, scorecard, catalyst, and strategic-asset work is done, and produces:
+
+- **Lynch category** — slowGrower, stalwart, fastGrower, cyclical, turnaround, or assetPlay.
+- **Plain-English thesis** — ≤50 words, using only the data Valus already computed.
+- **3 risks** — ≤10 words each, concrete (no "macro uncertainty" filler).
+- **Strategic note** — when the ticker is in a `survival_floor` tier, a one-sentence reminder that government backstop anchors survival probability ("don't write Intel to zero just because FCF is weak this year").
+
+Cached in Redis for 24h with quarterly granularity, so DCF re-runs don't re-bill the API.  Skipped silently for ETFs/indexes (no DCF) and when `ANTHROPIC_API_KEY` is absent.
+
+---
+
+## Unified Risk Profile
+
+Risk signals scattered across catalysts, debt momentum, beta, and policy headwinds are consolidated into one **Risk Profile** block with a 1–5 composite score:
+
+| Component | Weight | Source |
+|---|---|---|
+| Leverage | 25% | debt/EBITDA + interest coverage + debt momentum classification |
+| Volatility | 15% | beta from yfinance |
+| Catalyst risk | 25% | count + severity of risk_labels (SEC investigations, antitrust, etc.) |
+| Policy/regulatory | 15% | count of policy_headwind_labels |
+| Structural | 20% | Lynch category (cyclical/turnaround weight higher) |
+
+When the ticker is on a `survival_floor` tier, the composite is capped at 3.0 ("Moderate") regardless — the strategic floor IS the risk mitigation.
+
+Output color bands: green (<1.8), lime (<2.6), amber (<3.4), orange (<4.2), red (≥4.2).
+
+---
+
+## Smart Money
+
+Three-lane panel showing the people moving the stock:
+
+- **Institutional** — analyst rating + count (per-ticker 13F roll-up TBD).
+- **Insiders** — Form 4 filing count over 90d, parsed via SEC EDGAR Atom feeds.
+- **Congressional** — named buys/sells from House + Senate Stock Watcher community mirrors (free, refreshed nightly).  Format: *"Rep. Pelosi (D) — Bought $1M–5M · Mar 2026"*.
+
+Endpoint: `/api/congressional/<ticker>` — returns `{available, summary, items: [...], as_of}`.  Cached 6h in KV; falls back to empty gracefully if either upstream mirror is unavailable.
+
 ---
 
 ## The News Engine

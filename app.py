@@ -599,6 +599,168 @@ def _claude_interpret_headline(ticker, sector, title, summary):
         return None
 
 
+# ── Per-Ticker Claude Synthesis ────────────────────────────────────────────
+# Runs once per /api/analyze call (not per headline) to produce a Lynch-
+# style classification + plain-English thesis + risk read for the ticker.
+# Caches in KV with quarterly granularity so DCF re-runs don't re-bill.
+
+_CLAUDE_SYNTH_CACHE = {}
+_CLAUDE_SYNTH_CACHE_TTL = 24 * 3600
+
+_VALID_LYNCH_CATEGORIES = {
+    "slowGrower", "stalwart", "fastGrower",
+    "cyclical", "turnaround", "assetPlay",
+}
+
+
+def _claude_ticker_synthesis(ticker, payload, signals):
+    """
+    Per-ticker AI synthesis.  Inputs come from the already-computed analyze()
+    payload + a `signals` dict gathered alongside (insider direction,
+    13F holders, congressional summary, strategic flags).
+
+    Returns dict { category, thesis, risks: [...], strategic_note }
+    or None on failure / missing API key.  Never raises.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key or not ticker:
+        return None
+    # Quarter-level cache key — DCF inputs don't change rapidly.
+    quarter = f"{datetime.utcnow().year}Q{(datetime.utcnow().month - 1)//3 + 1}"
+    cache_key = (ticker.upper(), quarter)
+    cached = _CLAUDE_SYNTH_CACHE.get(cache_key)
+    if cached and (time.time() - cached[0]) < _CLAUDE_SYNTH_CACHE_TTL:
+        return cached[1]
+    redis_key = f"valus:synthesis:v1:{ticker.upper()}:{quarter}"
+    if _kv:
+        try:
+            raw = _kv.get(redis_key)
+            if raw:
+                parsed = _json_top.loads(raw)
+                _CLAUDE_SYNTH_CACHE[cache_key] = (time.time(), parsed)
+                return parsed
+        except Exception:
+            pass
+
+    # Compose compact input lines.  Using bullet form keeps the prompt
+    # stable and lets Haiku focus tokens on the synthesis, not parsing.
+    company  = payload.get("company_name") or ticker
+    sector   = payload.get("sector") or "?"
+    industry = payload.get("industry") or "?"
+    price    = payload.get("current_price")
+    iv       = payload.get("intrinsic_value")
+    mos      = payload.get("margin_of_safety")
+    verdict  = (payload.get("priced_for") or {}).get("label") or ""
+    debt_mom = (payload.get("debt_momentum") or {}).get("label") or "—"
+    cash_rich = "yes" if payload.get("is_cash_rich") else "no"
+    cats     = ", ".join((payload.get("catalyst_labels") or [])[:3]) or "none"
+    risks    = ", ".join((payload.get("risk_labels") or [])[:3]) or "none"
+    quality  = payload.get("quality_metrics") or []
+    qual_lines = "; ".join(
+        f"{m.get('label','?')}={m.get('value_pct')}%/{m.get('tier')}"
+        for m in quality if m.get("value_pct") is not None
+    ) or "—"
+
+    strategic_tier   = payload.get("strategic_label") or ""
+    strategic_reason = payload.get("strategic_reason") or ""
+    survival_floor   = bool(signals.get("survival_floor"))
+    floor = signals.get("strategic_floor") or {}
+    floor_line = ""
+    if floor and floor.get("applied"):
+        floor_line = (
+            f"Strategic IV floor lifted DCF from ${floor.get('dcf_iv')} to "
+            f"${floor.get('floor_iv')} because: "
+            + " ".join(floor.get("reasons", [])[:2])
+        )
+
+    insider_dir = signals.get("insider_direction") or "no recent filings"
+    top_holders = signals.get("top_13f_holders") or "—"
+    congress    = signals.get("congressional_summary") or "no recent activity"
+
+    prompt = (
+        "You are a Peter Lynch-style equity analyst writing for retail "
+        "investors using the Valus app.  Use ONLY the facts below.\n\n"
+        f"Ticker:       {ticker}\n"
+        f"Company:      {company}\n"
+        f"Sector:       {sector} / {industry}\n"
+        f"Price/IV/MOS: ${price} / ${iv} / {mos}%\n"
+        f"VALUS verdict: {verdict}\n"
+        f"Quality:      {qual_lines}\n"
+        f"Debt status:  {debt_mom} · Cash-rich: {cash_rich}\n"
+        f"Catalysts:    {cats}\n"
+        f"Risks:        {risks}\n"
+        f"Strategic tier: {strategic_tier or 'none'}\n"
+        f"Strategic reason: {strategic_reason or '—'}\n"
+        f"{floor_line}\n"
+        f"Insider 90d: {insider_dir}\n"
+        f"13F top holders: {top_holders}\n"
+        f"Congressional 180d: {congress}\n\n"
+        "TASKS:\n"
+        "1. Classify into ONE of the six Lynch categories: "
+        "slowGrower, stalwart, fastGrower, cyclical, turnaround, assetPlay.\n"
+        "2. In 50 words or fewer, write a plain-English investment thesis "
+        "using only the data above. Lynch tone — concrete, no jargon.\n"
+        "3. List exactly 3 risks, each <= 10 words.\n"
+        "4. If strategic tier is set, write a one-sentence strategic_note "
+        "explaining why a Lynch investor should NOT mark this name to zero "
+        "even if FCF or MOS look weak (cite CHIPS Act, defense backstop, etc.).  "
+        "If no strategic tier, return strategic_note as empty string.\n\n"
+        "Return ONLY a single-line JSON object with keys:\n"
+        "  category: string\n"
+        "  thesis: string\n"
+        "  risks: array of 3 strings\n"
+        "  strategic_note: string (may be empty)\n"
+    )
+    try:
+        body = {
+            "model":      "claude-haiku-4-5-20251001",
+            "max_tokens": 400,
+            "messages":   [{"role": "user", "content": prompt}],
+        }
+        resp = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key":         api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type":      "application/json",
+            },
+            json=body, timeout=10,
+        )
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        txt = ""
+        for block in data.get("content", []):
+            if block.get("type") == "text":
+                txt += block.get("text", "")
+        m = re.search(r"\{.*\}", txt, re.DOTALL)
+        if not m:
+            return None
+        parsed = _json_top.loads(m.group(0))
+        cat = str(parsed.get("category", ""))
+        thesis = str(parsed.get("thesis", ""))[:400]
+        risks_out = parsed.get("risks") or []
+        if not isinstance(risks_out, list):
+            risks_out = []
+        risks_out = [str(r)[:120] for r in risks_out][:3]
+        strategic_note = str(parsed.get("strategic_note", ""))[:280]
+        result = {
+            "category":       cat if cat in _VALID_LYNCH_CATEGORIES else None,
+            "thesis":         thesis,
+            "risks":          risks_out,
+            "strategic_note": strategic_note,
+        }
+        _CLAUDE_SYNTH_CACHE[cache_key] = (time.time(), result)
+        if _kv:
+            try:
+                _kv.setex(redis_key, _CLAUDE_SYNTH_CACHE_TTL, _json_top.dumps(result))
+            except Exception:
+                pass
+        return result
+    except Exception:
+        return None
+
+
 def _score_headline(title: str, summary: str, ticker: str, sector: str, industry: str):
     """
     Returns dict { score, durability, is_transformative, matched }.
@@ -1858,6 +2020,163 @@ def _build_quality_metrics(info, base_fcf, revenue_ttm):
     return metrics if metrics else None
 
 
+def _build_risk_profile(info, debt_momentum, catalyst_labels, risk_labels,
+                          policy_headwind_labels, lynch_category=None,
+                          survival_floor=False):
+    """
+    Unified Risk Profile: composite 1-5 score across five dimensions, each
+    weighted, with bullet reasons.  Today risk signals are scattered across
+    catalysts, policy headwinds, debt momentum, beta, etc — this consolidates
+    them into one block.
+
+    Components (each scored 1-5; 1 = low risk, 5 = high risk):
+      leverage      25% — debt/EBITDA + debt momentum classification
+      volatility    15% — beta from yfinance
+      catalyst      25% — count + severity of risk_labels (SEC investigations etc.)
+      policy        15% — count of policy_headwind_labels
+      structural    20% — Lynch category (cyclical / turnaround weight higher)
+
+    survival_floor=True caps composite at 3 ("Moderate") regardless.
+
+    Returns dict {score, label, color, reasons: [...], components: {...}}.
+    """
+    if not info:
+        return None
+
+    components = {}
+    reasons = []
+
+    # ── Leverage (25%) ────────────────────────────────────────────────────
+    debt_to_ebitda = None
+    interest_cov = None
+    if debt_momentum and isinstance(debt_momentum, dict):
+        debt_to_ebitda = debt_momentum.get("debt_to_ebitda")
+        interest_cov   = debt_momentum.get("interest_coverage")
+    if debt_to_ebitda is None:
+        leverage_score = 2.5
+    elif debt_to_ebitda < 1.0:
+        leverage_score = 1
+    elif debt_to_ebitda < 2.5:
+        leverage_score = 2
+    elif debt_to_ebitda < 4.0:
+        leverage_score = 3
+    elif debt_to_ebitda < 6.0:
+        leverage_score = 4
+    else:
+        leverage_score = 5
+    if interest_cov is not None and interest_cov < 1.5:
+        leverage_score = max(leverage_score, 4)
+    if debt_momentum and debt_momentum.get("classification") == "deleveraging":
+        leverage_score = max(1, leverage_score - 1)
+    elif debt_momentum and debt_momentum.get("classification") == "speculative_distress":
+        leverage_score = min(5, leverage_score + 1)
+    components["leverage"] = round(leverage_score, 1)
+    if debt_to_ebitda is not None:
+        if leverage_score <= 2:
+            reasons.append(f"Debt/EBITDA {debt_to_ebitda:.1f}× — manageable.")
+        elif leverage_score >= 4:
+            reasons.append(f"Debt/EBITDA {debt_to_ebitda:.1f}× — stressed.")
+
+    # ── Volatility (15%) ──────────────────────────────────────────────────
+    beta = safe(info.get("beta"))
+    if beta is None:
+        volatility_score = 2.5
+    elif beta < 0.7:
+        volatility_score = 1
+    elif beta < 1.0:
+        volatility_score = 2
+    elif beta < 1.3:
+        volatility_score = 3
+    elif beta < 1.7:
+        volatility_score = 4
+    else:
+        volatility_score = 5
+    components["volatility"] = round(volatility_score, 1)
+    if beta is not None and (beta >= 1.3 or beta < 0.7):
+        descriptor = "high" if beta >= 1.3 else "low"
+        reasons.append(f"Beta {beta:.2f} — {descriptor} vs. market.")
+
+    # ── Catalyst risk (25%) ───────────────────────────────────────────────
+    risks = list(risk_labels or [])
+    severe_kw = ("investigation", "fraud", "antitrust", "doj",
+                 "criminal", "subpoena", "sec charges")
+    severe = sum(1 for r in risks if any(s in r.lower() for s in severe_kw))
+    if not risks:
+        catalyst_score = 1.5
+    elif len(risks) == 1 and severe == 0:
+        catalyst_score = 2.5
+    elif len(risks) <= 2 and severe <= 1:
+        catalyst_score = 3
+    elif severe >= 2 or len(risks) >= 4:
+        catalyst_score = 5
+    else:
+        catalyst_score = 4
+    components["catalyst"] = round(catalyst_score, 1)
+    if severe >= 1:
+        reasons.append(f"{severe} severe risk signal{'s' if severe != 1 else ''} active.")
+    elif len(risks) >= 2:
+        reasons.append(f"{len(risks)} risk signals in recent news.")
+
+    # ── Policy / regulatory (15%) ─────────────────────────────────────────
+    pol = len(policy_headwind_labels or [])
+    if pol == 0:
+        policy_score = 1.5
+    elif pol == 1:
+        policy_score = 2.5
+    elif pol == 2:
+        policy_score = 3.5
+    else:
+        policy_score = 4.5
+    components["policy"] = round(policy_score, 1)
+    if pol >= 1:
+        reasons.append(f"{pol} active policy headwind{'s' if pol != 1 else ''}.")
+
+    # ── Structural (20%) — Lynch category ─────────────────────────────────
+    structural_map = {
+        "stalwart": 1.5,
+        "slowGrower": 2,
+        "fastGrower": 3,
+        "assetPlay": 2.5,
+        "cyclical": 4,
+        "turnaround": 4.5,
+    }
+    structural_score = structural_map.get(lynch_category, 2.5)
+    components["structural"] = round(structural_score, 1)
+    if lynch_category in ("cyclical", "turnaround"):
+        reasons.append(f"Structural: {lynch_category} — earnings volatility risk.")
+
+    # ── Composite ─────────────────────────────────────────────────────────
+    composite = (
+        leverage_score * 0.25 +
+        volatility_score * 0.15 +
+        catalyst_score * 0.25 +
+        policy_score * 0.15 +
+        structural_score * 0.20
+    )
+    if survival_floor:
+        composite = min(composite, 3.0)
+        reasons.append("Strategic survival floor caps risk at moderate.")
+
+    if composite < 1.8:
+        label, color = "Low", "green"
+    elif composite < 2.6:
+        label, color = "Low–Moderate", "lime"
+    elif composite < 3.4:
+        label, color = "Moderate", "amber"
+    elif composite < 4.2:
+        label, color = "Moderate–High", "orange"
+    else:
+        label, color = "High", "red"
+
+    return {
+        "score":      round(composite, 2),
+        "label":      label,
+        "color":      color,
+        "reasons":    reasons[:4],
+        "components": components,
+    }
+
+
 def clean(v):
     if isinstance(v, float) and (np.isnan(v) or np.isinf(v)):
         return None
@@ -2066,6 +2385,46 @@ _STRATEGIC_TIER_DELTAS = {
     "urban_air_mobility": (-0.0050, 0.08, 0.75, "Urban Air Mobility"),
 }
 
+# Tiers that get a "survival floor" — a Lynch-style override that says
+# pure DCF systematically underestimates these names because government
+# capital and policy backstop survival probability.  When set, the AI
+# synthesis is told "do not write this name to zero" and the unified
+# Risk Profile caps composite risk at "Moderate".
+_SURVIVAL_FLOOR_TIERS = {
+    "semi_sovereignty",
+    "defense_prime",
+    "energy_sovereignty",
+    "critical_material",
+}
+
+# Per-ticker subsidy / grant present-value, in USD.  Used to add a
+# strategic-floor delta to DCF for tickers with named, citable government
+# capital programs (CHIPS Act grants, DPA Title III contracts, etc.).
+# Conservative: only the *announced* dollar amount, not implied tax credits.
+STRATEGIC_SUBSIDY_PV = {
+    "INTC": 19_500_000_000,   # $8.5B CHIPS grant + $11B subsidized loan PV
+    "MU":    6_100_000_000,   # CHIPS Act grant
+    "TXN":   1_600_000_000,   # CHIPS Act grant
+    "GFS":   1_500_000_000,   # CHIPS Act grant (note: not in registry above)
+    "ON":      300_000_000,   # NY fab DPA framework
+    "MP":      150_000_000,   # DPA Title III rare-earth funding
+    "LEU":     150_000_000,   # DOE HALEU contract value (approx)
+    "BWXT":    300_000_000,   # Naval reactor contract framework
+}
+
+# Tier-level book-value floor multipliers.  Reflects the principle that
+# the U.S. will not let strategically-anchored assets trade at distressed
+# book value: defense primes (sole-source on strategic platforms) get a
+# higher multiplier than commodity-cyclical semi names.
+_STRATEGIC_BOOK_FLOOR_MULT = {
+    "semi_sovereignty":   1.5,
+    "defense_prime":      2.0,
+    "energy_sovereignty": 1.4,
+    "critical_material":  1.5,
+    # UAM tier is intentionally absent — pre-revenue eVTOL has no
+    # meaningful book-value anchor.
+}
+
 
 def _strategic_classifier(ticker):
     """
@@ -2095,12 +2454,101 @@ def _strategic_classifier(ticker):
         "wacc_delta":       wacc_delta,
         "ceiling_lift":     ceiling_lift,
         "iv_floor_mult":    iv_floor_mult,
+        "survival_floor":   tier in _SURVIVAL_FLOOR_TIERS,
+        "subsidy_pv":       STRATEGIC_SUBSIDY_PV.get(ticker.upper(), 0),
+        "book_floor_mult":  _STRATEGIC_BOOK_FLOOR_MULT.get(tier),
         "narrative": (
             f"VALUS recognizes {ticker.upper()} as a strategic US asset — "
             f"{tier_label}.  Pure DCF systematically undervalues these names "
             "because the discount rate ignores government backstops and "
             "policy-driven capital flows."
         ),
+    }
+
+
+# ── Strategic IV Floor ─────────────────────────────────────────────────────
+# When a strategically-anchored name (CHIPS Act recipient, defense prime,
+# DPA-funded critical material) prints a DCF that's clearly punishing the
+# stock for cyclicality the government will absorb, the IV floor lifts the
+# fair-value estimate to reflect that backstop.  Three flooring methods:
+#
+#   1. Subsidy-adjusted DCF: DCF + per-ticker subsidy_pv ÷ shares
+#   2. Book-value floor:     tangible_book * tier_multiplier
+#   3. Peer EV/Revenue floor: peer median × revenue, equity-converted
+#
+# We take the maximum of (DCF, subsidy_dcf, book_floor, peer_floor).  The
+# UI surfaces both numbers for transparency — never a black-box override.
+
+def _compute_strategic_iv_floor(ticker, info, dcf_iv, base_fcf, fx_rate,
+                                 net_debt, shares_out, strategic, peers_payload=None):
+    """
+    Returns dict {floor_iv, components: {dcf, subsidy_adj, book, peer}, reasons: []}
+    or None if no floor data is available.
+
+    Conservative — only fires when at least one citable input (subsidy PV,
+    tangible book, peer EV/Revenue) is available.  Returns components for
+    every method even when they don't win, so the UI can show the full
+    flooring math.
+    """
+    if not strategic or not strategic.get("survival_floor"):
+        return None
+    if not shares_out or shares_out <= 0:
+        return None
+
+    components = {"dcf": round(dcf_iv, 2) if dcf_iv else None}
+    reasons = []
+
+    # 1. Subsidy-adjusted DCF — adds strategic_subsidy_pv to enterprise value
+    subsidy_iv = None
+    subsidy_pv = strategic.get("subsidy_pv", 0) or 0
+    if dcf_iv and subsidy_pv > 0 and shares_out > 0:
+        subsidy_iv = round(dcf_iv + (subsidy_pv * fx_rate / shares_out), 2)
+        components["subsidy_adj"] = subsidy_iv
+        reasons.append(
+            f"Subsidy-adjusted DCF: ${subsidy_iv:.2f} (DCF ${dcf_iv:.2f} + "
+            f"${subsidy_pv/1e9:.1f}B in citable government capital ÷ "
+            f"{shares_out/1e9:.2f}B shares)."
+        )
+
+    # 2. Book-value floor — tangible book × tier multiplier
+    book_iv = None
+    book_mult = strategic.get("book_floor_mult")
+    book_value_per_share = safe(info.get("bookValue"))
+    if book_value_per_share and book_value_per_share > 0 and book_mult:
+        book_iv = round(book_value_per_share * book_mult, 2)
+        components["book"] = book_iv
+        reasons.append(
+            f"Book floor: ${book_iv:.2f} (book value ${book_value_per_share:.2f}/sh × "
+            f"{book_mult:.1f}× — {strategic['strategic_label']} tier won't trade at distressed book)."
+        )
+
+    # 3. Peer EV/Revenue floor — peer median × revenue, equity-converted
+    peer_iv = None
+    if peers_payload and isinstance(peers_payload, dict):
+        peer_ev_rev = peers_payload.get("peer_median_ev_rev")
+        revenue = safe(info.get("totalRevenue"))
+        if peer_ev_rev and peer_ev_rev > 0 and revenue and revenue > 0:
+            implied_ev = peer_ev_rev * revenue
+            implied_equity = implied_ev - (net_debt or 0)
+            if shares_out > 0:
+                peer_iv = round(max(0, implied_equity / shares_out), 2)
+                components["peer"] = peer_iv
+                if peer_iv > 0:
+                    reasons.append(
+                        f"Peer EV/Revenue floor: ${peer_iv:.2f} "
+                        f"(median peer multiple {peer_ev_rev:.1f}× × ${revenue/1e9:.1f}B revenue)."
+                    )
+
+    candidates = [c for c in [dcf_iv, subsidy_iv, book_iv, peer_iv] if c is not None and c > 0]
+    if not candidates:
+        return None
+    floor_iv = max(candidates)
+    return {
+        "floor_iv":   round(floor_iv, 2),
+        "components": components,
+        "reasons":    reasons,
+        "dcf_iv":     round(dcf_iv, 2) if dcf_iv else None,
+        "applied":    floor_iv > (dcf_iv or 0),
     }
 
 
@@ -2371,7 +2819,8 @@ def _build_verdict_summary(ticker, priced_for, implied_growth_pct, model_growth_
                             sector_ceiling_pct, sector_ceiling_label, price, iv,
                             margin_of_safety, analyst_target,
                             debt_momentum, is_cash_rich, cash_pct_of_mcap,
-                            is_mag7, is_structural_transformer):
+                            is_mag7, is_structural_transformer,
+                            survival_floor=False, strategic_floor=None):
     """
     Distil the full analysis into a clean numbered explanation users can
     actually read.  Replaces the dense flag list with: a one-line headline,
@@ -2548,7 +2997,22 @@ def _build_verdict_summary(ticker, priced_for, implied_growth_pct, model_growth_
     # Verdict line — always matches the sign of margin_of_safety so it's
     # consistent with the OVERVALUED/UNDERVALUED tag at the top of the page.
     mos = margin_of_safety or 0
-    if tier == "deep_discount":
+    # Survival-floor names get distinct phrasing — Prof Shelton's note that
+    # strategically-anchored stocks shouldn't be tagged "overvalued" in the
+    # standard sense even when MOS is negative; the strategic backstop is
+    # what's missing from the DCF, not value to be skeptical of.
+    if survival_floor and mos < 0:
+        floor_applied = bool(strategic_floor and strategic_floor.get("applied"))
+        if floor_applied and mos > -10:
+            verdict = (f"Strategic re-rating opportunity — government-backed tier; "
+                       f"DCF lifts ${strategic_floor.get('dcf_iv'):.2f} → "
+                       f"${strategic_floor.get('floor_iv'):.2f} via subsidy, "
+                       f"book floor, and peer multiples.")
+        else:
+            verdict = (f"Premium for strategic floor — pure DCF undercounts the "
+                       f"government backstop on this name; survival probability "
+                       f"is anchored, not market-driven.")
+    elif tier == "deep_discount":
         verdict = (f"VALUS sees this stock as undervalued by {abs(mos):.0f}% — market is "
                    f"overly pessimistic; meaningful upside if fundamentals hold.")
     elif tier == "discount":
@@ -5289,6 +5753,184 @@ def api_insider():
     return jsonify(payload)
 
 
+# ── Congressional trading (House + Senate Stock Watcher mirrors) ───────────
+# Free community-mirrored dataset of House Periodic Transaction Reports and
+# Senate eFD filings. Surfaces named buys/sells per ticker for the "Smart
+# Money" panel.  Cached aggressively (6h) — these data feeds refresh daily.
+
+_CONGRESS_CACHE = {}
+_CONGRESS_CACHE_TTL = 6 * 3600
+
+# House/Senate Stock Watcher publish their parsed datasets to public S3
+# buckets — those are the canonical source the websites read from too.
+# Direct-to-S3 avoids the websites' rate limits and CDN flakiness.
+# If a bucket is unreachable, we fall back to an empty list silently.
+_HOUSE_API_URL  = "https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json"
+_SENATE_API_URL = "https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/aggregate/all_transactions.json"
+
+
+def _normalize_congress_row(row, chamber):
+    """Normalize a row from either House or Senate Stock Watcher into a
+    consistent shape: {date, name, party, chamber, action, amount_range}.
+    Returns None if essential fields are missing."""
+    if not row or not isinstance(row, dict):
+        return None
+    ticker = (row.get("ticker") or "").upper().strip()
+    if not ticker:
+        return None
+    action_raw = (row.get("type") or row.get("transaction_type") or "").lower()
+    if "purchase" in action_raw or "buy" in action_raw:
+        action = "buy"
+    elif "sale" in action_raw or "sell" in action_raw:
+        action = "sell"
+    else:
+        action = action_raw[:30] or "—"
+    name = (row.get("representative") or row.get("senator") or row.get("name")
+            or "").strip()
+    if not name:
+        return None
+    return {
+        "ticker":       ticker,
+        "date":         row.get("transaction_date") or row.get("disclosure_date") or "",
+        "name":         name,
+        "party":        (row.get("party") or "").strip()[:1].upper() or None,
+        "chamber":      chamber,
+        "action":       action,
+        "amount_range": (row.get("amount") or "").strip() or None,
+    }
+
+
+# Full-dataset cache: download the House + Senate transaction JSONs once,
+# then filter per ticker from memory.  Way faster than re-downloading the
+# multi-MB dataset on every per-ticker call.
+_CONGRESS_FULL_CACHE = {"ts": 0, "rows": []}
+_CONGRESS_FULL_TTL   = 24 * 3600
+
+
+def _fetch_congress_full_dataset():
+    """Download and cache the House + Senate combined dataset (24h)."""
+    if (time.time() - _CONGRESS_FULL_CACHE["ts"]) < _CONGRESS_FULL_TTL:
+        return _CONGRESS_FULL_CACHE["rows"]
+    rows = []
+    for url, chamber in [(_HOUSE_API_URL, "House"), (_SENATE_API_URL, "Senate")]:
+        try:
+            r = requests.get(url, timeout=20, headers={
+                "User-Agent": "Valus/1.0 (sultan@valus.app)",
+                "Accept": "application/json",
+            })
+            if r.status_code != 200:
+                continue
+            data = r.json()
+            raw_rows = data if isinstance(data, list) else (data.get("transactions") or data.get("data") or [])
+            for row in raw_rows:
+                norm = _normalize_congress_row(row, chamber)
+                if norm:
+                    rows.append(norm)
+        except Exception:
+            continue
+    _CONGRESS_FULL_CACHE["ts"]   = time.time()
+    _CONGRESS_FULL_CACHE["rows"] = rows
+    return rows
+
+
+def _fetch_congressional_trades(ticker: str, lookback_days: int = 180):
+    """
+    Returns dict {available, summary, items: [...], as_of} or
+    {available: False, reason: ...}.  Never raises.
+    """
+    if not ticker:
+        return {"available": False, "reason": "ticker required"}
+    t = ticker.upper().strip()
+    cached = _CONGRESS_CACHE.get(t)
+    if cached and (time.time() - cached[0]) < _CONGRESS_CACHE_TTL:
+        return cached[1]
+
+    redis_key = f"valus:congress:v1:{t}"
+    if _kv:
+        try:
+            raw = _kv.get(redis_key)
+            if raw:
+                parsed = _json_top.loads(raw)
+                _CONGRESS_CACHE[t] = (time.time(), parsed)
+                return parsed
+        except Exception:
+            pass
+
+    cutoff = (datetime.utcnow() - timedelta(days=lookback_days)).date()
+    items = []
+    try:
+        all_rows = _fetch_congress_full_dataset()
+        for norm in all_rows:
+            if norm["ticker"] != t:
+                continue
+            try:
+                # Dataset uses MM/DD/YYYY format; tolerate ISO too.
+                dstr = norm.get("date") or ""
+                d = None
+                for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%-m/%-d/%Y"):
+                    try:
+                        d = datetime.strptime(dstr, fmt).date()
+                        break
+                    except Exception:
+                        continue
+                if d is None:
+                    continue
+                if d < cutoff:
+                    continue
+            except Exception:
+                continue
+            items.append(norm)
+    except Exception:
+        items = []
+
+    # Sort by date desc, dedupe by (name, date, action)
+    seen = set()
+    deduped = []
+    items.sort(key=lambda x: x.get("date", ""), reverse=True)
+    for it in items:
+        k = (it["name"], it["date"], it["action"])
+        if k in seen:
+            continue
+        seen.add(k)
+        deduped.append(it)
+
+    buys  = [x for x in deduped if x["action"] == "buy"]
+    sells = [x for x in deduped if x["action"] == "sell"]
+    summary = {
+        "buy_count":   len(buys),
+        "sell_count":  len(sells),
+        "net_label":   ("net buying" if len(buys) > len(sells) else
+                        "net selling" if len(sells) > len(buys) else
+                        "balanced"),
+    }
+    payload = {
+        "available": bool(deduped),
+        "summary":   summary,
+        "items":     deduped[:10],
+        "as_of":     date.today().isoformat(),
+    }
+    if not deduped:
+        payload["reason"] = "No congressional trades disclosed in last 180 days."
+
+    _CONGRESS_CACHE[t] = (time.time(), payload)
+    if _kv:
+        try:
+            _kv.setex(redis_key, _CONGRESS_CACHE_TTL, _json_top.dumps(payload))
+        except Exception:
+            pass
+    return payload
+
+
+@app.route("/api/congressional/<ticker>")
+@limiter.limit(limit_medium)
+def api_congressional(ticker):
+    """Per-ticker congressional trading disclosures (House + Senate)."""
+    ticker = (ticker or "").strip().upper()
+    if not ticker:
+        return jsonify({"available": False, "reason": "ticker required"}), 400
+    return jsonify(_fetch_congressional_trades(ticker))
+
+
 @app.route("/api/valuation-history")
 @limiter.limit(limit_medium)
 def valuation_history():
@@ -7868,6 +8510,7 @@ def analyze():
         # the floor.  This refuses to print a distress verdict on a name
         # the government is structurally backstopping.
         strategic_floor_applied = False
+        strategic_floor_payload = None
         if (strategic and intrinsic_value is not None and price and price > 0):
             forward_pe   = safe(info.get("forwardPE"))
             sector_fwd   = safe(info.get("trailingPE"))   # rough proxy when no sector avg
@@ -7875,10 +8518,29 @@ def analyze():
                 (forward_pe is not None and forward_pe > 0 and forward_pe < 20) or
                 (analyst_target_price and analyst_target_price > price * 1.05)
             )
-            iv_floor = price * strategic["iv_floor_mult"]
-            if intrinsic_value < iv_floor and cheap_signal:
+            # New: substantive strategic floor for survival_floor tiers.
+            # Combines subsidy-adjusted DCF, book-value floor, and peer
+            # EV/Revenue floor — full transparency surfaced in payload.
+            _shares_for_floor = safe(bal_data.get("shares"), 0) if bal_data else 0
+            strategic_floor_payload = _compute_strategic_iv_floor(
+                ticker=ticker, info=info, dcf_iv=intrinsic_value,
+                base_fcf=base_fcf, fx_rate=fx_rate,
+                net_debt=net_debt, shares_out=_shares_for_floor,
+                strategic=strategic,
+            )
+            new_floor = None
+            if strategic_floor_payload and strategic_floor_payload.get("applied"):
+                new_floor = strategic_floor_payload["floor_iv"]
+            # Fallback: legacy price-multiple floor for tiers without a
+            # citable subsidy/book/peer input (UAM, energy_sovereignty
+            # without subsidy data).
+            legacy_floor = price * strategic["iv_floor_mult"]
+            if (new_floor is None and intrinsic_value < legacy_floor
+                    and cheap_signal):
+                new_floor = legacy_floor
+            if new_floor is not None and new_floor > intrinsic_value:
                 _iv_pre = intrinsic_value
-                intrinsic_value = round(iv_floor, 2)
+                intrinsic_value = round(new_floor, 2)
                 margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
                 strategic_floor_applied = True
                 if scenarios:
@@ -7969,6 +8631,8 @@ def analyze():
                 cash_pct_of_mcap       = cash_pct_of_mcap,
                 is_mag7                = is_mag7,
                 is_structural_transformer = is_structural_transformer,
+                survival_floor         = bool(strategic and strategic.get("survival_floor")),
+                strategic_floor        = strategic_floor_payload,
             )
         except Exception:
             verdict_summary = None
@@ -8422,6 +9086,8 @@ def analyze():
             "strategic_narrative":       strategic["narrative"]        if strategic else None,
             "strategic_wacc_delta_pp":   round(strategic_wacc_delta * 100, 2) if strategic else 0.0,
             "strategic_floor_applied":   strategic_floor_applied,
+            "strategic_floor":           strategic_floor_payload,
+            "survival_floor":            bool(strategic and strategic.get("survival_floor")),
             "strategic_live_amplified":  bool(strategic and strategic.get("live_policy_amplifier")),
             # ── Policy news signals ──────────────────────────────────────
             "policy_tailwind":           policy_tailwind,
@@ -8445,6 +9111,120 @@ def analyze():
             "fifty_two_week_low":        safe(info.get("fiftyTwoWeekLow")),
             "quality_metrics": _build_quality_metrics(info, base_fcf, rev_ttm),
         }
+
+        # ── Unified Risk Profile (consolidates scattered risk signals) ────
+        try:
+            result["risk_profile"] = _build_risk_profile(
+                info=info,
+                debt_momentum=debt_momentum,
+                catalyst_labels=catalyst_labels,
+                risk_labels=risk_labels,
+                policy_headwind_labels=policy_headwind_labels,
+                lynch_category=None,   # filled after AI synthesis below
+                survival_floor=bool(strategic and strategic.get("survival_floor")),
+            )
+        except Exception:
+            result["risk_profile"] = None
+
+        # ── Per-ticker Haiku synthesis (Lynch thesis + risks + strategic_note) ──
+        # Skipped for ETFs/indexes (handled in their own branch above).
+        # Soft-fails to None on any error so the rest of the analysis remains.
+        try:
+            insider_dir_summary = "no recent filings"
+            try:
+                _ins = _fetch_insider_form4(ticker)
+                if _ins and _ins.get("filings"):
+                    insider_dir_summary = (
+                        f"{_ins['filings']} Form 4 filings in last 90 days"
+                    )
+            except Exception:
+                pass
+            congress_summary = "no recent activity"
+            try:
+                _con = _fetch_congressional_trades(ticker)
+                if _con and _con.get("available"):
+                    s = _con["summary"]
+                    notable = ""
+                    items = _con.get("items") or []
+                    if items:
+                        first = items[0]
+                        notable = (f"; notable: {first.get('name','?')} "
+                                   f"{first.get('action','?')} {first.get('amount_range','?')}")
+                    congress_summary = (
+                        f"{s.get('buy_count',0)} buys, {s.get('sell_count',0)} sells "
+                        f"({s.get('net_label','—')}){notable}"
+                    )
+            except Exception:
+                pass
+
+            ai_signals = {
+                "survival_floor":         bool(strategic and strategic.get("survival_floor")),
+                "strategic_floor":        strategic_floor_payload,
+                "insider_direction":      insider_dir_summary,
+                "top_13f_holders":        "—",  # not pulled per-ticker (yfinance has it; out of scope this round)
+                "congressional_summary":  congress_summary,
+            }
+            ai_synth = _claude_ticker_synthesis(ticker, result, ai_signals)
+            result["ai_synthesis"] = ai_synth
+            # Backfill structural component of risk_profile with the Lynch
+            # category from AI synthesis (cyclical/turnaround weight higher).
+            if ai_synth and result.get("risk_profile"):
+                cat = ai_synth.get("category")
+                if cat:
+                    try:
+                        result["risk_profile"] = _build_risk_profile(
+                            info=info,
+                            debt_momentum=debt_momentum,
+                            catalyst_labels=catalyst_labels,
+                            risk_labels=risk_labels,
+                            policy_headwind_labels=policy_headwind_labels,
+                            lynch_category=cat,
+                            survival_floor=bool(strategic and strategic.get("survival_floor")),
+                        )
+                    except Exception:
+                        pass
+        except Exception:
+            result["ai_synthesis"] = None
+
+        # ── Congressional preview (lightweight; first 5 rows) ─────────────
+        # We only block on a synchronous fetch if the per-ticker cache is
+        # already warm (or KV-cached).  When cold, we return a placeholder
+        # so the analyze response stays fast — the dedicated
+        # /api/congressional/<ticker> endpoint will populate on demand.
+        try:
+            _t = ticker.upper().strip()
+            _cached = _CONGRESS_CACHE.get(_t)
+            _con_preview = None
+            if _cached and (time.time() - _cached[0]) < _CONGRESS_CACHE_TTL:
+                _con_preview = _cached[1]
+            elif _kv:
+                try:
+                    _raw = _kv.get(f"valus:congress:v1:{_t}")
+                    if _raw:
+                        _con_preview = _json_top.loads(_raw)
+                except Exception:
+                    pass
+            # If full dataset already cached, run the synchronous fetch
+            # (fast; just memory filter).  Otherwise defer to async client fetch.
+            if _con_preview is None and (time.time() - _CONGRESS_FULL_CACHE["ts"]) < _CONGRESS_FULL_TTL:
+                _con_preview = _fetch_congressional_trades(ticker)
+            if _con_preview and _con_preview.get("available"):
+                result["congressional"] = {
+                    "summary": _con_preview.get("summary"),
+                    "items":   (_con_preview.get("items") or [])[:5],
+                    "as_of":   _con_preview.get("as_of"),
+                }
+            elif _con_preview:
+                result["congressional"] = {
+                    "summary": None,
+                    "items":   [],
+                    "reason":  _con_preview.get("reason"),
+                }
+            else:
+                # Cold cache — UI will fetch via /api/congressional async
+                result["congressional"] = {"summary": None, "items": [], "deferred": True}
+        except Exception:
+            result["congressional"] = None
 
         cleaned = clean(result)
         _analyze_cache_set(_ck, cleaned)

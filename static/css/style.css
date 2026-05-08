@@ -3633,6 +3633,148 @@ a:focus-visible {
 a.insider-row { text-decoration: none; transition: background 0.15s ease; }
 a.insider-row:hover { background: rgba(255,255,255,0.05); }
 
+/* ── AI Thesis card ───────────────────────────────────────────────── */
+.ai-thesis-card {
+  margin-bottom: 24px;
+  padding: 22px 24px;
+  border-left: 3px solid #a78bfa;
+  background: linear-gradient(180deg, rgba(167,139,250,0.05), rgba(255,255,255,0.01));
+}
+.ai-thesis-head { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
+.ai-thesis-title-row { display: flex; align-items: center; gap: 10px; }
+.ai-thesis-title { font-size: 16px; font-weight: 700; color: #f5f7fa; letter-spacing: -0.005em; }
+.ai-thesis-badge {
+  display: inline-block; padding: 3px 10px; border-radius: 999px;
+  font-size: 11px; font-weight: 600;
+  background: rgba(167,139,250,0.14); color: #c4b5fd;
+  border: 1px solid rgba(167,139,250,0.30); text-transform: capitalize;
+}
+.ai-thesis-sub { font-size: 11.5px; color: #8892a3; }
+.ai-thesis-body { font-size: 14px; line-height: 1.55; color: #e7eaf0; }
+.ai-thesis-strategic {
+  margin-top: 12px; padding: 10px 14px; border-radius: 8px;
+  background: rgba(96,165,250,0.08); border-left: 3px solid #60a5fa;
+  font-size: 12.5px; color: #cbd5f5; line-height: 1.5;
+}
+.ai-thesis-risks { margin-top: 14px; }
+.ai-risks-title {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: #8892a3; font-weight: 600; margin-bottom: 6px;
+}
+.ai-thesis-risks ul {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.ai-thesis-risks li {
+  font-size: 12.5px; color: #d8dde6; padding-left: 14px; position: relative;
+}
+.ai-thesis-risks li::before {
+  content: "·"; position: absolute; left: 4px; color: #f87171; font-weight: 700;
+}
+
+/* ── Risk Profile ─────────────────────────────────────────────────── */
+.risk-score-wrap {
+  display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px;
+}
+.risk-score {
+  font-variant-numeric: tabular-nums;
+  display: flex; align-items: baseline; gap: 4px;
+  padding: 6px 14px; border-radius: 8px; font-weight: 700;
+}
+.risk-score__num { font-size: 26px; }
+.risk-score__scale { font-size: 12px; opacity: 0.7; }
+.risk-score--green  { background: rgba(52,211,153,0.14); color: #34d399; }
+.risk-score--lime   { background: rgba(132,204,22,0.14); color: #84cc16; }
+.risk-score--amber  { background: rgba(251,191,36,0.14); color: #fbbf24; }
+.risk-score--orange { background: rgba(251,146,60,0.14); color: #fb923c; }
+.risk-score--red    { background: rgba(248,113,113,0.14); color: #f87171; }
+.risk-score__label { font-size: 13px; font-weight: 600; color: #e7eaf0; }
+.risk-reasons {
+  list-style: none; padding: 0; margin: 0 0 12px 0;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.risk-reasons li {
+  font-size: 12px; color: #d8dde6; padding-left: 10px; position: relative;
+}
+.risk-reasons li::before {
+  content: "—"; position: absolute; left: 0; color: #6b7382;
+}
+.risk-components {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px;
+  margin-top: 8px;
+}
+.risk-comp {
+  display: flex; flex-direction: column; gap: 2px; align-items: center;
+  padding: 6px 4px; border-radius: 6px;
+  background: rgba(255,255,255,0.02);
+}
+.risk-comp__lbl {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.04em;
+  color: #8892a3; font-weight: 600;
+}
+.risk-comp__val {
+  font-size: 13px; font-weight: 700; color: #f5f7fa;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Smart Money (Institutional / Insiders / Congressional) ──────── */
+.insights-card--wide { grid-column: 1 / -1; }
+.smart-money-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+}
+@media (max-width: 720px) {
+  .smart-money-grid { grid-template-columns: 1fr; }
+  .risk-components  { grid-template-columns: repeat(5, 1fr); font-size: 9px; }
+}
+.smart-lane {
+  padding: 12px 14px; border-radius: 8px;
+  background: rgba(255,255,255,0.02);
+  border-left: 3px solid rgba(255,255,255,0.10);
+}
+.smart-lane:nth-child(1) { border-left-color: #60a5fa; }
+.smart-lane:nth-child(2) { border-left-color: #fbbf24; }
+.smart-lane:nth-child(3) { border-left-color: #c084fc; }
+.smart-lane__title {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: #8892a3; font-weight: 600; margin-bottom: 6px;
+}
+.smart-lane__body {
+  font-size: 12.5px; color: #d8dde6; display: flex; flex-direction: column; gap: 4px;
+}
+.sm-summary {
+  font-weight: 600; color: #e7eaf0; padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255,255,255,0.06); margin-bottom: 4px;
+}
+.sm-row {
+  font-size: 11.5px; color: #d8dde6; padding: 2px 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sm-row--buy  { color: #34d399; }
+.sm-row--sell { color: #f87171; }
+.sm-pill {
+  display: inline-block; padding: 3px 9px; border-radius: 999px;
+  font-size: 11px; font-weight: 600;
+}
+.sm-pill--active   { background: rgba(52,211,153,0.12); color: #34d399; }
+.sm-pill--moderate { background: rgba(96,165,250,0.10); color: #60a5fa; }
+.sm-pill--quiet    { background: rgba(255,255,255,0.04); color: #8892a3; }
+.sm-line { font-size: 12.5px; color: #d8dde6; }
+
+/* ── Strategic IV floor breakdown (in hero) ──────────────────────── */
+.iv-floor-breakdown {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px;
+  margin-top: 6px; padding: 8px 12px;
+  background: rgba(96,165,250,0.06);
+  border-left: 2px solid #60a5fa;
+  border-radius: 6px;
+  font-size: 11.5px; font-variant-numeric: tabular-nums;
+}
+.iv-floor__lbl  { color: #8892a3; text-transform: uppercase; font-size: 10px; letter-spacing: 0.04em; }
+.iv-floor__val  { color: #d8dde6; font-weight: 600; }
+.iv-floor__sep  { color: #6b7382; }
+.iv-floor__val--floor { color: #fbbf24; }
+.iv-floor__val--used  { color: #34d399; font-weight: 700; }
+
 /* ── Portfolio Templates modal ──────────────────────────────────────── */
 .pf-templates__panel { max-width: 760px; }
 .pf-tpl__tabs {
