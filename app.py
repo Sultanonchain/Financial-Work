@@ -615,7 +615,8 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
                           implied_growth_pct, model_growth_pct,
                           quality_metrics, risk_labels, catalyst_labels,
                           confidence_weaknesses, iv_confidence,
-                          strategic_info, priced_for_label):
+                          strategic_info, priced_for_label,
+                          tape_signals=None):
     """
     Per-ticker Lynch-flavored verdict via Claude Haiku.
     Returns dict or None on failure / no API key.
@@ -682,11 +683,34 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
     else:
         strat_block = "NO sovereign backstop on file."
 
+    # ── TAPE block: recent price action, 52w distance, volume, short/float ──
+    # Optional. Each line is omitted if the underlying signal is missing so
+    # the prompt stays clean for thinly-covered names.
+    tape_lines = []
+    regime = (tape_signals or {}).get("regime") or "stable"
+    if tape_signals:
+        ts = tape_signals
+        if ts.get("ret_1m_pct")  is not None: tape_lines.append(f"  • 1-month return: {ts['ret_1m_pct']:+.1f}%")
+        if ts.get("ret_3m_pct")  is not None: tape_lines.append(f"  • 3-month return: {ts['ret_3m_pct']:+.1f}%")
+        if ts.get("ret_6m_pct")  is not None: tape_lines.append(f"  • 6-month return: {ts['ret_6m_pct']:+.1f}%")
+        if ts.get("ret_ytd_pct") is not None: tape_lines.append(f"  • YTD return: {ts['ret_ytd_pct']:+.1f}%")
+        if ts.get("pct_of_52w_high")   is not None: tape_lines.append(f"  • % of 52w high: {ts['pct_of_52w_high']:.1f}%")
+        if ts.get("pct_above_52w_low") is not None: tape_lines.append(f"  • % above 52w low: {ts['pct_above_52w_low']:.1f}%")
+        if ts.get("vol_anomaly_x")     is not None: tape_lines.append(f"  • Volume vs 30d avg: {ts['vol_anomaly_x']:.2f}x")
+        if ts.get("short_pct_float")   is not None: tape_lines.append(f"  • Short % of float: {ts['short_pct_float']:.1f}%")
+        if ts.get("short_days_to_cover") is not None: tape_lines.append(f"  • Days to cover: {ts['short_days_to_cover']:.1f}")
+        if ts.get("float_shares_m")    is not None: tape_lines.append(f"  • Float (M shares): {ts['float_shares_m']:.1f}")
+        if ts.get("insider_held_pct")  is not None: tape_lines.append(f"  • Insider ownership: {ts['insider_held_pct']:.1f}%")
+        if ts.get("institution_held_pct") is not None: tape_lines.append(f"  • Institutional ownership: {ts['institution_held_pct']:.1f}%")
+        tape_lines.append(f"  • Computed regime hint: {regime}")
+    tape_block = "\n".join(tape_lines) if tape_lines else "  (no tape data available)"
+
     try:
         prompt = (
-            "You are a buyside equity analyst trained in Peter Lynch's method "
-            "from One Up On Wall Street.  You're issuing a one-line verdict on "
-            "this stock based on the snapshot below.\n\n"
+            "You are a buyside analyst trained in Peter Lynch's method from "
+            "One Up On Wall Street.  Issue ONE verdict on this stock from the "
+            "snapshot below.  Write like Lynch — short plain sentences, no "
+            "sell-side jargon, blunt where the numbers are blunt.\n\n"
             "LYNCH'S SIX CATEGORIES — pick the one that fits best:\n"
             "  slowGrower  — large, mature, low single-digit growth, dividend.\n"
             "  stalwart    — multibillion, 10–12% growth, recession-resilient.\n"
@@ -694,15 +718,45 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
             "  cyclical    — earnings rise/fall with macro (autos, airlines, semis).\n"
             "  turnaround  — battered names that may rebound.\n"
             "  assetPlay   — hidden assets (real estate, cash, brand) understated.\n\n"
-            "LYNCH'S PRINCIPLES (apply when scoring):\n"
-            "  • PEG < 1 + clean balance sheet = strong buy signal.\n"
-            "  • Insider buying / buybacks > 1 quarter = positive.\n"
-            "  • Diworsification, hot-stock hype, debt-funded growth = red flag.\n"
-            "  • Cyclicals near peak earnings = sell EVEN on good headlines.\n"
+            "LYNCH HEURISTICS (use the numerics, don't paraphrase):\n"
+            "  • PEG ≤ 0.5 with rising earnings → strong; PEG ≥ 1.5 → trim regardless of story.\n"
+            "  • FastGrower needs ≥20% revenue growth AND debt/equity < 0.5.\n"
+            "    Debt-fueled growth is the #1 trap — call it out.\n"
+            "  • Cyclical at peak margins + bullish headline = sell signal, not buy.\n"
             "  • Stalwarts realistically deliver 30–50% over 1–2 years, not 10x.\n"
-            "  • Turnarounds need cash to survive AND a credible plan.\n\n"
+            "  • Turnaround thesis is invalid without ≥18 months of cash runway.\n"
+            "  • Diworsification, hot-stock hype, analyst chase = red flags.\n\n"
             "STRATEGIC BACKSTOP RULE (critical):\n"
             f"{strat_block}\n\n"
+            "REGIME RULE (critical — read this carefully):\n"
+            "  The TAPE block tells you what the stock is actually doing.\n"
+            "  When tape and fundamentals disagree, NAME THE DISAGREEMENT.  Do\n"
+            "  not parrot the IV when the tape says something else is going on.\n"
+            "  Apply the regime hint as follows:\n\n"
+            "    momentum_runup   — Stock is melting up on flow, not earnings.\n"
+            "                       Lead the thesis by NAMING the move\n"
+            "                       ('momentum melt-up', 'FOMO bid', 'AI-themed\n"
+            "                       chase'). State separately what the\n"
+            "                       fundamentals say.  DO NOT issue Avoid based\n"
+            "                       on IV alone — you can't time tops.  Verdict\n"
+            "                       caps at Hold or Watch.  Never Buy a parabola.\n\n"
+            "    squeeze_risk     — High short %, volume spike.  Tape is being\n"
+            "                       moved by positioning, not fundamentals.\n"
+            "                       Verdict caps at Hold or Watch.  Refuse a\n"
+            "                       decisive call and say so plainly.\n\n"
+            "    post_runup_pullback — Big 6-month move, recent pullback.  Easy\n"
+            "                       money is gone but the regime change may be\n"
+            "                       real.  Hold or Accumulate based on quality.\n\n"
+            "    broken           — Down hard, near 52w low.  If quality metrics\n"
+            "                       are intact, this is Lynch turnaround\n"
+            "                       territory — say so explicitly and check the\n"
+            "                       cash-runway rule above.\n\n"
+            "    stable           — Judge normally on DCF + quality.\n\n"
+            "  HONESTY RULE: When the tape contradicts the DCF, the thesis MUST\n"
+            "  acknowledge it.  No glossing.  Better to be a useful skeptic than\n"
+            "  a confidently-wrong machine.\n\n"
+            "TAPE:\n"
+            f"{tape_block}\n\n"
             "SNAPSHOT:\n"
             f"  Ticker: {ticker}\n"
             f"  Sector / Industry: {sector or '?'} / {industry or '?'}\n"
@@ -728,18 +782,22 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
             "Return ONLY a single-line JSON object with these keys (no prose):\n"
             "  category: one of slowGrower|stalwart|fastGrower|cyclical|turnaround|assetPlay\n"
             "  verdict:  one of Buy|Accumulate|Hold|Watch|Avoid\n"
-            "  thesis:   <= 220 chars, plain English, Lynch-flavored\n"
+            "  thesis:   <= 240 chars, plain English, Lynch-flavored\n"
             "  bull_points: array of 2-3 strings (each <= 70 chars)\n"
             "  bear_points: array of 2-3 strings (each <= 70 chars)\n"
             "  sovereign_backstop: short string if a strategic backstop applies, else null\n"
-            "Be honest.  If numbers are weak AND no backstop applies, say Avoid.  "
-            "If a backstop applies, soften by one notch and explain why.\n"
+            "  regime:   one of stable|momentum_runup|squeeze_risk|post_runup_pullback|broken\n"
+            "            (use the TAPE regime hint unless you can defend a different one)\n"
+            "Be honest.  If numbers are weak AND no backstop applies AND regime is\n"
+            "stable, say Avoid.  If a backstop applies, soften by one notch and\n"
+            "explain why.  If regime is momentum_runup or squeeze_risk, cap verdict\n"
+            "at Hold/Watch and lead with what the tape is doing.\n"
         )
         full_prompt = prompt + snap_extra + instructions
 
         body = {
             "model":      "claude-haiku-4-5-20251001",
-            "max_tokens": 500,
+            "max_tokens": 700,
             "messages":   [{"role": "user", "content": full_prompt}],
         }
         resp = requests.post(
@@ -784,13 +842,26 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         sb = parsed.get("sovereign_backstop")
         sb_str = (str(sb).strip()[:120] if sb else None) or None
 
+        _VALID_REGIMES = {"stable", "momentum_runup", "squeeze_risk",
+                          "post_runup_pullback", "broken"}
+        regime_out = str(parsed.get("regime", "")).strip()
+        if regime_out not in _VALID_REGIMES:
+            regime_out = (tape_signals or {}).get("regime") or "stable"
+
+        # Enforce the cap: momentum_runup / squeeze_risk can't be Buy/Accumulate
+        # even if the model ignored the prompt.
+        verdict_final = verdict if verdict in _VALID_VERDICTS else "Hold"
+        if regime_out in ("momentum_runup", "squeeze_risk") and verdict_final in ("Buy", "Accumulate"):
+            verdict_final = "Hold"
+
         result = {
             "category":           cat if cat in _VALID_CATS else None,
-            "verdict":            verdict if verdict in _VALID_VERDICTS else "Hold",
-            "thesis":             str(parsed.get("thesis", ""))[:240],
+            "verdict":            verdict_final,
+            "thesis":             str(parsed.get("thesis", ""))[:260],
             "bull_points":        _coerce_str_list(parsed.get("bull_points")),
             "bear_points":        _coerce_str_list(parsed.get("bear_points")),
             "sovereign_backstop": sb_str,
+            "regime":             regime_out,
             "model":              "claude-haiku-4-5-20251001",
         }
         _LYNCH_CACHE[bucket] = (time.time(), result)
@@ -2000,6 +2071,132 @@ def _qual_score_low(val, good, great):
     if val <= good:  return "strong"
     if val <= good * 2: return "ok"
     return "weak"
+
+
+def _build_tape_signals(info, hist):
+    """
+    Tape & float signals for the Lynch verdict — recent returns, distance
+    from 52w high/low, volume anomaly, short/float profile, and a regime
+    classification. All inputs already in hand at the /ticker call site
+    (yfinance info dict + 5y daily price history DataFrame). No new API.
+
+    Returns a dict, or None if nothing meaningful could be derived. Every
+    nested value is optional so the prompt can omit lines that are missing
+    rather than emit "n/a" placeholders.
+
+    Regime ∈ {momentum_runup, squeeze_risk, post_runup_pullback,
+              broken, stable}.  This is a hint — the LLM still gets the raw
+    numbers and is expected to reason.
+    """
+    if info is None and (hist is None or getattr(hist, "empty", True)):
+        return None
+
+    out = {}
+
+    # ── Recent returns from the daily history ────────────────────────────
+    try:
+        if hist is not None and not hist.empty and "Close" in hist.columns:
+            closes = hist["Close"].dropna()
+            if len(closes) >= 2:
+                last = float(closes.iloc[-1])
+                def _ret(n):
+                    if len(closes) <= n: return None
+                    base = float(closes.iloc[-1 - n])
+                    if base <= 0: return None
+                    return (last / base - 1.0) * 100.0
+                out["ret_1m_pct"] = _ret(21)    # ~21 trading days
+                out["ret_3m_pct"] = _ret(63)
+                out["ret_6m_pct"] = _ret(126)
+                # YTD: walk back to the first trading day of current year
+                try:
+                    cur_year = closes.index[-1].year
+                    yr_mask = closes.index.year == cur_year
+                    yr_closes = closes[yr_mask]
+                    if len(yr_closes) >= 2 and float(yr_closes.iloc[0]) > 0:
+                        out["ret_ytd_pct"] = (last / float(yr_closes.iloc[0]) - 1.0) * 100.0
+                except Exception:
+                    pass
+
+                # ── Volume anomaly (last 5d vs trailing 30d) ──────────────
+                if "Volume" in hist.columns:
+                    vols = hist["Volume"].dropna()
+                    if len(vols) >= 35:
+                        v5  = float(vols.iloc[-5:].mean())
+                        v30 = float(vols.iloc[-35:-5].mean())
+                        if v30 > 0:
+                            out["vol_anomaly_x"] = round(v5 / v30, 2)
+    except Exception:
+        pass
+
+    # ── 52-week distance from yfinance info ──────────────────────────────
+    try:
+        if info:
+            hi = info.get("fiftyTwoWeekHigh")
+            lo = info.get("fiftyTwoWeekLow")
+            px = info.get("currentPrice") or info.get("regularMarketPrice")
+            if hi and px:
+                out["pct_of_52w_high"] = round(float(px) / float(hi) * 100.0, 1)
+            if lo and px and float(lo) > 0:
+                out["pct_above_52w_low"] = round((float(px) / float(lo) - 1.0) * 100.0, 1)
+    except Exception:
+        pass
+
+    # ── Short / float profile ────────────────────────────────────────────
+    try:
+        if info:
+            sp = info.get("shortPercentOfFloat")
+            if sp is not None:
+                # yfinance returns this as a fraction (0.18 = 18%)
+                out["short_pct_float"] = round(float(sp) * 100.0, 1)
+            sr = info.get("shortRatio")
+            if sr is not None:
+                out["short_days_to_cover"] = round(float(sr), 1)
+            fl = info.get("floatShares")
+            if fl:
+                out["float_shares_m"] = round(float(fl) / 1e6, 1)
+            ins = info.get("heldPercentInsiders")
+            if ins is not None:
+                out["insider_held_pct"] = round(float(ins) * 100.0, 1)
+            inst = info.get("heldPercentInstitutions")
+            if inst is not None:
+                out["institution_held_pct"] = round(float(inst) * 100.0, 1)
+    except Exception:
+        pass
+
+    # ── Regime classification ────────────────────────────────────────────
+    regime = "stable"
+    try:
+        r1m = out.get("ret_1m_pct")
+        r6m = out.get("ret_6m_pct")
+        pct_high = out.get("pct_of_52w_high")
+        sp_float = out.get("short_pct_float")
+        vol_x    = out.get("vol_anomaly_x")
+
+        is_runup   = (r1m is not None and r1m >= 30.0
+                      and pct_high is not None and pct_high >= 90.0)
+        is_squeeze = (sp_float is not None and sp_float >= 15.0
+                      and vol_x is not None and vol_x >= 2.0)
+        is_pullback = (r6m is not None and r6m >= 50.0
+                       and r1m is not None and r1m <= -10.0)
+        is_broken  = (r6m is not None and r6m <= -30.0
+                      and pct_high is not None and pct_high <= 60.0)
+
+        if is_squeeze:
+            regime = "squeeze_risk"
+        elif is_runup:
+            regime = "momentum_runup"
+        elif is_pullback:
+            regime = "post_runup_pullback"
+        elif is_broken:
+            regime = "broken"
+    except Exception:
+        regime = "stable"
+    out["regime"] = regime
+
+    # If we got nothing useful, return None so the caller skips the block
+    if not any(k for k in out if k != "regime"):
+        return None
+    return out
 
 
 def _build_quality_metrics(info, base_fcf, revenue_ttm):
@@ -8576,6 +8773,7 @@ def analyze():
         if not (_ua_is_bot and not _is_internal):
             try:
                 _qm_for_lynch = _build_quality_metrics(info, base_fcf, rev_ttm)
+                _tape_for_lynch = _build_tape_signals(info, hist)
                 lynch_verdict = _claude_lynch_verdict(
                     ticker                 = ticker,
                     sector                 = sector,
@@ -8592,6 +8790,7 @@ def analyze():
                     iv_confidence          = iv_confidence,
                     strategic_info         = strategic,
                     priced_for_label       = (priced_for or {}).get("label") if priced_for else None,
+                    tape_signals           = _tape_for_lynch,
                 )
             except Exception:
                 lynch_verdict = None
