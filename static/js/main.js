@@ -1373,7 +1373,8 @@ function renderHaikuVerdict(d) {
   const thes = document.getElementById("lynchThesis");
   const bulls = document.getElementById("lynchBulls");
   const bears = document.getElementById("lynchBears");
-  const back  = document.getElementById("lynchBackstop");
+  const back   = document.getElementById("lynchBackstop");
+  const regime = document.getElementById("lynchRegime");
   if (cat)  cat.textContent  = catLabel;
   if (verd) {
     verd.textContent = lv.verdict || "Hold";
@@ -1390,6 +1391,21 @@ function renderHaikuVerdict(d) {
       back.classList.remove("hidden");
     } else {
       back.classList.add("hidden");
+    }
+  }
+  if (regime) {
+    const regimeMap = {
+      momentum_runup:      ["Momentum Melt-Up",    "lynch-regime--momentum"],
+      squeeze_risk:        ["Squeeze Risk",         "lynch-regime--squeeze"],
+      post_runup_pullback: ["Post-Runup Pullback",  "lynch-regime--pullback"],
+      broken:              ["Broken",               "lynch-regime--broken"],
+    };
+    const r = regimeMap[lv.regime];
+    if (r) {
+      regime.textContent = r[0];
+      regime.className   = "lynch-regime " + r[1];
+    } else {
+      regime.className = "lynch-regime hidden";
     }
   }
   card.classList.remove("hidden");

@@ -3723,6 +3723,15 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
   border-left: 3px solid #60a5fa;
 }
 .lynch-backstop.hidden { display: none; }
+.lynch-regime {
+  display: inline-block; padding: 4px 10px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+}
+.lynch-regime.hidden { display: none; }
+.lynch-regime--momentum  { background: rgba(251,146,60,0.12); color: #fb923c; border: 1px solid rgba(251,146,60,0.35); }
+.lynch-regime--squeeze   { background: rgba(248,113,113,0.12); color: #f87171; border: 1px solid rgba(248,113,113,0.35); }
+.lynch-regime--pullback  { background: rgba(251,191,36,0.12);  color: #fbbf24; border: 1px solid rgba(251,191,36,0.35); }
+.lynch-regime--broken    { background: rgba(148,163,184,0.10); color: #94a3b8; border: 1px solid rgba(148,163,184,0.25); }
 
 /* ── Risk analysis card ──────────────────────────────────────────────── */
 .risk-summary { margin-bottom: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
