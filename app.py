@@ -599,16 +599,68 @@ def _claude_interpret_headline(ticker, sector, title, summary):
         return None
 
 
+# ── Market-epoch cache key ─────────────────────────────────────────────────
+# Lynch verdicts (and the AI-adjusted DCF computed from them) re-key only at
+# the next market open (9:30 ET) or close (4:00 ET) on a trading day.  This
+# means: one refresh at 9:30, one at 4:00, none over the weekend.  Costs
+# stay bounded; verdicts stop flapping with intraday price ticks.
+def _market_epoch():
+    """Stable cache-key string that flips at 9:30 AM and 4:00 PM ET on
+    trading days.  Weekends and pre-open weekday hours defer to the most
+    recent close, so the same cached verdict serves through the weekend.
+    Holidays produce a slightly-off label but the cache behavior is still
+    correct — the epoch persists until 9:30 of the next trading-day."""
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("America/New_York"))
+    except Exception:
+        # zoneinfo missing on some minimal containers — UTC-5 is a fine
+        # approximation; we only need stability within a 6.5-hour window.
+        now = datetime.utcnow() - timedelta(hours=5)
+    wd  = now.weekday()                   # 0=Mon, 6=Sun
+    mom = now.hour * 60 + now.minute      # minute-of-day in ET
+    OPEN_MIN, CLOSE_MIN = 9 * 60 + 30, 16 * 60
+    if wd == 5:                                                  # Saturday
+        prev = (now - timedelta(days=1)).date()
+        return f"{prev.isoformat()}-close"
+    if wd == 6:                                                  # Sunday
+        prev = (now - timedelta(days=2)).date()
+        return f"{prev.isoformat()}-close"
+    if wd == 0 and mom < OPEN_MIN:                               # Mon pre-open
+        prev = (now - timedelta(days=3)).date()
+        return f"{prev.isoformat()}-close"
+    if mom < OPEN_MIN:                                           # Tue-Fri pre-open
+        prev = (now - timedelta(days=1)).date()
+        return f"{prev.isoformat()}-close"
+    if mom < CLOSE_MIN:                                          # in-session
+        return f"{now.date().isoformat()}-open"
+    return f"{now.date().isoformat()}-close"                     # post-close
+
+
+def _market_epoch_label(epoch):
+    """Human-readable 'as of' label for the Lynch card chip."""
+    if not epoch:
+        return ""
+    if epoch.endswith("-open"):
+        return "as of market open · 9:30 ET"
+    if epoch.endswith("-close"):
+        return "as of last close · 4:00 ET"
+    return ""
+
+
 # ── Per-ticker Claude Haiku Lynch Verdict ───────────────────────────────────
 # Whereas _claude_interpret_headline() runs only on ambiguous individual
 # headlines, this runs once per ticker on the assembled valuation snapshot
 # (price, IV, MOS, quality metrics, risk labels, strategic-asset profile).
-# It returns a Peter-Lynch-style verdict the UI surfaces just under the hero.
+# It returns a Peter-Lynch-style verdict the UI surfaces just under the hero,
+# and (via dcf_tweaks) suggests bounded adjustments to s1 growth and WACC
+# that the caller re-runs through run_dcf_single() to produce a second
+# AI-adjusted ("VALUS") IV that renders alongside the deterministic DCF IV.
 # Strategic-asset narrative is fed in explicitly so Haiku does NOT issue a
 # distress verdict on a CHIPS-Act semi or a defense prime just because near-
 # term FCF is weak — the sovereign backstop is part of the thesis.
 _LYNCH_CACHE = {}
-_LYNCH_CACHE_TTL = 24 * 3600   # 24h — verdict only changes when price moves
+_LYNCH_CACHE_TTL = 5 * 24 * 3600   # 5 days — must cover weekend (Fri-close → Mon-open ~ 66h)
 
 
 def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
@@ -625,20 +677,16 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
     if not api_key or not ticker:
         return None
 
-    # Cache bucket — re-key every $1 of price movement and every 1pp of MOS
-    # so a 5-minute reload doesn't re-bill, but a real intraday move does.
-    try:
-        bucket = (
-            ticker.upper(),
-            int(round(float(price or 0.0))),
-            int(round(float(mos or 0.0))),
-        )
-    except Exception:
-        bucket = (ticker.upper(), 0, 0)
+    # Cache bucket — re-key only at the next market open (9:30 ET) or close
+    # (4:00 ET) on a trading day.  Same epoch persists through the weekend.
+    # Within an epoch, the verdict is frozen so live-price ticks don't burn
+    # API credits or cause the Lynch card to flap.
+    epoch = _market_epoch()
+    bucket = (ticker.upper(), epoch)
     cached = _LYNCH_CACHE.get(bucket)
     if cached and (time.time() - cached[0]) < _LYNCH_CACHE_TTL:
         return cached[1]
-    redis_key = f"valus:lynch:{bucket[0]}:{bucket[1]}:{bucket[2]}"
+    redis_key = f"valus:lynch:{bucket[0]}:{epoch}"
     if _kv:
         try:
             raw = _kv.get(redis_key)
@@ -788,6 +836,17 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
             "  sovereign_backstop: short string if a strategic backstop applies, else null\n"
             "  regime:   one of stable|momentum_runup|squeeze_risk|post_runup_pullback|broken\n"
             "            (use the TAPE regime hint unless you can defend a different one)\n"
+            "  dcf_tweaks: object with three keys describing how the DCF should be\n"
+            "    nudged to reflect facts the pure-math DCF misses (news, AI\n"
+            "    demand cycle, sovereign capital, sentiment regime):\n"
+            "      growth_delta_pp: number in [-3.0, +3.0]  (delta to Stage 1 growth, percentage points)\n"
+            "      wacc_delta_pp:   number in [-1.0, +1.0]  (delta to WACC, percentage points)\n"
+            "      rationale:       string <= 120 chars explaining the dial moves\n"
+            "    Positive growth_delta = catalysts you see in the news/tape that\n"
+            "    the DCF growth rate doesn't capture (HBM ramp, AI cycle, foundry\n"
+            "    fill).  Negative wacc_delta = sovereign capital lowers cost of\n"
+            "    equity (CHIPS Act, gov't equity stake, DPA-protected revenue).\n"
+            "    Use zeros when no edge exists — do NOT pad. Stay inside the bounds.\n"
             "Be honest.  If numbers are weak AND no backstop applies AND regime is\n"
             "stable, say Avoid.  If a backstop applies, the verdict floor is HOLD —\n"
             "NEVER Avoid, NEVER Watch on a backstopped name.  Lead the bull case\n"
@@ -878,6 +937,29 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
             if not already_leads:
                 bull_points = [lead] + bull_points[:2]
 
+        # Parse + clamp the AI-suggested DCF dial moves.  Bounds are enforced
+        # here regardless of what the model returned; the caller applies them
+        # to s1/wacc inside industry guardrails and re-runs run_dcf_single().
+        dcf_tweaks_out = None
+        try:
+            raw_tweaks = parsed.get("dcf_tweaks")
+            if isinstance(raw_tweaks, dict):
+                g = float(raw_tweaks.get("growth_delta_pp") or 0.0)
+                w = float(raw_tweaks.get("wacc_delta_pp") or 0.0)
+                # Hard clamp to the prompted bounds — the model occasionally
+                # overshoots, and these dials feed the math directly.
+                g = max(-3.0, min(3.0, g))
+                w = max(-1.0, min(1.0, w))
+                r = str(raw_tweaks.get("rationale") or "")[:120]
+                if abs(g) > 0.05 or abs(w) > 0.05:
+                    dcf_tweaks_out = {
+                        "growth_delta_pp": round(g, 2),
+                        "wacc_delta_pp":   round(w, 2),
+                        "rationale":       r,
+                    }
+        except Exception:
+            dcf_tweaks_out = None
+
         result = {
             "category":           cat if cat in _VALID_CATS else None,
             "verdict":            verdict_final,
@@ -886,6 +968,9 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
             "bear_points":        _coerce_str_list(parsed.get("bear_points")),
             "sovereign_backstop": sb_str,
             "regime":             regime_out,
+            "dcf_tweaks":         dcf_tweaks_out,
+            "as_of_epoch":        epoch,
+            "as_of_label":        _market_epoch_label(epoch),
             "model":              "claude-haiku-4-5-20251001",
         }
         _LYNCH_CACHE[bucket] = (time.time(), result)
@@ -897,6 +982,71 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         return result
     except Exception:
         return None
+
+
+def _lynch_fallback_verdict(ticker, sector, mos, strategic_info,
+                            regime, confidence_weaknesses):
+    """Builds a Lynch-verdict-shaped dict from DCF + strategic facts only.
+    Used when ANTHROPIC_API_KEY is missing, Claude is unreachable, or the
+    JSON parse fails — so the Lynch card never silently disappears."""
+    is_strategic = bool(strategic_info and strategic_info.get("is_strategic"))
+    regime = regime or "stable"
+
+    # Verdict from MOS bands
+    if mos is None:
+        verdict = "Hold"
+    elif mos >= 40:
+        verdict = "Buy"
+    elif mos >= 15:
+        verdict = "Accumulate"
+    elif mos >= -10:
+        verdict = "Hold"
+    elif mos >= -25:
+        verdict = "Watch"
+    else:
+        verdict = "Avoid"
+
+    # Same clamps as the Claude path
+    if regime in ("momentum_runup", "squeeze_risk") and verdict in ("Buy", "Accumulate"):
+        verdict = "Hold"
+    if is_strategic and verdict in ("Avoid", "Watch"):
+        verdict = "Hold"
+
+    bull_points, bear_points = [], []
+    sb_str = None
+    if is_strategic:
+        sb_str = strategic_info.get("strategic_label")
+        bull_points.append(f"Sovereign backstop: {sb_str}"[:70])
+    if mos is not None:
+        if mos > 5:
+            bull_points.append(f"DCF margin of safety: +{mos:.0f}%")
+        elif mos < -5:
+            bear_points.append(f"DCF margin: {mos:+.0f}% (price above IV)")
+    for w in (confidence_weaknesses or [])[:2]:
+        bear_points.append(str(w)[:70])
+
+    thesis_parts = []
+    if is_strategic:
+        thesis_parts.append(strategic_info.get("strategic_label", "Strategic asset"))
+    if mos is not None:
+        thesis_parts.append(f"DCF MOS {mos:+.0f}%")
+    thesis_parts.append("AI commentary unavailable; verdict from DCF facts only.")
+    thesis = " · ".join(thesis_parts)[:260]
+
+    epoch = _market_epoch()
+    return {
+        "category":           None,
+        "verdict":            verdict,
+        "thesis":             thesis,
+        "bull_points":        bull_points[:3],
+        "bear_points":        bear_points[:3],
+        "sovereign_backstop": sb_str,
+        "regime":             regime,
+        "dcf_tweaks":         None,
+        "as_of_epoch":        epoch,
+        "as_of_label":        _market_epoch_label(epoch),
+        "model":              "valus-fallback",
+    }
 
 
 def _score_headline(title: str, summary: str, ticker: str, sector: str, industry: str):
@@ -980,8 +1130,14 @@ def _score_headline(title: str, summary: str, ticker: str, sector: str, industry
     claude_reason = None
     claude_overrode = False
     claude_category = None
+    # Backstop tickers (CHIPS-Act semis, defense primes, energy sovereignty)
+    # get the AI on EVERY headline — sovereign-capital tickers have catalysts
+    # the keyword heuristic was never tuned for (HBM tape-out, DPA Title III
+    # order, Treasury filing), so we'd rather pay $0.0005/headline than drop
+    # a real signal.  Per-headline cache (24h) keeps cost bounded.
+    is_backstop_ticker = bool(STRATEGIC_ASSETS.get((ticker or "").upper()))
     # Path 1 — ambiguous band: heuristic gave nothing useful, let Claude decide.
-    if -0.2 <= score <= 0.2 and not matched:
+    if (-0.2 <= score <= 0.2 and not matched) or (is_backstop_ticker and not claude_used):
         ai = _claude_interpret_headline(ticker, sector, title, summary)
         if ai is not None:
             score = ai["score"]
@@ -8860,6 +9016,7 @@ def analyze():
         # still gets primed — those are safe and rate-limited at the source.
         _is_internal = bool(request.headers.get("X-Valus-Internal"))
         lynch_verdict = None
+        _tape_for_lynch = None
         if not (_ua_is_bot and not _is_internal):
             try:
                 _qm_for_lynch = _build_quality_metrics(info, base_fcf, rev_ttm)
@@ -8884,6 +9041,65 @@ def analyze():
                 )
             except Exception:
                 lynch_verdict = None
+
+        # Always-render fallback: if Claude returned nothing (no key, error,
+        # parse fail, or bot UA), build a verdict from DCF + strategic facts
+        # so the Lynch card never silently hides on the frontend.
+        if not isinstance(lynch_verdict, dict):
+            lynch_verdict = _lynch_fallback_verdict(
+                ticker, sector, margin_of_safety, strategic,
+                (_tape_for_lynch or {}).get("regime") if _tape_for_lynch else None,
+                dcf_conf_warnings,
+            )
+
+        # ── AI-adjusted IV (the "VALUS" number) ─────────────────────────
+        # When Haiku returned bounded dcf_tweaks, apply them to s1 and WACC
+        # inside the industry guardrails, then re-run run_dcf_single() to
+        # get a second IV that captures the AI's read on news, sovereign
+        # capital, and the demand cycle.  The deterministic DCF IV stays
+        # the headline number; this one renders alongside it.
+        ai_adjusted_iv      = None
+        ai_adjusted_mos     = None
+        ai_dcf_tweaks_meta  = None
+        try:
+            tweaks = lynch_verdict.get("dcf_tweaks") if isinstance(lynch_verdict, dict) else None
+            if (tweaks and intrinsic_value is not None and price
+                    and s1 is not None and wacc is not None and tg is not None
+                    and fwd_base_fcf and ind_params):
+                g_delta = float(tweaks.get("growth_delta_pp") or 0.0) / 100.0
+                w_delta = float(tweaks.get("wacc_delta_pp") or 0.0) / 100.0
+                adj_s1  = max(0.0, min(s1 + g_delta, ind_params["max_s1"]))
+                adj_wacc = max(ind_params["min_wacc"], wacc + w_delta)
+                # Maintain wacc-tg spread floor so terminal-value math stays sane.
+                if adj_wacc - tg < ind_params["wacc_spread"]:
+                    adj_wacc = tg + ind_params["wacc_spread"]
+                ai_iv_raw, *_ = run_dcf_single(
+                    fwd_base_fcf, adj_s1, s2, tg, adj_wacc, yrs, info, fx_rate,
+                    stage1_years=backbone_stage1_years,
+                )
+                if ai_iv_raw is not None and ai_iv_raw > 0:
+                    # +50% sanity cap relative to base DCF IV — industry
+                    # guardrails should keep us inside this, but defends
+                    # against pathological inputs.
+                    cap = intrinsic_value * 1.50
+                    capped = ai_iv_raw > cap
+                    ai_iv_final = min(ai_iv_raw, cap)
+                    # Never let the AI lower the headline; if it would, drop it.
+                    if ai_iv_final >= intrinsic_value:
+                        ai_adjusted_iv  = round(ai_iv_final, 2)
+                        ai_adjusted_mos = round((ai_adjusted_iv - price) / price * 100, 1)
+                        ai_dcf_tweaks_meta = {
+                            "growth_delta_pp": round(g_delta * 100, 2),
+                            "wacc_delta_pp":   round(w_delta * 100, 2),
+                            "rationale":       tweaks.get("rationale", ""),
+                            "base_iv":         round(intrinsic_value, 2),
+                            "uplift_pct":      round((ai_iv_final - intrinsic_value) / intrinsic_value * 100, 1),
+                            "capped":          bool(capped),
+                        }
+        except Exception:
+            ai_adjusted_iv = None
+            ai_adjusted_mos = None
+            ai_dcf_tweaks_meta = None
 
         # ── Methodology Steps (for the new "How VALUS calculated this" panel)
         # Each step is a row showing the actual numbers used for THIS stock.
@@ -9360,8 +9576,17 @@ def analyze():
             "quality_metrics": _build_quality_metrics(info, base_fcf, rev_ttm),
             # ── Per-ticker Haiku Lynch verdict (Buy/Hold/Avoid + thesis) ──
             # Generated once per ticker from the assembled snapshot above.
-            # Null when ANTHROPIC_API_KEY is unset or Claude is unreachable.
+            # Falls back to a DCF-only verdict when Claude is unavailable.
             "lynch_verdict":             lynch_verdict,
+            # ── AI-adjusted "VALUS" IV ────────────────────────────────────
+            # Re-runs the DCF with Haiku's bounded growth/WACC nudges so the
+            # number captures news/sovereign-capital/demand-cycle signal the
+            # pure-math DCF misses.  Renders SIDE-BY-SIDE with intrinsic_value
+            # (the deterministic DCF stays the headline).  Null when no
+            # tweaks were suggested or the recomputation failed.
+            "ai_adjusted_iv":            ai_adjusted_iv,
+            "ai_adjusted_mos":           ai_adjusted_mos,
+            "ai_dcf_tweaks":             ai_dcf_tweaks_meta,
         }
 
         cleaned = clean(result)

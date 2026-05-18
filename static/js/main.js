@@ -565,6 +565,38 @@ function renderHeroVerdict(d) {
     }
   }
 
+  // AI-adjusted IV — the "VALUS" number Haiku produces by nudging Stage 1
+  // growth and WACC inside industry guardrails.  Renders alongside the
+  // deterministic DCF so users see both: the pure-math number and the
+  // AI-aware number that captures news + sovereign-capital signal.
+  const aiEl = $("vAiIvBreakdown");
+  if (aiEl) {
+    const ai  = d.ai_adjusted_iv;
+    const meta = d.ai_dcf_tweaks;
+    if (ai != null && d.intrinsic_value != null && meta) {
+      const up = meta.uplift_pct;
+      const upTxt = up != null ? `${up >= 0 ? "+" : ""}${up.toFixed(1)}%` : "";
+      const g = meta.growth_delta_pp, w = meta.wacc_delta_pp;
+      const dialTxt = [
+        g ? `growth ${g >= 0 ? "+" : ""}${g.toFixed(1)}pp` : "",
+        w ? `WACC ${w >= 0 ? "+" : ""}${w.toFixed(2)}pp` : "",
+      ].filter(Boolean).join(" · ");
+      const tip = (meta.rationale ? meta.rationale + " — " : "") + dialTxt;
+      aiEl.classList.remove("hidden");
+      aiEl.innerHTML = `
+        <span class="iv-floor__lbl">DCF</span>
+        <span class="iv-floor__val">${fmtPrice(d.intrinsic_value)}</span>
+        <span class="iv-floor__sep">·</span>
+        <span class="iv-floor__lbl">VALUS</span>
+        <span class="iv-floor__val iv-floor__val--ai" title="${escHtml(tip)}">${fmtPrice(ai)}</span>
+        <span class="iv-floor__sep">·</span>
+        <span class="iv-floor__lbl">${upTxt} vs DCF</span>`;
+    } else {
+      aiEl.classList.add("hidden");
+      aiEl.innerHTML = "";
+    }
+  }
+
   // ── Strategic Asset banner ───────────────────────────────────────────
   // Renders only when the backend tags this ticker as a strategic asset
   // (CHIPS Act recipient, defense prime, energy sovereignty, critical
@@ -1346,7 +1378,9 @@ function renderHaikuVerdict(d) {
   const card = document.getElementById("lynchCard");
   if (!card) return;
   const lv = d && d.lynch_verdict;
-  if (!lv || (!lv.thesis && !lv.bull_points && !lv.bear_points)) {
+  // Backend now always returns a verdict (real or DCF-fallback) so the
+  // card renders consistently.  Only hide if the whole payload is missing.
+  if (!lv) {
     card.classList.add("hidden");
     return;
   }
@@ -1375,6 +1409,11 @@ function renderHaikuVerdict(d) {
   const bears = document.getElementById("lynchBears");
   const back   = document.getElementById("lynchBackstop");
   const regime = document.getElementById("lynchRegime");
+  const asof   = document.getElementById("lynchAsOf");
+  if (asof) {
+    asof.textContent = lv.as_of_label || "";
+    asof.classList.toggle("hidden", !lv.as_of_label);
+  }
   if (cat)  cat.textContent  = catLabel;
   if (verd) {
     verd.textContent = lv.verdict || "Hold";

@@ -1691,6 +1691,14 @@ button { font-family: inherit; cursor: pointer; }
 .iv-floor__sep  { color: #6b7382; }
 .iv-floor__val--floor { color: #fbbf24; }
 .iv-floor__val--used  { color: #34d399; font-weight: 700; }
+.iv-floor__val--ai    { color: #a78bfa; font-weight: 700; }   /* Haiku-violet */
+
+/* AI-IV variant uses a violet accent so users distinguish "VALUS / AI"
+   from the green "Used" line of the strategic-floor breakdown. */
+.ai-iv-breakdown {
+  background: rgba(167,139,250,0.06);
+  border-left-color: #a78bfa;
+}
 
 .pi-block { display: flex; flex-direction: column; gap: 4px; }
 .pi-block.right { text-align: right; }
@@ -3672,6 +3680,11 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
   background: rgba(167,139,250,0.12); color: #a78bfa;
   border: 1px solid rgba(167,139,250,0.30);
 }
+.lynch-asof {
+  font-size: 10.5px; font-weight: 500; color: #8892a3;
+  margin-left: 4px;
+}
+.lynch-asof.hidden { display: none; }
 .lynch-pill-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .lynch-cat {
   display: inline-block; padding: 4px 10px; border-radius: 999px;
