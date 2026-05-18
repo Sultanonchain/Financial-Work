@@ -674,11 +674,11 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         strat_block = (
             f"YES — {strategic_info.get('strategic_label')}\n"
             f"  Reason: {strategic_info.get('strategic_reason')}\n"
-            f"  Sovereign capital backstop applies (e.g. CHIPS Act grants, defense\n"
-            f"  prime sole-source contracts, energy-sovereignty PPAs).  Treat near-\n"
-            f"  term FCF weakness as transitory; do NOT issue an Avoid verdict on\n"
-            f"  weak fundamentals alone — the floor is real.  Step the verdict\n"
-            f"  down at most one notch and explain the backstop in the thesis."
+            f"  Sovereign capital backstop applies (CHIPS Act grants, DPA Title III\n"
+            f"  contracts, energy-sovereignty PPAs, or direct US government equity).\n"
+            f"  This is a HARD FLOOR on the verdict: NEVER Avoid, NEVER Watch on\n"
+            f"  this ticker — the floor is Hold.  Treat near-term FCF weakness as\n"
+            f"  transitory and LEAD the bull case with the backstop, not bury it."
         )
     else:
         strat_block = "NO sovereign backstop on file."
@@ -789,9 +789,10 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
             "  regime:   one of stable|momentum_runup|squeeze_risk|post_runup_pullback|broken\n"
             "            (use the TAPE regime hint unless you can defend a different one)\n"
             "Be honest.  If numbers are weak AND no backstop applies AND regime is\n"
-            "stable, say Avoid.  If a backstop applies, soften by one notch and\n"
-            "explain why.  If regime is momentum_runup or squeeze_risk, cap verdict\n"
-            "at Hold/Watch and lead with what the tape is doing.\n"
+            "stable, say Avoid.  If a backstop applies, the verdict floor is HOLD —\n"
+            "NEVER Avoid, NEVER Watch on a backstopped name.  Lead the bull case\n"
+            "with the backstop.  If regime is momentum_runup or squeeze_risk, cap\n"
+            "verdict at Hold/Watch and lead with what the tape is doing.\n"
         )
         full_prompt = prompt + snap_extra + instructions
 
@@ -854,11 +855,34 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         if regime_out in ("momentum_runup", "squeeze_risk") and verdict_final in ("Buy", "Accumulate"):
             verdict_final = "Hold"
 
+        # Strategic-backstop floor: sovereign capital makes failure
+        # off-the-table for these names, so Avoid/Watch is never the right
+        # call.  Floor at Hold.  Does NOT override Buy/Accumulate — only
+        # clamps the downside.
+        is_backstopped = bool(strategic_info and strategic_info.get("is_strategic"))
+        if is_backstopped and verdict_final in ("Avoid", "Watch"):
+            verdict_final = "Hold"
+
+        bull_points = _coerce_str_list(parsed.get("bull_points"))
+        # Lead the bull case with the backstop when one applies, so the
+        # floor isn't buried below DCF-driven points.
+        if is_backstopped:
+            backstop_text = sb_str or strategic_info.get("strategic_label") or "Sovereign capital backstop"
+            lead = f"Sovereign backstop: {backstop_text}"
+            if len(lead) > 70:
+                lead = lead[:67] + "..."
+            already_leads = bull_points and any(
+                kw in bull_points[0].lower()
+                for kw in ("backstop", "sovereign", "chips", "government", "dpa")
+            )
+            if not already_leads:
+                bull_points = [lead] + bull_points[:2]
+
         result = {
             "category":           cat if cat in _VALID_CATS else None,
             "verdict":            verdict_final,
             "thesis":             str(parsed.get("thesis", ""))[:260],
-            "bull_points":        _coerce_str_list(parsed.get("bull_points")),
+            "bull_points":        bull_points,
             "bear_points":        _coerce_str_list(parsed.get("bear_points")),
             "sovereign_backstop": sb_str,
             "regime":             regime_out,
@@ -2484,7 +2508,7 @@ _SURVIVAL_FLOOR_TIERS = {
 # never sees.  Conservative: only the announced dollar amount, not implied
 # tax credits.
 STRATEGIC_SUBSIDY_PV = {
-    "INTC": 19_500_000_000,   # $8.5B CHIPS grant + $11B subsidized loan PV
+    "INTC": 28_400_000_000,   # $8.5B CHIPS grant + $11B subsidized loan PV + $8.9B US Treasury direct equity stake (~9.9% of INTC, Aug 2025)
     "MU":    6_100_000_000,   # CHIPS Act grant
     "TXN":   1_600_000_000,   # CHIPS Act grant
     "GFS":   1_500_000_000,   # CHIPS Act grant
@@ -6696,31 +6720,95 @@ def leaderboard_delete():
     return jsonify({"ok": True})
 
 
-PORTFOLIO_FILE = "/tmp/.valus_portfolios.json"
-PORTFOLIO_KEY  = "valus:portfolios:v1"
+# ── Portfolio storage ────────────────────────────────────────────────────
+# When KV is configured, KV is the AUTHORITATIVE source of truth — one key
+# per user (`valus:portfolio:{user_sub}`) holding {items, updated_at}.
+# Per-user keys eliminate the read-modify-write clobber the legacy shared
+# dict had on transient KV failures, and they're safe under concurrent
+# writes from different users.  KV read/write failures surface as 503 to
+# the client so we never silently fall back to ephemeral storage and
+# overwrite durable data with an empty snapshot.
+#
+# When KV is NOT configured (local dev only), we fall back to a process
+# dict + /tmp file — ephemeral on serverless, never reached in production.
+PORTFOLIO_FILE       = "/tmp/.valus_portfolios.json"
+PORTFOLIO_KEY_FMT    = "valus:portfolio:{sub}"        # v2 — per-user
+PORTFOLIO_LEGACY_KEY = "valus:portfolios:v1"          # v1 — shared dict, migration source
 _PORTFOLIOS_MEM = {}
 
-def _read_portfolios():
-    raw = kv_get(PORTFOLIO_KEY)
-    if raw:
-        try: return _json.loads(raw)
-        except Exception: pass
-    if os.path.exists(PORTFOLIO_FILE):
+
+class KVUnavailable(Exception):
+    """KV is configured but the operation errored.  Translates to 503 at
+    the route boundary so durable data isn't clobbered by an ephemeral
+    fallback."""
+
+
+def _read_user_portfolio(user_sub):
+    """Returns {'items': [...], 'updated_at': float|None}.
+    Raises KVUnavailable if KV is configured but a read errored."""
+    key = PORTFOLIO_KEY_FMT.format(sub=user_sub)
+    if _kv:
+        try:
+            raw = _kv.get(key)
+        except Exception as e:
+            raise KVUnavailable(f"kv_get({key}) failed: {e}")
+        if raw:
+            try:
+                data = _json.loads(raw)
+                return {"items": data.get("items", []),
+                        "updated_at": data.get("updated_at")}
+            except Exception:
+                return {"items": [], "updated_at": None}
+        # Per-user key miss — one-time migration from the legacy shared dict.
+        try:
+            legacy_raw = _kv.get(PORTFOLIO_LEGACY_KEY)
+        except Exception as e:
+            raise KVUnavailable(f"kv_get({PORTFOLIO_LEGACY_KEY}) failed: {e}")
+        if legacy_raw:
+            try:
+                legacy = _json.loads(legacy_raw)
+                items = legacy.get(user_sub, [])
+                ts    = legacy.get(f"{user_sub}__ts")
+                if items:
+                    try:
+                        _kv.set(key, _json.dumps({"items": items, "updated_at": ts}))
+                    except Exception as e:
+                        raise KVUnavailable(f"kv_set({key}) during migration failed: {e}")
+                return {"items": items or [], "updated_at": ts}
+            except KVUnavailable:
+                raise
+            except Exception:
+                pass
+        return {"items": [], "updated_at": None}
+    # Local-dev path
+    store = _PORTFOLIOS_MEM
+    if not store and os.path.exists(PORTFOLIO_FILE):
         try:
             with open(PORTFOLIO_FILE) as f:
-                return _json.load(f)
+                store = _json.load(f)
         except Exception:
-            pass
-    return dict(_PORTFOLIOS_MEM)
+            store = {}
+    return {"items": store.get(user_sub, []),
+            "updated_at": store.get(f"{user_sub}__ts")}
 
-def _write_portfolios(d):
-    global _PORTFOLIOS_MEM
-    _PORTFOLIOS_MEM = dict(d)
-    serialized = _json.dumps(d)
-    kv_set(PORTFOLIO_KEY, serialized)
+
+def _write_user_portfolio(user_sub, items):
+    """Persists items for one user.  Raises KVUnavailable on KV write
+    failure when KV is configured."""
+    ts = time.time()
+    if _kv:
+        key = PORTFOLIO_KEY_FMT.format(sub=user_sub)
+        try:
+            _kv.set(key, _json.dumps({"items": items, "updated_at": ts}))
+        except Exception as e:
+            raise KVUnavailable(f"kv_set({key}) failed: {e}")
+        return
+    # Local-dev path
+    _PORTFOLIOS_MEM[user_sub] = items
+    _PORTFOLIOS_MEM[f"{user_sub}__ts"] = ts
     try:
         with open(PORTFOLIO_FILE, "w") as f:
-            f.write(serialized)
+            _json.dump(_PORTFOLIOS_MEM, f)
     except Exception:
         pass
 
@@ -6730,9 +6818,11 @@ def portfolio_get():
     """Return the signed-in user's saved portfolio (list of ticker snapshots)."""
     user, err = require_user()
     if err: return err
-    portfolios = _read_portfolios()
-    items = portfolios.get(user["sub"], [])
-    return jsonify({"items": items, "updated_at": portfolios.get(f"{user['sub']}__ts")})
+    try:
+        data = _read_user_portfolio(user["sub"])
+    except KVUnavailable as e:
+        return jsonify({"error": "portfolio store unavailable", "detail": str(e)}), 503
+    return jsonify({"items": data["items"], "updated_at": data["updated_at"]})
 
 
 @app.route("/api/portfolio", methods=["POST"])
@@ -6767,10 +6857,10 @@ def portfolio_save():
             "addedAt": it.get("addedAt") if isinstance(it.get("addedAt"), (int, float)) else None,
         })
 
-    portfolios = _read_portfolios()
-    portfolios[user["sub"]]            = cleaned
-    portfolios[f"{user['sub']}__ts"]   = time.time()
-    _write_portfolios(portfolios)
+    try:
+        _write_user_portfolio(user["sub"], cleaned)
+    except KVUnavailable as e:
+        return jsonify({"error": "portfolio store unavailable", "detail": str(e)}), 503
     return jsonify({"ok": True, "count": len(cleaned)})
 
 
