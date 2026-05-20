@@ -108,6 +108,7 @@ async function analyze(ticker, params = {}) {
   if (_btn) { _btn.disabled = true; _btn.textContent = "Analyzing…"; }
   showLoading();
   hideError();
+  hideLimitBanner();
   $("results").classList.add("hidden");
   $("btcHero").classList.add("hidden");
   $("etfHero")?.classList.add("hidden");
@@ -130,7 +131,9 @@ async function analyze(ticker, params = {}) {
     const res = await fetch(url);
     const data = await res.json();
     if (res.status === 429) {
+      hideLoading();
       showRateLimit(data);
+      if (_btn) { _btn.disabled = false; _btn.textContent = _btnLabel || "Analyze"; }
       return;
     }
     if (!res.ok || data.error) {
@@ -173,38 +176,93 @@ function showError(msg) {
   $("error").classList.remove("hidden");
 }
 function showRateLimit(data) {
-  // Search-limit responses ship a concrete message + error code so the
-  // CTA matches the user's tier.  Generic 429s (Flask-Limiter spam
-  // protection) fall through to the default copy.
-  let msg;
+  // Daily-search-limit responses ship a concrete used/limit pair + error
+  // code so we can render a banner whose CTA matches the user's tier.
+  // Generic 429s (Flask-Limiter spam protection — no error code) fall
+  // through to a permissive copy.
+  const banner = ensureLimitBanner();
+  const used = (data && Number.isFinite(data.used)) ? data.used : null;
+  const limit = (data && Number.isFinite(data.limit)) ? data.limit : null;
+
+  let body = "";
+  let primaryHref = null;
+  let primaryLabel = null;
+  let secondaryHref = null;
+  let secondaryLabel = null;
+
   if (data && data.error === "search_limit_anon") {
+    // Match the product spec verbatim. The signed-in/$2 numbers come from
+    // the server payload so they stay in sync if we ever tune the tiers.
+    body = `You've used your ${limit ?? 5} free searches today. ` +
+           `Sign in for ${SIGNED_IN_LIMIT_LABEL}/day or upgrade to VALUS+ for unlimited — $2/month`;
     const next = window.location.pathname + window.location.search + window.location.hash;
-    const href = `/auth/login?next=${encodeURIComponent(next)}`;
-    msg =
-      `You've used your free searches for today. ` +
-      `<a href="${href}" style="color:inherit;text-decoration:underline;font-weight:600;">Sign in</a> ` +
-      `for 8/day or ` +
-      `<a href="#" id="rateLimitPremium" style="color:inherit;text-decoration:underline;font-weight:600;">upgrade to VALUS+</a> ` +
-      `for unlimited.`;
+    primaryHref = `/auth/login?next=${encodeURIComponent(next)}`;
+    primaryLabel = "Sign in (free)";
+    secondaryLabel = "VALUS+ — Unlimited for $2/month";
   } else if (data && data.error === "search_limit_signed_in") {
-    msg =
-      `You've used your free searches for today. ` +
-      `<a href="#" id="rateLimitPremium" style="color:inherit;text-decoration:underline;font-weight:600;">Upgrade to VALUS+</a> ` +
-      `for unlimited searches plus scenario analysis, insider activity, and historical valuation.`;
+    body = `You've used your ${limit ?? 8} free searches today. ` +
+           `Upgrade to VALUS+ for unlimited — $2/month`;
+    secondaryLabel = "VALUS+ — Unlimited for $2/month";
   } else {
-    msg =
-      'Free limit reached. <a href="/auth/login" style="color:inherit;text-decoration:underline;font-weight:600;">Sign in</a> ' +
-      'or upgrade to VALUS+ for unlimited.';
+    body = "Daily search limit reached. Try again tomorrow, " +
+           "or upgrade to VALUS+ for unlimited.";
+    secondaryLabel = "VALUS+ — Unlimited for $2/month";
   }
-  $("errorMsg").innerHTML = msg;
-  $("error").classList.remove("hidden");
-  const premiumLink = document.getElementById("rateLimitPremium");
-  if (premiumLink) {
-    premiumLink.onclick = (e) => {
-      e.preventDefault();
-      startCheckout();
-    };
+
+  banner.querySelector(".limit-banner__msg").textContent = body;
+
+  const actions = banner.querySelector(".limit-banner__actions");
+  actions.innerHTML = "";
+  if (primaryLabel) {
+    const a = document.createElement("a");
+    a.href = primaryHref || "#";
+    a.className = "limit-banner__btn limit-banner__btn--ghost";
+    a.textContent = primaryLabel;
+    actions.appendChild(a);
   }
+  if (secondaryLabel) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "limit-banner__btn limit-banner__btn--gold";
+    b.textContent = secondaryLabel;
+    b.onclick = () => startCheckout();
+    actions.appendChild(b);
+  }
+  banner.hidden = false;
+  banner.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+// One banner element, lazily inserted at the top of the results region so
+// the user sees it without scrolling. Idempotent — replaces children, not
+// the host node.
+const SIGNED_IN_LIMIT_LABEL = "8";
+function ensureLimitBanner() {
+  let el = document.getElementById("limitBanner");
+  if (el) return el;
+  el = document.createElement("div");
+  el.id = "limitBanner";
+  el.className = "limit-banner";
+  el.hidden = true;
+  el.innerHTML = `
+    <div class="limit-banner__inner">
+      <span class="limit-banner__icon" aria-hidden="true">⏳</span>
+      <div class="limit-banner__copy">
+        <div class="limit-banner__title">Daily search limit</div>
+        <div class="limit-banner__msg"></div>
+      </div>
+      <div class="limit-banner__actions"></div>
+    </div>
+  `;
+  // Mount right above the error shell so it sits in a predictable place
+  // on every view (hero, results, etc.). Falls back to <body> if not found.
+  const host = document.querySelector(".error-shell")?.parentElement || document.body;
+  host.insertBefore(el, host.firstChild);
+  return el;
+}
+
+function hideLimitBanner() {
+  const el = document.getElementById("limitBanner");
+  if (el) el.hidden = true;
 }
 function hideError() { $("error").classList.add("hidden"); }
 
@@ -3509,8 +3567,8 @@ function updateAuthControl() {
       avatar.classList.remove("auth-avatar--plus");
       if (plusBadge) plusBadge.classList.add("hidden");
       if (tier) tier.classList.add("hidden");
-      if (premLabel) premLabel.textContent = "Upgrade to VALUS+";
-      if (premHint)  premHint.textContent  = "$2/mo";
+      if (premLabel) premLabel.textContent = "VALUS+ — Unlimited for $2/month";
+      if (premHint)  premHint.textContent  = "";
     }
   } else {
     signInBtn.classList.remove("hidden");

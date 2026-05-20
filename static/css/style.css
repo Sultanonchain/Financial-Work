@@ -314,7 +314,7 @@ button { font-family: inherit; cursor: pointer; }
   border-radius: var(--radius);
   box-shadow: var(--shadow-card-hover);
   padding: var(--space-2);
-  min-width: 200px;
+  min-width: 280px;     /* fits "VALUS+ — Unlimited for $2/month" label */
   z-index: 100;
 }
 .auth-menu.hidden { display: none; }
@@ -508,6 +508,84 @@ button { font-family: inherit; cursor: pointer; }
   margin: var(--space-3) 0 0;
   text-align: center;
   line-height: 1.45;
+}
+
+/* Daily-search-limit banner */
+.limit-banner {
+  margin: 16px auto;
+  max-width: 760px;
+  background: linear-gradient(135deg,
+              rgba(245, 158, 11, 0.10) 0%,
+              rgba(245, 158, 11, 0.04) 100%);
+  border: 1px solid rgba(245, 158, 11, 0.30);
+  border-radius: 14px;
+  padding: 14px 18px;
+  box-shadow: 0 8px 24px -12px rgba(245, 158, 11, 0.25);
+}
+.limit-banner[hidden] { display: none; }
+.limit-banner__inner {
+  display: flex; align-items: center; gap: 14px;
+}
+.limit-banner__icon {
+  flex-shrink: 0;
+  width: 36px; height: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(245, 158, 11, 0.16);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 10px;
+  font-size: 18px;
+}
+.limit-banner__copy { flex: 1; min-width: 0; }
+.limit-banner__title {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #f59e0b;
+  margin-bottom: 2px;
+}
+.limit-banner__msg {
+  font-size: 14px;
+  color: var(--ink-primary);
+  line-height: 1.45;
+}
+.limit-banner__actions {
+  display: flex; gap: 8px; flex-shrink: 0;
+}
+.limit-banner__btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 13px;
+  padding: 9px 16px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: transform 120ms var(--ease-out), filter 120ms var(--ease-out);
+}
+.limit-banner__btn--ghost {
+  background: rgba(255,255,255,0.04);
+  border-color: rgba(255,255,255,0.10);
+  color: var(--ink-primary);
+}
+.limit-banner__btn--ghost:hover {
+  background: rgba(255,255,255,0.10);
+}
+.limit-banner__btn--gold {
+  background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 50%, #d97706 100%);
+  color: #1a1208;
+}
+.limit-banner__btn--gold:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+}
+@media (max-width: 640px) {
+  .limit-banner__inner { flex-direction: column; align-items: stretch; gap: 10px; }
+  .limit-banner__actions { flex-wrap: wrap; }
+  .limit-banner__btn { flex: 1 1 calc(50% - 4px); }
 }
 
 /* Toast notification (Stripe redirect feedback, etc.) */

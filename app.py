@@ -6830,8 +6830,8 @@ def _check_anon_search_limit(req, ticker: str):
         limit = SIGNED_IN_SEARCH_LIMIT
         error_code = "search_limit_signed_in"
         message = (
-            f"You've used your free searches for today. "
-            f"Upgrade to VALUS+ for unlimited."
+            f"You've used your {SIGNED_IN_SEARCH_LIMIT} free searches today. "
+            f"Upgrade to VALUS+ for unlimited — $2/month."
         )
     else:
         scope = "anon"
@@ -6839,8 +6839,9 @@ def _check_anon_search_limit(req, ticker: str):
         limit = ANON_SEARCH_LIMIT
         error_code = "search_limit_anon"
         message = (
-            "You've used your free searches for today. "
-            f"Sign in for {SIGNED_IN_SEARCH_LIMIT}/day or upgrade to VALUS+ for unlimited."
+            f"You've used your {ANON_SEARCH_LIMIT} free searches today. "
+            f"Sign in for {SIGNED_IN_SEARCH_LIMIT}/day or upgrade to "
+            f"VALUS+ for unlimited — $2/month."
         )
 
     seen = _searches_today(scope, ident)
