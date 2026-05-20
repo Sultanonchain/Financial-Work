@@ -181,18 +181,20 @@ function showRateLimit(data) {
     const next = window.location.pathname + window.location.search + window.location.hash;
     const href = `/auth/login?next=${encodeURIComponent(next)}`;
     msg =
-      `You've used your <strong>${data.used} of ${data.limit}</strong> free searches today. ` +
+      `You've used your free searches for today. ` +
       `<a href="${href}" style="color:inherit;text-decoration:underline;font-weight:600;">Sign in</a> ` +
-      `for unlimited searches plus portfolio tracking and the Discover heatmap.`;
+      `for 8/day or ` +
+      `<a href="#" id="rateLimitPremium" style="color:inherit;text-decoration:underline;font-weight:600;">upgrade to VALUS+</a> ` +
+      `for unlimited.`;
   } else if (data && data.error === "search_limit_signed_in") {
     msg =
-      `You've used your <strong>${data.used} of ${data.limit}</strong> free searches today. ` +
-      `<a href="#" id="rateLimitPremium" style="color:inherit;text-decoration:underline;font-weight:600;">Upgrade to Premium</a> ` +
-      `for unlimited searches plus daily AI digests.`;
+      `You've used your free searches for today. ` +
+      `<a href="#" id="rateLimitPremium" style="color:inherit;text-decoration:underline;font-weight:600;">Upgrade to VALUS+</a> ` +
+      `for unlimited searches plus scenario analysis, insider activity, and historical valuation.`;
   } else {
     msg =
       'Free limit reached. <a href="/auth/login" style="color:inherit;text-decoration:underline;font-weight:600;">Sign in</a> ' +
-      'to get more free lookups and unlock full access.';
+      'or upgrade to VALUS+ for unlimited.';
   }
   $("errorMsg").innerHTML = msg;
   $("error").classList.remove("hidden");
@@ -200,7 +202,7 @@ function showRateLimit(data) {
   if (premiumLink) {
     premiumLink.onclick = (e) => {
       e.preventDefault();
-      alert("Premium tier launching soon — daily AI digest, unlimited searches, and catalyst alerts.");
+      startCheckout();
     };
   }
 }
@@ -1077,6 +1079,32 @@ function renderScenarios(d) {
   const sc = d.scenarios || {};
   const grid = $("scGrid");
 
+  // Premium gate — server strips scenarios for free users and sets
+  // scenarios_locked: true. Render the lock overlay instead of the cards.
+  if (d.scenarios_locked) {
+    grid.innerHTML = `
+      <div class="sc-card sc-card--locked" style="grid-column: 1 / -1;">
+        <div class="plus-lock-overlay" style="position: relative; inset: auto; padding: 28px 16px;">
+          <span class="plus-lock-overlay__icon">🔒</span>
+          <div class="plus-lock-overlay__title">Scenario analysis is VALUS+</div>
+          <div class="plus-lock-overlay__sub">
+            Bear / base / bull weighted fair-value scenarios, with probability
+            blending and per-case g₁ / WACC assumptions.
+          </div>
+          <button class="plus-lock-overlay__cta" type="button" id="scLockedUpgrade">
+            Upgrade — $2/month
+          </button>
+        </div>
+      </div>
+    `;
+    const btn = document.getElementById("scLockedUpgrade");
+    if (btn) btn.onclick = () => startCheckout();
+    $("scWeightNote").textContent = "";
+    $("scWeighted").textContent = "—";
+    $("scWeightedDelta").textContent = "";
+    return;
+  }
+
   $("scWeightNote").textContent = sc.weight_basis ? `Weights: ${sc.weight_basis}` : "";
 
   // Sector-aware case-narratives so users understand what each scenario assumes
@@ -1342,6 +1370,29 @@ async function fetchAndRenderValuationHistory(ticker) {
   if (empty) empty.classList.add("hidden");
   try {
     const res = await fetch(`/api/valuation-history?ticker=${encodeURIComponent(ticker)}`);
+    // 402 Payment Required → VALUS+ gate. Render the lock state in the
+    // chart area instead of hiding the card.
+    if (res.status === 402) {
+      destroyValuationHistoryChart();
+      const wrap = card.querySelector(".vh-chart-wrap");
+      if (wrap) {
+        wrap.innerHTML = `
+          <div class="plus-lock-overlay" style="position: relative; inset: auto; padding: 36px 16px; border-radius: var(--radius);">
+            <span class="plus-lock-overlay__icon">🔒</span>
+            <div class="plus-lock-overlay__title">Historical valuation is VALUS+</div>
+            <div class="plus-lock-overlay__sub">
+              Replay VALUS at every yearly 10-K cutoff for the last 5 years —
+              point-in-time DCF vs. the price the market actually paid.
+            </div>
+            <button class="plus-lock-overlay__cta" type="button" data-plus-cta>Upgrade — $2/month</button>
+          </div>
+        `;
+        const cta = wrap.querySelector("[data-plus-cta]");
+        if (cta) cta.onclick = () => startCheckout();
+      }
+      if (empty) empty.classList.add("hidden");
+      return;
+    }
     const j = await res.json();
     if (!j || j.available === false || !Array.isArray(j.iv_points) || j.iv_points.length === 0) {
       if (empty) empty.classList.remove("hidden");
@@ -1594,6 +1645,26 @@ async function renderInsiderCard(ticker) {
   card.hidden = true;
   try {
     const r = await fetch(`/api/insider?ticker=${encodeURIComponent(ticker)}`);
+    // 402 Payment Required → VALUS+ upgrade gate. Show the lock state
+    // instead of hiding silently, so the user knows the feature exists.
+    if (r.status === 402) {
+      summary.innerHTML = `<span class="insider-pill insider-pill--quiet">🔒 VALUS+</span>`;
+      list.innerHTML = `
+        <div class="plus-lock-overlay" style="position: relative; inset: auto; padding: 22px 16px; border-radius: var(--radius);">
+          <span class="plus-lock-overlay__icon">🔒</span>
+          <div class="plus-lock-overlay__title">Insider activity is VALUS+</div>
+          <div class="plus-lock-overlay__sub">
+            Form 4 buys, sells, and option exercises filed by C-suite and 10%+ holders over the last 90 days.
+          </div>
+          <button class="plus-lock-overlay__cta" type="button" data-plus-cta>Upgrade — $2/month</button>
+        </div>
+      `;
+      const cta = list.querySelector("[data-plus-cta]");
+      if (cta) cta.onclick = () => startCheckout();
+      card.hidden = false;
+      if (insightsGrid) insightsGrid.classList.remove("hidden");
+      return;
+    }
     const j = await r.json();
     if (!j.available || !Array.isArray(j.items) || j.items.length === 0) {
       card.hidden = true;
@@ -3394,8 +3465,18 @@ function setupLowConfExplainer() {
 const VALUS_USER_KEY = "valus.user.v1";   // legacy soft-token, kept for claim flow
 let _ME = null;
 let _AUTH_CONFIGURED = false;
+let _STRIPE_CONFIGURED = false;
+let _IS_PLUS = false;          // VALUS+ subscriber flag, refreshed from /api/me
+let _PLUS_RENEWS_AT = null;    // unix-seconds when current period ends (if plus)
 let _PENDING_INTENT = null;   // string set when an action prompted sign-in;
                               // re-fired on auth_ok=1 redirect.
+
+// Convenience: is the user a guest, free signed-in, or VALUS+?
+function userTier() {
+  if (_IS_PLUS) return "plus";
+  if (_ME) return "free";
+  return "guest";
+}
 
 function getValusUser() {
   try {
@@ -3422,11 +3503,18 @@ async function refreshMe() {
     const data = await r.json();
     _ME = data.user || null;
     _AUTH_CONFIGURED = !!data.auth_configured;
+    _STRIPE_CONFIGURED = !!data.stripe_configured;
+    _IS_PLUS = !!data.is_plus;
+    _PLUS_RENEWS_AT = data.plus_renews_at || null;
   } catch {
     _ME = null;
     _AUTH_CONFIGURED = false;
+    _STRIPE_CONFIGURED = false;
+    _IS_PLUS = false;
+    _PLUS_RENEWS_AT = null;
   }
   updateAuthControl();
+  refreshPlusLockUI();
   // First-time sign-in: claim any legacy soft-token entries
   if (_ME && !sessionStorage.getItem("valus.claimed")) {
     const legacy = getValusUser();
@@ -3447,13 +3535,32 @@ async function refreshMe() {
   if (_ME) pfPullFromServer();
 }
 
+// Decorate paid-feature buttons with a visible lock for free users so the
+// gate is discoverable, not surprising-at-click.  Idempotent + safe to call
+// on every refreshMe() — we restore the original label when the user
+// becomes VALUS+.
+function refreshPlusLockUI() {
+  const decorate = (btn, baseHTML) => {
+    if (!btn) return;
+    if (!btn.dataset.baseHtml) btn.dataset.baseHtml = btn.innerHTML || baseHTML;
+    btn.innerHTML = _IS_PLUS
+      ? (btn.dataset.baseHtml || baseHTML)
+      : `${btn.dataset.baseHtml || baseHTML} <span class="plus-inline-lock">🔒 VALUS+</span>`;
+  };
+  decorate(document.getElementById("pfPublishBtn"), "🏆 Publish");
+}
+
 function updateAuthControl() {
   const signInBtn = $("signInBtn");
   const avatar    = $("authAvatar");
   const avatarImg = $("authAvatarImg");
   const avatarTxt = $("authAvatarName");
+  const plusBadge = $("authPlusBadge");
   const menu      = $("authMenu");
   const email     = $("authMenuEmail");
+  const tier      = $("authMenuTier");
+  const premLabel = $("authPremiumLabel");
+  const premHint  = $("authPremiumHint");
   if (!signInBtn || !avatar) return;
   if (_ME) {
     signInBtn.classList.add("hidden");
@@ -3466,11 +3573,154 @@ function updateAuthControl() {
     }
     avatarTxt.textContent = _ME.name || "Account";
     if (email) email.textContent = _ME.email || "";
+    // VALUS+ visual treatment: gold border, badge in avatar, tier line in menu.
+    if (_IS_PLUS) {
+      avatar.classList.add("auth-avatar--plus");
+      if (plusBadge) plusBadge.classList.remove("hidden");
+      if (tier) {
+        const renews = _PLUS_RENEWS_AT
+          ? new Date(_PLUS_RENEWS_AT * 1000).toLocaleDateString(undefined, {
+              year: "numeric", month: "short", day: "numeric"
+            })
+          : null;
+        tier.innerHTML = renews
+          ? `<span class="valus-plus-badge">VALUS+</span><span class="auth-menu__tier-detail">Renews ${renews}</span>`
+          : `<span class="valus-plus-badge">VALUS+</span><span class="auth-menu__tier-detail">Active</span>`;
+        tier.classList.remove("hidden");
+      }
+      if (premLabel) premLabel.textContent = "Manage subscription";
+      if (premHint)  premHint.textContent  = "Active";
+    } else {
+      avatar.classList.remove("auth-avatar--plus");
+      if (plusBadge) plusBadge.classList.add("hidden");
+      if (tier) tier.classList.add("hidden");
+      if (premLabel) premLabel.textContent = "Upgrade to VALUS+";
+      if (premHint)  premHint.textContent  = "$2/mo";
+    }
   } else {
     signInBtn.classList.remove("hidden");
     avatar.classList.add("hidden");
+    avatar.classList.remove("auth-avatar--plus");
+    if (plusBadge) plusBadge.classList.add("hidden");
     if (menu) menu.classList.add("hidden");
   }
+}
+
+// ── Stripe Checkout / VALUS+ upgrade flow ──────────────────────────────
+function showPlusModal() {
+  const m = $("plusModal");
+  if (!m) return;
+  const btn   = $("plusCheckoutBtn");
+  const notCfg = $("plusNotConfigured");
+  // If checkout isn't configured on this deploy, disable the CTA and
+  // show the developer-facing hint (mirrors how showSignInModal handles
+  // missing OAuth config).
+  if (_STRIPE_CONFIGURED) {
+    if (notCfg) notCfg.classList.add("hidden");
+    if (btn) { btn.disabled = false; btn.style.opacity = "1"; }
+  } else {
+    if (notCfg) notCfg.classList.remove("hidden");
+    if (btn) { btn.disabled = true; btn.style.opacity = "0.4"; }
+  }
+  m.classList.remove("hidden");
+}
+
+function startCheckout() {
+  // If not signed in, bounce through OAuth first.  /subscribe enforces
+  // sign-in server-side; this is just nicer UX for the typical path.
+  if (!_ME) {
+    sessionStorage.setItem("valus.pending_intent", "subscribe");
+    const next = encodeURIComponent("/subscribe");
+    window.location.href = `/auth/login?next=${next}`;
+    return;
+  }
+  if (!_STRIPE_CONFIGURED) {
+    showPlusModal();
+    return;
+  }
+  // Already plus: open manage-subscription path instead.
+  if (_IS_PLUS) {
+    showManageSubscription();
+    return;
+  }
+  window.location.href = "/subscribe";
+}
+
+async function showManageSubscription() {
+  // Lightweight: tell the user their renewal date and offer to cancel
+  // at period end. A full Stripe Customer Portal would be nicer, but
+  // requires an extra Stripe endpoint config — phase this in later.
+  const renews = _PLUS_RENEWS_AT
+    ? new Date(_PLUS_RENEWS_AT * 1000).toLocaleDateString(undefined, {
+        year: "numeric", month: "short", day: "numeric"
+      })
+    : "the end of the current billing period";
+  const ok = window.confirm(
+    `You're on VALUS+. Your subscription renews on ${renews}.\n\n` +
+    `Cancel at period end? You'll keep access until ${renews}.`
+  );
+  if (!ok) return;
+  try {
+    const r = await fetch("/api/subscription/cancel", {
+      method: "POST", credentials: "same-origin"
+    });
+    const j = await r.json();
+    if (r.ok && j.ok) {
+      alert(`Cancelled. You'll keep VALUS+ access until ${renews}.`);
+      refreshMe();
+    } else {
+      alert(`Could not cancel: ${j.error || "unknown error"}`);
+    }
+  } catch (e) {
+    alert("Network error while cancelling. Try again.");
+  }
+}
+
+// Surface the Stripe redirect outcome as a non-intrusive toast on landing.
+function handleStripeRedirect() {
+  const url = new URL(window.location.href);
+  const subbed = url.searchParams.get("subscribed");
+  const stripeErr = url.searchParams.get("stripe_error");
+  if (!subbed && !stripeErr) return;
+  url.searchParams.delete("subscribed");
+  url.searchParams.delete("stripe_error");
+  window.history.replaceState({}, "", url);
+
+  if (subbed === "1") {
+    // Stripe webhooks are usually delivered within a few seconds, but
+    // poll /api/me for up to ~12s so the badge appears reliably.
+    let attempts = 0;
+    const poll = async () => {
+      attempts++;
+      await refreshMe();
+      if (_IS_PLUS) {
+        showToast("🎉 Welcome to VALUS+ — unlimited searches unlocked.", "success");
+        return;
+      }
+      if (attempts < 6) setTimeout(poll, 2000);
+      else showToast("Payment received — refresh in a moment if VALUS+ doesn't appear.", "info");
+    };
+    poll();
+  } else if (subbed === "0") {
+    showToast("Checkout cancelled — you can upgrade anytime.", "info");
+  } else if (stripeErr) {
+    showToast(`Checkout error: ${stripeErr.replace(/_/g, " ")}.`, "error");
+  }
+}
+
+function showToast(msg, kind) {
+  let toast = document.getElementById("valusToast");
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.id = "valusToast";
+    toast.className = "valus-toast";
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.dataset.kind = kind || "info";
+  toast.classList.add("show");
+  clearTimeout(toast._hide);
+  toast._hide = setTimeout(() => toast.classList.remove("show"), 5000);
 }
 
 // Gate a protected action on auth.  If signed in, returns true; else
@@ -3698,7 +3948,17 @@ function setupAuthControl() {
   const aboutBtn   = $("authAboutBtn");
   if (premiumBtn) premiumBtn.onclick = () => {
     if (menu) menu.classList.add("hidden");
-    alert("Premium tier launching soon — daily AI digest, unlimited searches, and catalyst alerts.");
+    if (_IS_PLUS) {
+      showManageSubscription();
+    } else {
+      showPlusModal();
+    }
+  };
+  const plusCheckoutBtn = $("plusCheckoutBtn");
+  if (plusCheckoutBtn) plusCheckoutBtn.onclick = () => {
+    const m = $("plusModal");
+    if (m) m.classList.add("hidden");
+    startCheckout();
   };
   if (aboutBtn) aboutBtn.onclick = () => {
     if (menu) menu.classList.add("hidden");
@@ -3799,6 +4059,12 @@ function setupSubmitToLeaderboard() {
     }
     // Gate on real auth — sign-in modal is shown if not signed in.
     if (!(await requireAuthWithRedirectIntent("publish"))) return;
+    // Phase 4 — publishing is VALUS+ only. Show the upgrade modal so the
+    // user understands why and can convert in one click.
+    if (!_IS_PLUS) {
+      showPlusModal();
+      return;
+    }
     // Pre-populate display name from the OAuth identity
     if (_ME?.name) nameEl.value = _ME.name;
     modal.classList.remove("hidden");
@@ -3838,6 +4104,13 @@ function setupSubmitToLeaderboard() {
         submitBtn.textContent = "Publish";
         submitBtn.disabled = false;
         showSignInModal("publish");
+        return;
+      }
+      if (res.status === 402) {
+        modal.classList.add("hidden");
+        submitBtn.textContent = "Publish";
+        submitBtn.disabled = false;
+        showPlusModal();
         return;
       }
       if (data.error) throw new Error(data.error);
@@ -4824,6 +5097,7 @@ document.addEventListener("DOMContentLoaded", () => {
   pfUpdateBadge();
   // Fetch identity in parallel with bootFromURL — non-blocking
   refreshMe();
+  handleStripeRedirect();
   bootFromURL();
   // Browser back/forward should navigate between views.  Only react to
   // hash changes that didn't come from our own setViewHash() (those use

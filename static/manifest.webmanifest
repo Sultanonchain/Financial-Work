@@ -1,0 +1,43 @@
+{
+  "name": "VALUS — Stock Valuation",
+  "short_name": "VALUS",
+  "description": "Free 10-year DCF stock valuation tool. Search any ticker for intrinsic value, margin of safety, and Lynch verdict.",
+  "id": "/",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b0e14",
+  "theme_color": "#0b0e14",
+  "categories": ["finance", "education", "productivity"],
+  "icons": [
+    {
+      "src": "/static/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Discover",
+      "short_name": "Discover",
+      "description": "Sector heatmap across 100+ stocks",
+      "url": "/?source=pwa#discover",
+      "icons": [{ "src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "My Portfolio",
+      "short_name": "Portfolio",
+      "description": "Track your watchlist",
+      "url": "/?source=pwa#portfolio",
+      "icons": [{ "src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    }
+  ]
+}

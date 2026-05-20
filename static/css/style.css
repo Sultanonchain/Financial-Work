@@ -414,6 +414,220 @@ button { font-family: inherit; cursor: pointer; }
   font-size: 11px;
 }
 
+/* ── VALUS+ badge + upgrade affordances ─────────────────────────────── */
+.valus-plus-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #fde68a 0%, #f59e0b 55%, #b45309 100%);
+  color: #1a1208;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.10em;
+  padding: 2px 6px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.45),
+              0 2px 8px -2px rgba(245, 158, 11, 0.55);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.valus-plus-badge.hidden { display: none; }
+.valus-plus-badge--large {
+  font-size: 12px;
+  padding: 4px 10px;
+  letter-spacing: 0.14em;
+}
+.auth-avatar--plus {
+  border-color: rgba(245, 158, 11, 0.55);
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.20),
+              0 4px 14px -6px rgba(245, 158, 11, 0.40);
+}
+.auth-avatar--plus img {
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.55);
+}
+.auth-menu__tier {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  margin-bottom: 4px;
+}
+.auth-menu__tier.hidden { display: none; }
+.auth-menu__tier-detail {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-muted);
+  letter-spacing: 0.04em;
+}
+
+/* VALUS+ upgrade modal */
+.plus-intro {
+  font-size: 14px;
+  color: var(--ink-secondary);
+  margin: 0 0 var(--space-3);
+}
+.plus-intro strong { color: var(--ink-primary); }
+.plus-perks {
+  list-style: none; padding: 0; margin: 0 0 var(--space-4);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.plus-perks li {
+  display: flex; gap: 12px;
+  font-size: 13px;
+  color: var(--ink-secondary);
+  line-height: 1.45;
+}
+.plus-perks li strong { color: var(--ink-primary); font-weight: 600; }
+.plus-perks__icon {
+  flex-shrink: 0;
+  width: 24px; height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: 6px;
+  color: #f59e0b;
+  font-size: 12px;
+  font-weight: 700;
+}
+.plus-cta-row {
+  display: flex; gap: 10px; justify-content: flex-end;
+  margin-top: var(--space-4);
+}
+.plus-cta {
+  background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 50%, #d97706 100%);
+  color: #1a1208;
+  border-color: rgba(245, 158, 11, 0.5);
+  font-weight: 700;
+}
+.plus-cta:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+.plus-fineprint {
+  font-size: 11px;
+  color: var(--ink-muted);
+  margin: var(--space-3) 0 0;
+  text-align: center;
+  line-height: 1.45;
+}
+
+/* Lock-overlay for premium-gated features (Phase 4) */
+.plus-lock {
+  position: relative;
+}
+.plus-lock::after {
+  content: "🔒 VALUS+";
+  position: absolute;
+  top: 8px; right: 8px;
+  z-index: 4;
+  background: rgba(245, 158, 11, 0.16);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 3px 7px;
+  border-radius: 999px;
+  pointer-events: none;
+}
+.plus-lock-overlay {
+  position: absolute; inset: 0;
+  background: linear-gradient(180deg,
+              rgba(15, 17, 22, 0.55) 0%,
+              rgba(15, 17, 22, 0.92) 100%);
+  backdrop-filter: blur(3px);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center;
+  padding: var(--space-5);
+  border-radius: inherit;
+  z-index: 3;
+}
+.plus-lock-overlay__icon {
+  font-size: 28px;
+  margin-bottom: 8px;
+  opacity: 0.85;
+}
+.plus-lock-overlay__title {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink-primary);
+  margin-bottom: 4px;
+}
+.plus-lock-overlay__sub {
+  font-size: 12px;
+  color: var(--ink-muted);
+  line-height: 1.5;
+  max-width: 320px;
+  margin-bottom: 14px;
+}
+.plus-lock-overlay__cta {
+  background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 50%, #d97706 100%);
+  color: #1a1208;
+  border: none;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  padding: 8px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 120ms var(--ease-out);
+}
+.plus-lock-overlay__cta:hover { transform: translateY(-1px); }
+
+/* Inline upgrade tooltip on small lock icons */
+.plus-inline-lock {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.30);
+  padding: 2px 6px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 120ms var(--ease-out);
+}
+.plus-inline-lock:hover {
+  background: rgba(245, 158, 11, 0.22);
+  border-color: rgba(245, 158, 11, 0.50);
+}
+
+/* Toast notification (Stripe redirect feedback, etc.) */
+.valus-toast {
+  position: fixed;
+  bottom: 24px; left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: var(--bg-elevated);
+  border: 1px solid rgba(255,255,255,0.10);
+  color: var(--ink-primary);
+  padding: 12px 20px;
+  border-radius: 12px;
+  box-shadow: var(--shadow-card-hover);
+  font-size: 13px;
+  font-weight: 500;
+  z-index: 10000;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 220ms var(--ease-out);
+  max-width: 92vw;
+  text-align: center;
+}
+.valus-toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+.valus-toast[data-kind="success"] {
+  border-color: rgba(94, 234, 212, 0.40);
+  box-shadow: 0 14px 32px -10px rgba(94, 234, 212, 0.30);
+}
+.valus-toast[data-kind="error"] {
+  border-color: rgba(248, 113, 113, 0.40);
+  color: #fca5a5;
+}
+
 /* ════════════════════════════════════════════════════════════════════════
    Hero search section
    ════════════════════════════════════════════════════════════════════════ */
@@ -4137,4 +4351,153 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
   background: var(--accent-soft);
   color: var(--accent);
   border-color: var(--accent);
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Mobile + PWA polish (Phase 5)
+   Consolidated mobile rules covering the hero, header actions, scenarios,
+   modals, and iOS safe-area insets so the app reads well at 375px width
+   (iPhone SE) and respects the notch when added to Home Screen.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* iOS safe-area padding for standalone PWA mode (under the notch).
+   Only applies when the user actually launched from the Home Screen icon. */
+@media (display-mode: standalone) {
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+  .site-header { padding-top: max(env(safe-area-inset-top), 12px); }
+  /* Toast pinned to bottom needs to clear the iOS home indicator. */
+  .valus-toast { bottom: max(env(safe-area-inset-bottom), 24px); }
+}
+
+/* iPhone-sized screens: ≤ 480px (iPhone SE through iPhone 14 portrait) */
+@media (max-width: 480px) {
+  .hero { padding: var(--space-6) 0 var(--space-5); }
+  .hero__title {
+    font-size: 30px;
+    line-height: 1.12;
+    letter-spacing: -0.02em;
+  }
+  .hero__subtitle {
+    font-size: 14px;
+    line-height: 1.5;
+    margin-bottom: var(--space-5);
+    padding: 0 var(--space-2);
+  }
+  .search-bar { padding: 3px; }
+  .search-input {
+    padding: 12px 4px 12px 16px;
+    font-size: 16px;   /* keep ≥16px so iOS doesn't auto-zoom on focus */
+  }
+  .search-btn {
+    padding: 10px 14px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+  .search-dropdown { max-height: 60vh; }
+
+  /* Header actions: collapse to icon-only on phones, allow gentle wrap so
+     nothing gets pushed off-screen even with avatar + sign-in + portfolio. */
+  .site-header__inner { gap: 8px; }
+  .header-actions { gap: 6px; flex-wrap: nowrap; }
+  .header-btn { padding: 6px 9px; min-width: 36px; }
+  .auth-avatar { padding: 3px 8px 3px 3px; gap: 6px; }
+  .auth-avatar img { width: 22px; height: 22px; }
+  .auth-avatar span { display: none; }
+
+  /* Hero verdict card — keep numbers prominent on small screens. */
+  .hero-verdict { padding: var(--space-5) var(--space-4); }
+  .price-iv {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "price iv"
+      "mos   mos";
+    gap: var(--space-3);
+    text-align: left;
+  }
+  .price-iv .pi-block:first-child { grid-area: price; }
+  .price-iv .mos-bar              { grid-area: mos; }
+  .price-iv .pi-block.right       { grid-area: iv; text-align: right; }
+  .pi-value, .pi-value.iv { font-size: 26px; }
+
+  /* Scenario grid → single column on phone (3 cards stack). */
+  .scenarios__grid { grid-template-columns: 1fr !important; }
+  /* Mini-stats: 2 columns on phone instead of 4. */
+  .mini-stats { grid-template-columns: repeat(2, 1fr); }
+  .mini-stat__value { font-size: 18px; }
+
+  /* Insights grid → single column (quality + risk + insider + news stack). */
+  .insights-grid { grid-template-columns: 1fr; }
+
+  /* Modal: full-bleed feel on phones */
+  .modal__panel {
+    max-width: calc(100vw - 24px) !important;
+    margin: 0 12px;
+    border-radius: 14px;
+  }
+  .modal__body { padding: var(--space-4); }
+
+  /* Portfolio page — make the summary stats wrap to 2x2 grid on phone */
+  .pf-summary-grid { grid-template-columns: repeat(2, 1fr) !important; }
+  .pf-page__actions {
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: stretch;
+  }
+  .pf-page__actions .copy-btn {
+    flex: 1 1 calc(50% - 6px);
+    font-size: 12px;
+    padding: 8px 10px;
+  }
+
+  /* Drawer trigger — keep tappable */
+  .drawer-trigger { padding: 12px 16px; font-size: 13px; }
+
+  /* DCF custom-assumption sliders */
+  .cd-result { grid-template-columns: 1fr; gap: var(--space-2); text-align: center; }
+  .cd-arrow { display: none; }
+  .cd-sliders { gap: var(--space-3); }
+
+  /* Tables: horizontal-scroll wrapper already exists; nudge font down a touch */
+  .dt { font-size: 12px; }
+  .dt th, .dt td { padding: 6px 8px; }
+
+  /* Lynch card — tighten gutters */
+  .lynch-cols { grid-template-columns: 1fr; }
+  .lynch-pill-row { flex-wrap: wrap; gap: 6px; }
+
+  /* VALUS+ upgrade modal perks list — slightly tighter on phones */
+  .plus-perks li { font-size: 12px; }
+  .plus-perks__icon { width: 22px; height: 22px; font-size: 11px; }
+  .plus-cta-row { flex-direction: column; }
+  .plus-cta-row .copy-btn { width: 100%; }
+}
+
+/* Very narrow screens (iPhone SE, 320px width) — keep search usable */
+@media (max-width: 360px) {
+  .hero__title { font-size: 26px; }
+  .search-btn { padding: 9px 11px; font-size: 12px; }
+  .brand-name { font-size: 14px; }
+  .header-btn { padding: 5px 7px; }
+}
+
+/* Larger phones / small tablets: scenarios fit 3-up at ≥ 600px */
+@media (min-width: 481px) and (max-width: 768px) {
+  .mini-stats { grid-template-columns: repeat(4, 1fr); }
+  .insights-grid { grid-template-columns: 1fr 1fr; }
+}
+
+/* Touch device polish — bump up tap targets on the few small icons */
+@media (hover: none) and (pointer: coarse) {
+  .header-btn,
+  .copy-btn,
+  .pf-sort,
+  .disc-tier-pill,
+  .modal__close {
+    min-height: 36px;
+  }
 }

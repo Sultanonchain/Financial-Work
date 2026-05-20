@@ -2,11 +2,22 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
   <meta name="description" content="VALUS — Free educational stock valuation tool. Search any ticker for a 10-year DCF model, intrinsic value estimate, and margin of safety. Educational only — not investment advice."/>
   <title>VALUS — Educational Stock Valuation Tool · Free DCF & Intrinsic Value</title>
   <link rel="canonical" href="/"/>
   <link rel="stylesheet" href="/static/css/style.css"/>
+
+  <!-- PWA — Add to Home Screen support -->
+  <link rel="manifest" href="/static/manifest.webmanifest"/>
+  <meta name="theme-color" content="#0b0e14"/>
+  <meta name="color-scheme" content="dark"/>
+  <!-- iOS Safari: standalone display + dark status bar + home-screen icon. -->
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="VALUS"/>
+  <link rel="apple-touch-icon" href="/static/icon.svg"/>
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml"/>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"/>
@@ -50,13 +61,15 @@
         <button class="auth-avatar hidden" id="authAvatar" type="button" aria-label="Account">
           <img id="authAvatarImg" alt="" />
           <span id="authAvatarName"></span>
+          <span class="valus-plus-badge hidden" id="authPlusBadge" title="VALUS+ subscriber">VALUS+</span>
         </button>
         <div class="auth-menu hidden" id="authMenu">
           <div class="auth-menu__email" id="authMenuEmail"></div>
+          <div class="auth-menu__tier hidden" id="authMenuTier"></div>
           <button class="auth-menu__btn auth-menu__btn--neutral" id="authPremiumBtn" type="button">
             <span class="auth-menu__icon">★</span>
-            <span class="auth-menu__label">Upgrade to Premium</span>
-            <span class="auth-menu__hint">Soon</span>
+            <span class="auth-menu__label" id="authPremiumLabel">Upgrade to VALUS+</span>
+            <span class="auth-menu__hint" id="authPremiumHint">$2/mo</span>
           </button>
           <button class="auth-menu__btn auth-menu__btn--neutral" id="authSettingsBtn" type="button">
             <span class="auth-menu__icon">⚙</span>
@@ -234,6 +247,44 @@
     <span id="errorMsg">Something went wrong.</span>
   </div>
 </section>
+
+<!-- ── VALUS+ UPGRADE MODAL ─────────────────────────────────────────── -->
+<div class="modal hidden" id="plusModal" role="dialog" aria-modal="true" aria-labelledby="plusModalTitle">
+  <div class="modal__backdrop" data-modal-close></div>
+  <div class="modal__panel" style="max-width: 460px;">
+    <div class="modal__head">
+      <h2 class="modal__title" id="plusModalTitle">
+        <span class="valus-plus-badge valus-plus-badge--large">VALUS+</span>
+      </h2>
+      <button class="modal__close" data-modal-close aria-label="Close">✕</button>
+    </div>
+    <div class="modal__body">
+      <p class="plus-intro">Unlock the institutional toolkit for <strong>$2 / month</strong>.</p>
+      <ul class="plus-perks">
+        <li><span class="plus-perks__icon">∞</span><div><strong>Unlimited searches.</strong> No daily cap on any ticker.</div></li>
+        <li><span class="plus-perks__icon">⌖</span><div><strong>Scenario analysis</strong> — bear / base / bull weighted fair value.</div></li>
+        <li><span class="plus-perks__icon">▣</span><div><strong>Insider trading</strong> — Form 4 filings for every ticker.</div></li>
+        <li><span class="plus-perks__icon">↗</span><div><strong>5-year valuation history</strong> — model IV vs market price replay.</div></li>
+        <li><span class="plus-perks__icon">🏆</span><div><strong>Publish to leaderboard</strong> — flex your undervalued picks.</div></li>
+        <li><span class="plus-perks__icon">⚡</span><div><strong>Priority data refresh</strong> — fresher caches on every analyze.</div></li>
+      </ul>
+      <div class="plus-cta-row">
+        <button class="copy-btn" data-modal-close type="button">Maybe later</button>
+        <button class="copy-btn copy-btn--primary plus-cta" id="plusCheckoutBtn" type="button">
+          <span>Upgrade — $2/month</span>
+        </button>
+      </div>
+      <p class="plus-fineprint">
+        Secure checkout via Stripe. Cancel anytime — your access continues through the current billing period.
+      </p>
+      <p class="signin-not-configured hidden" id="plusNotConfigured">
+        ⚠ Subscription checkout is not yet configured on this deployment.  The
+        owner needs to set <code>STRIPE_SECRET_KEY</code>, <code>STRIPE_PRICE_ID</code>,
+        and <code>STRIPE_WEBHOOK_SECRET</code> environment variables.
+      </p>
+    </div>
+  </div>
+</div>
 
 <!-- ── SIGN-IN MODAL ────────────────────────────────────────────────── -->
 <div class="modal hidden" id="signInModal" role="dialog" aria-modal="true" aria-labelledby="signInTitle">

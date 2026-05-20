@@ -13,3 +13,7 @@ redis>=5.0.0
 requests>=2.31.0
 # .env loader for local dev (Vercel/Render set env vars natively)
 python-dotenv>=1.0.0
+# Stripe — VALUS+ $2/month subscription (Phase 3). Optional at runtime; the
+# app starts and serves all free-tier features without it. Set STRIPE_SECRET_KEY,
+# STRIPE_PRICE_ID, and STRIPE_WEBHOOK_SECRET in env to enable paid tier.
+stripe>=10.0.0

@@ -52,6 +52,11 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=bool(os.environ.get("VERCEL")),  # secure cookies on prod only
+    # 30-day persistent login: when auth_callback sets session.permanent = True,
+    # the signed cookie survives browser restarts and follows the user across
+    # devices for 30 days. Without this, sessions expire on browser close —
+    # which is the "I have to sign in every time I open the site" symptom.
+    PERMANENT_SESSION_LIFETIME=timedelta(days=30),
 )
 CORS(app, supports_credentials=True)
 
@@ -164,6 +169,111 @@ if _GOOGLE_CONFIGURED:
         print(f"[valus] OAuth setup failed: {_e}")
         _oauth = None
         _GOOGLE_CONFIGURED = False
+
+# ── Stripe (VALUS+ $2/month subscription) ─────────────────────────────────
+# Optional — the app works fully without Stripe configured (Phase-1 search
+# limits still apply, no one can become VALUS+, but everything else works).
+#
+# Three env vars together enable the paid tier:
+#   STRIPE_SECRET_KEY      — sk_live_… or sk_test_…
+#   STRIPE_PRICE_ID        — price_…   the $2/month recurring price
+#   STRIPE_WEBHOOK_SECRET  — whsec_…   raw-body signature secret
+_stripe = None
+_STRIPE_CONFIGURED = bool(
+    os.environ.get("STRIPE_SECRET_KEY") and
+    os.environ.get("STRIPE_PRICE_ID")
+)
+if _STRIPE_CONFIGURED:
+    try:
+        import stripe as _stripe_lib
+        _stripe_lib.api_key = os.environ["STRIPE_SECRET_KEY"]
+        _stripe = _stripe_lib
+    except Exception as _e:
+        print(f"[valus] Stripe import failed: {_e}")
+        _stripe = None
+        _STRIPE_CONFIGURED = False
+
+# Subscription record in KV.  One key per user (sub) holds the latest
+# Stripe subscription state. Free users have no key — absence == not plus.
+# Shape: { "status": "active", "customer_id": "cus_…", "subscription_id":
+# "sub_…", "current_period_end": 1700000000, "since": 1690000000 }
+SUBSCRIPTION_KEY_FMT = "valus:plus:{sub}"
+_SUBSCRIPTION_MEM = {}  # local-dev fallback when KV absent
+
+# When ALLOW_TEST_PLUS_OVERRIDE=1, an env-listed comma-separated list of
+# emails is treated as VALUS+ without a real Stripe sub.  Used for early
+# user grants + local QA.
+_TEST_PLUS_EMAILS = {
+    e.strip().lower() for e in
+    (os.environ.get("VALUS_PLUS_EMAILS") or "").split(",")
+    if e.strip()
+}
+
+
+def _read_subscription(user_sub):
+    """Return the saved subscription dict or {} for an unknown user."""
+    if not user_sub:
+        return {}
+    key = SUBSCRIPTION_KEY_FMT.format(sub=user_sub)
+    if _kv:
+        try:
+            raw = _kv.get(key)
+            if raw:
+                return _json_top.loads(raw)
+        except Exception:
+            pass
+    return dict(_SUBSCRIPTION_MEM.get(user_sub) or {})
+
+
+def _write_subscription(user_sub, record):
+    """Persist subscription dict for a user. record={} clears them to free."""
+    if not user_sub:
+        return
+    key = SUBSCRIPTION_KEY_FMT.format(sub=user_sub)
+    if _kv:
+        try:
+            if record:
+                _kv.set(key, _json_top.dumps(record))
+            else:
+                _kv.delete(key)
+            return
+        except Exception:
+            pass
+    if record:
+        _SUBSCRIPTION_MEM[user_sub] = dict(record)
+    else:
+        _SUBSCRIPTION_MEM.pop(user_sub, None)
+
+
+def is_valus_plus(user_or_dict):
+    """True iff this user has an active VALUS+ subscription right now.
+
+    `user_or_dict` is the session.user dict (or None/empty).  We honor:
+      1. VALUS_PLUS_EMAILS env override (for ops grants / QA).
+      2. KV-stored Stripe subscription with status in {active, trialing}.
+      3. Soft grace: if current_period_end is set and >= now, still plus.
+    """
+    if not user_or_dict:
+        return False
+    email = (user_or_dict.get("email") or "").lower()
+    if email and email in _TEST_PLUS_EMAILS:
+        return True
+    sub = user_or_dict.get("sub")
+    if not sub:
+        return False
+    rec = _read_subscription(sub)
+    if not rec:
+        return False
+    status = (rec.get("status") or "").lower()
+    if status in ("active", "trialing"):
+        return True
+    # Past-due grace until the period actually ends (Stripe still tries to
+    # collect for a few days after a failed charge).
+    end = rec.get("current_period_end")
+    if status == "past_due" and end and end > time.time():
+        return True
+    return False
+
 
 RISK_FREE_RATE   = 0.043   # 10-yr US Treasury proxy (Apr 2025 ~4.3%)
 EQUITY_RISK_PREM = 0.060   # FIN 415 template MRP (6.0% — matches academic standard)
@@ -5768,6 +5878,27 @@ def require_user():
     return user, None
 
 
+def require_plus(feature: str = ""):
+    """Gate for VALUS+-only endpoints.
+
+    Returns (user_dict, None) when access is granted, otherwise (None, error)
+    with a payload the frontend can display verbatim ("Upgrade to VALUS+ to
+    unlock {feature}").  Uses 402 Payment Required for the upgrade case so
+    the JS layer can distinguish it from auth (401) and rate (429) errors.
+    """
+    user, err = require_user()
+    if err:
+        return None, err
+    if is_valus_plus(user):
+        return user, None
+    return None, (jsonify({
+        "error":   "valus_plus_required",
+        "feature": feature or "this feature",
+        "message": f"Upgrade to VALUS+ to unlock {feature or 'this feature'}.",
+        "tier":    "free",
+    }), 402)
+
+
 @app.route("/api/_diag/kv")
 def diag_kv():
     """Quick sanity check: is KV connected and writeable?  Public, no PII."""
@@ -5790,14 +5921,40 @@ def diag_kv():
 @app.route("/api/me")
 def api_me():
     """
-    Returns the current signed-in user (or null) plus a flag telling the
-    frontend whether OAuth is configured at all (so it can show a useful
-    message if a deploy forgot to set the env vars).
+    Returns the current signed-in user (or null), the OAuth/Stripe config
+    flags, and the user's subscription tier so the frontend can render
+    badges, unlock gated features, and show the right upgrade CTA.
     """
-    return jsonify({
-        "user":             session.get("user"),
+    user = session.get("user")
+    plus = is_valus_plus(user)
+    payload = {
+        "user":             user,
         "auth_configured":  _GOOGLE_CONFIGURED,
-    })
+        "stripe_configured": _STRIPE_CONFIGURED,
+        "is_plus":          plus,
+        "tier":             "plus" if plus else ("free" if user else "guest"),
+        "search_limit": (
+            None if plus
+            else (SIGNED_IN_SEARCH_LIMIT if user else ANON_SEARCH_LIMIT)
+        ),
+    }
+    if user and plus:
+        rec = _read_subscription(user.get("sub"))
+        if rec.get("current_period_end"):
+            payload["plus_renews_at"] = rec["current_period_end"]
+    return jsonify(payload)
+
+
+@app.before_request
+def _keep_session_alive():
+    """Renew the 30-day rolling window on every request from a signed-in user.
+
+    Without this, the session expires 30 days after sign-in regardless of
+    activity. With it, an active user's login persists indefinitely — they
+    only get bumped out after a full month of zero use.
+    """
+    if session.get("user"):
+        session.permanent = True
 
 
 @app.route("/auth/login")
@@ -5871,6 +6028,255 @@ def auth_logout():
     if request.method == "GET":
         return redirect("/")
     return jsonify({"ok": True})
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Stripe — VALUS+ $2/month subscription
+# ════════════════════════════════════════════════════════════════════════
+# Three routes:
+#   GET  /subscribe              → create Checkout Session, redirect to Stripe
+#   POST /api/stripe/webhook     → Stripe → us; status updates (signed)
+#   POST /api/subscription/cancel → user cancels at period end
+# Subscription state is stored in KV under valus:plus:{user_sub}.
+
+def _origin_url():
+    """Build the public base URL of this deployment for Stripe redirects."""
+    # Vercel sets VERCEL_URL = "valus-xxxx.vercel.app" (no scheme).  In prod
+    # we want our canonical domain.  Honor an explicit override first.
+    override = os.environ.get("PUBLIC_BASE_URL")
+    if override:
+        return override.rstrip("/")
+    # Fall back to whatever the request says.  request.host_url has the
+    # trailing slash; strip it.
+    try:
+        return request.host_url.rstrip("/")
+    except Exception:
+        return "https://valusfinancial.com"
+
+
+@app.route("/subscribe")
+def subscribe():
+    """Create a Stripe Checkout Session for VALUS+ and redirect the user.
+
+    Requires sign-in (so we can key the webhook back to a user).  If Stripe
+    isn't configured, we redirect home with a banner flag so the frontend
+    can explain.
+    """
+    if not _STRIPE_CONFIGURED or not _stripe:
+        return redirect("/?stripe_error=not_configured")
+    user = session.get("user") or {}
+    if not user.get("sub"):
+        # Stash intent and bounce to Google OAuth.
+        next_url = "/subscribe"
+        return redirect(f"/auth/login?next={next_url}")
+
+    base = _origin_url()
+    success_url = f"{base}/?subscribed=1"
+    cancel_url  = f"{base}/?subscribed=0"
+
+    try:
+        # If the user already has a Stripe customer record, reuse it so
+        # billing history / cards persist across re-subscribes.
+        existing = _read_subscription(user["sub"])
+        customer_id = existing.get("customer_id")
+
+        kwargs = dict(
+            mode="subscription",
+            line_items=[{"price": os.environ["STRIPE_PRICE_ID"], "quantity": 1}],
+            success_url=success_url,
+            cancel_url=cancel_url,
+            allow_promotion_codes=True,
+            # client_reference_id lets the webhook tie the session back
+            # to our internal user_sub even if Stripe customer email
+            # diverges from the OAuth email.
+            client_reference_id=user["sub"],
+            metadata={
+                "user_sub":   user["sub"],
+                "user_email": user.get("email") or "",
+            },
+            subscription_data={
+                "metadata": {
+                    "user_sub":   user["sub"],
+                    "user_email": user.get("email") or "",
+                },
+            },
+        )
+        if customer_id:
+            kwargs["customer"] = customer_id
+        else:
+            # Prefill with the OAuth email so the user doesn't re-type.
+            if user.get("email"):
+                kwargs["customer_email"] = user["email"]
+
+        sess = _stripe.checkout.Session.create(**kwargs)
+        return redirect(sess.url, code=303)
+    except Exception as e:
+        print(f"[valus] /subscribe failed: {type(e).__name__}: {e}")
+        return redirect("/?stripe_error=checkout_failed")
+
+
+@app.route("/api/stripe/webhook", methods=["POST"])
+def stripe_webhook():
+    """Receive subscription lifecycle events from Stripe and persist them.
+
+    The webhook secret is non-optional: an unsigned POST is rejected.  We
+    handle three events:
+      checkout.session.completed     — user just paid; grant VALUS+
+      customer.subscription.updated  — renew / status change / period end
+      customer.subscription.deleted  — fully ended; revoke VALUS+
+    """
+    if not _STRIPE_CONFIGURED or not _stripe:
+        return jsonify({"error": "stripe not configured"}), 503
+
+    webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET")
+    payload = request.get_data(as_text=False)
+    sig_header = request.headers.get("Stripe-Signature", "")
+
+    try:
+        if webhook_secret:
+            event = _stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
+        else:
+            # Dev fallback: parse without signature verification. NEVER
+            # leave STRIPE_WEBHOOK_SECRET unset in production.
+            event = _json_top.loads(payload)
+    except Exception as e:
+        print(f"[valus] stripe webhook signature failed: {e}")
+        return jsonify({"error": "invalid signature"}), 400
+
+    etype = event.get("type") if isinstance(event, dict) else event["type"]
+    obj   = (event.get("data") or {}).get("object") if isinstance(event, dict) \
+            else event["data"]["object"]
+    try:
+        if etype == "checkout.session.completed":
+            # Pull the user_sub from client_reference_id (set when we created
+            # the session). Fall back to subscription metadata.
+            user_sub = obj.get("client_reference_id")
+            sub_id   = obj.get("subscription")
+            cust_id  = obj.get("customer")
+            if not user_sub:
+                # Stripe SDK shape: obj["metadata"]
+                md = obj.get("metadata") or {}
+                user_sub = md.get("user_sub")
+            if user_sub and sub_id:
+                # Hit Stripe API for the actual subscription to get the
+                # period_end + status.
+                try:
+                    sub = _stripe.Subscription.retrieve(sub_id)
+                    _write_subscription(user_sub, {
+                        "status":             sub.get("status") or "active",
+                        "customer_id":        cust_id,
+                        "subscription_id":    sub_id,
+                        "current_period_end": sub.get("current_period_end"),
+                        "since":              int(time.time()),
+                    })
+                except Exception:
+                    # Stripe API blip — still grant access for now; the
+                    # next subscription.updated webhook will reconcile.
+                    _write_subscription(user_sub, {
+                        "status":             "active",
+                        "customer_id":        cust_id,
+                        "subscription_id":    sub_id,
+                        "current_period_end": None,
+                        "since":              int(time.time()),
+                    })
+        elif etype in ("customer.subscription.updated",
+                       "customer.subscription.created"):
+            md = obj.get("metadata") or {}
+            user_sub = md.get("user_sub")
+            if not user_sub:
+                # Look up via customer_id reverse-map (search KV — small N).
+                cust_id = obj.get("customer")
+                user_sub = _find_user_by_customer(cust_id) if cust_id else None
+            if user_sub:
+                existing = _read_subscription(user_sub)
+                _write_subscription(user_sub, {
+                    **existing,
+                    "status":             obj.get("status") or "active",
+                    "customer_id":        obj.get("customer"),
+                    "subscription_id":    obj.get("id"),
+                    "current_period_end": obj.get("current_period_end"),
+                    "cancel_at_period_end": bool(obj.get("cancel_at_period_end")),
+                })
+        elif etype == "customer.subscription.deleted":
+            md = obj.get("metadata") or {}
+            user_sub = md.get("user_sub")
+            if not user_sub:
+                cust_id = obj.get("customer")
+                user_sub = _find_user_by_customer(cust_id) if cust_id else None
+            if user_sub:
+                _write_subscription(user_sub, {})
+    except Exception as e:
+        print(f"[valus] stripe webhook handler errored: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        # Always 200 OK to Stripe so it doesn't retry forever on bugs we
+        # own.  We've already logged for ops triage.
+    return jsonify({"received": True})
+
+
+def _find_user_by_customer(customer_id: str):
+    """Best-effort reverse lookup: customer_id → user_sub.
+
+    Stripe webhooks that aren't checkout.session.completed (renewals, plan
+    changes) sometimes lose our metadata.  We scan KV under the small
+    valus:plus:* namespace to find a matching customer.  Cheap because the
+    KV pattern has at most ~N_subscribers keys.
+    """
+    if not customer_id or not _kv:
+        return None
+    try:
+        for k in _kv.scan_iter(match="valus:plus:*", count=200):
+            raw = _kv.get(k)
+            if not raw:
+                continue
+            try:
+                rec = _json_top.loads(raw)
+            except Exception:
+                continue
+            if rec.get("customer_id") == customer_id:
+                # key shape: valus:plus:{sub}
+                return k.split(":", 2)[-1]
+    except Exception:
+        pass
+    return None
+
+
+@app.route("/api/subscription/status")
+def subscription_status():
+    """Return the signed-in user's subscription record (or {} if free)."""
+    user, err = require_user()
+    if err: return err
+    rec = _read_subscription(user["sub"])
+    return jsonify({
+        "is_plus": is_valus_plus(user),
+        "record":  rec,
+    })
+
+
+@app.route("/api/subscription/cancel", methods=["POST"])
+def subscription_cancel():
+    """Cancel the user's active subscription at the end of the current period.
+
+    We don't immediately void — they keep access until the period_end so the
+    $2 they already paid for the current month isn't wasted.
+    """
+    if not _STRIPE_CONFIGURED or not _stripe:
+        return jsonify({"error": "stripe not configured"}), 503
+    user, err = require_user()
+    if err: return err
+    rec = _read_subscription(user["sub"])
+    sub_id = rec.get("subscription_id")
+    if not sub_id:
+        return jsonify({"error": "no active subscription"}), 404
+    try:
+        updated = _stripe.Subscription.modify(sub_id, cancel_at_period_end=True)
+        _write_subscription(user["sub"], {
+            **rec,
+            "status":              updated.get("status") or rec.get("status"),
+            "cancel_at_period_end": True,
+        })
+        return jsonify({"ok": True, "cancels_at": updated.get("current_period_end")})
+    except Exception as e:
+        return jsonify({"error": str(e)[:200]}), 500
 
 
 @app.route("/api/search")
@@ -6038,6 +6444,9 @@ def api_insider():
     ticker = request.args.get("ticker", "").strip().upper()
     if not ticker:
         return jsonify({"error": "ticker required"}), 400
+    # VALUS+ gate — insider Form 4 surfacing is a paid feature.
+    _user, err = require_plus("insider activity")
+    if err: return err
     payload = _fetch_insider_form4(ticker)
     if not payload:
         return jsonify({"available": False, "reason": "No recent Form 4 filings or non-US filer."})
@@ -6217,6 +6626,9 @@ def valuation_history():
     ticker = request.args.get("ticker", "").strip().upper()
     if not ticker:
         return jsonify({"error": "ticker required"}), 400
+    # VALUS+ gate — historical valuation replay is a paid feature.
+    _user, err = require_plus("historical valuation")
+    if err: return err
     try:
         info = {}
         sector = industry = ""
@@ -6377,8 +6789,9 @@ def _seconds_until_next_market_open() -> int:
 # Premium (future):              unlimited.
 # Re-fetching a ticker already searched today doesn't double-count.
 # Counter resets at midnight Eastern.
-ANON_SEARCH_LIMIT      = 5
-SIGNED_IN_SEARCH_LIMIT = 10
+ANON_SEARCH_LIMIT      = 5     # guest, per IP, per ET-day
+SIGNED_IN_SEARCH_LIMIT = 8     # free signed-in user, per Google sub, per ET-day
+# VALUS+ subscribers: unlimited (gated by is_valus_plus(user)).
 _SEARCH_LIMIT_MEM: dict = {}  # in-memory fallback when _kv is unavailable
 
 def _client_ip(req) -> str:
@@ -6421,34 +6834,55 @@ def _record_search(scope: str, ident: str, ticker: str) -> None:
 def _check_anon_search_limit(req, ticker: str):
     """Returns None to allow, or (response, status) tuple to block.
 
-    Pre-Stripe policy:
-      • Anonymous: 5 unique tickers per IP per ET-day.
-      • Signed-in: unlimited.
-      • Internal callers (Discover treemap, hourly cron): bypass.
+    Policy:
+      • Anonymous (no account): ANON_SEARCH_LIMIT (5) unique tickers per IP / ET-day.
+      • Free signed-in user:    SIGNED_IN_SEARCH_LIMIT (8) unique tickers per user / ET-day.
+      • VALUS+ subscriber:      unlimited.
+      • Internal callers (Discover treemap, hourly cron warm-up): bypass.
 
-    Once Stripe lands, swap the early-return below to enforce
-    SIGNED_IN_SEARCH_LIMIT for non-premium signed-in users.
+    Counts are keyed to unique TICKERS per day — re-fetching the same ticker
+    multiple times in one day is free.  Quota resets at midnight ET.
     """
     if req.headers.get("X-Valus-Internal") == "1":
         return None
-    if session.get("user"):
+
+    user = session.get("user") or {}
+    # VALUS+ subscribers bypass entirely.
+    if is_valus_plus(user):
         return None
 
-    ip = _client_ip(req)
-    seen = _searches_today("anon", ip)
+    if user and user.get("sub"):
+        scope = "user"
+        ident = user["sub"]
+        limit = SIGNED_IN_SEARCH_LIMIT
+        error_code = "search_limit_signed_in"
+        message = (
+            f"You've used your free searches for today. "
+            f"Upgrade to VALUS+ for unlimited."
+        )
+    else:
+        scope = "anon"
+        ident = _client_ip(req)
+        limit = ANON_SEARCH_LIMIT
+        error_code = "search_limit_anon"
+        message = (
+            "You've used your free searches for today. "
+            f"Sign in for {SIGNED_IN_SEARCH_LIMIT}/day or upgrade to VALUS+ for unlimited."
+        )
+
+    seen = _searches_today(scope, ident)
     if ticker in seen:
         return None  # already counted today, re-fetch is free
-    if len(seen) >= ANON_SEARCH_LIMIT:
+    if len(seen) >= limit:
         return (jsonify({
-            "error":   "search_limit_anon",
-            "limit":   ANON_SEARCH_LIMIT,
+            "error":   error_code,
+            "limit":   limit,
             "used":    len(seen),
-            "message": (
-                f"You've used your {ANON_SEARCH_LIMIT} free searches today. "
-                "Sign in for unlimited searches plus portfolio tracking and the Discover heatmap."
-            ),
+            "message": message,
+            "signed_in":   scope == "user",
+            "is_plus":     False,
         }), 429)
-    _record_search("anon", ip, ticker)
+    _record_search(scope, ident, ticker)
     return None
 
 
@@ -6820,12 +7254,13 @@ def _write_leaderboard(entries):
 @app.route("/api/leaderboard/submit", methods=["POST"])
 def leaderboard_submit():
     """
-    Submit a portfolio to the public leaderboard.  Requires sign-in.
+    Submit a portfolio to the public leaderboard.  VALUS+ feature — free
+    users can browse the leaderboard but can't publish to it.
     Body: { name: str (optional override), tickers: [str], note: str }
     Entries are keyed to the OAuth `sub` so re-publishing replaces the
     user's previous entry.
     """
-    user, err = require_user()
+    user, err = require_plus("leaderboard publishing")
     if err: return err
 
     body = request.get_json(silent=True) or {}
@@ -7489,6 +7924,32 @@ def leaderboard():
     return jsonify({"items": enriched[:50], "total": len(enriched)})
 
 
+def _gate_premium_fields(payload, user):
+    """Strip VALUS+-only data from the analyze response for free users.
+
+    We keep the cache copy whole (so an upgrade picks up the gated fields
+    immediately on the next refresh) and gate at response time. The free
+    payload retains everything needed for the basic DCF + verdict UI;
+    scenario analysis is replaced with a `*_locked: True` marker so the
+    frontend can render the upgrade overlay.
+
+    Internal callers (X-Valus-Internal header on Discover/warm cron) get
+    the full payload so the cache + heatmap stay correct.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    if request.headers.get("X-Valus-Internal") == "1":
+        return payload
+    if is_valus_plus(user):
+        return payload
+    # Free tier: drop scenarios + sensitivity grid, mark as locked.
+    gated = dict(payload)
+    gated["scenarios"] = None
+    gated["sensitivity_grid"] = None
+    gated["scenarios_locked"] = True
+    return gated
+
+
 @app.route("/api/analyze")
 @limiter.limit(limit_analyze)
 def analyze():
@@ -7496,6 +7957,7 @@ def analyze():
     if not ticker:
         return jsonify({"error": "Ticker is required"}), 400
 
+    _current_user = session.get("user")
     # Anonymous-user daily search gate. Signed-in users skip.
     gate = _check_anon_search_limit(request, ticker)
     if gate is not None:
@@ -7508,9 +7970,16 @@ def analyze():
 
     # Cache lookup
     _ck = _analyze_cache_key(ticker, dict(request.args))
-    _cached = _analyze_cache_get(_ck)
+    # VALUS+ priority refresh: a plus user can pass ?fresh=1 to bypass the
+    # cache and force a full re-pull. Free users cannot (would let one user
+    # exhaust Yahoo's rate-limit headroom for everyone).
+    _force_fresh = (
+        is_valus_plus(_current_user)
+        and request.args.get("fresh", "").lower() in ("1", "true", "yes")
+    )
+    _cached = None if _force_fresh else _analyze_cache_get(_ck)
     if _cached is not None:
-        resp = jsonify(_cached)
+        resp = jsonify(_gate_premium_fields(_cached, _current_user))
         resp.headers["X-Valus-Cache"] = "HIT"
         return resp
 
@@ -9591,7 +10060,7 @@ def analyze():
 
         cleaned = clean(result)
         _analyze_cache_set(_ck, cleaned)
-        resp = jsonify(cleaned)
+        resp = jsonify(_gate_premium_fields(cleaned, _current_user))
         resp.headers["X-Valus-Cache"] = "MISS"
         return resp
 
