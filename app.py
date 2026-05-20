@@ -2550,6 +2550,561 @@ def _build_quality_metrics(info, base_fcf, revenue_ttm):
     return metrics if metrics else None
 
 
+_QUAL_TIER_POINTS = {"elite": 100, "strong": 75, "ok": 50, "weak": 20}
+
+def _composite_quality_score(metrics):
+    """Single 0–100 quality score derived from the per-metric tier ladder.
+
+    Weights:
+      ROE          0.20    — capital efficiency, the canonical Buffett metric
+      ROA          0.10    — debt-corrected return signal
+      Op Margin    0.20    — operating profitability
+      Net Margin   0.15    — bottom-line efficiency
+      FCF Margin   0.20    — cash conversion (harder to fake than EPS)
+      Debt/Equity  0.15    — leverage; low values get full credit
+
+    Grade thresholds match the per-metric tier ladder so the composite
+    reads consistently with the individual chips.
+    """
+    if not metrics:
+        return None
+    w = {
+        "roe": 0.20, "roa": 0.10, "op_margin": 0.20,
+        "profit_margin": 0.15, "fcf_margin": 0.20, "debt_equity": 0.15,
+    }
+    total_w   = 0.0
+    total_pts = 0.0
+    drivers   = {}
+    for m in metrics:
+        key  = m.get("key")
+        tier = m.get("tier")
+        if not key or not tier or key not in w:
+            continue
+        pts  = _QUAL_TIER_POINTS.get(tier, 0)
+        total_pts += pts * w[key]
+        total_w   += w[key]
+        drivers[key] = {"tier": tier, "pts": pts, "weight": w[key]}
+    if total_w <= 0:
+        return None
+    score = round(total_pts / total_w)
+    if   score >= 85: grade = "Elite"
+    elif score >= 70: grade = "Strong"
+    elif score >= 50: grade = "Solid"
+    elif score >= 30: grade = "Mediocre"
+    else:             grade = "Weak"
+    return {"score": score, "grade": grade, "drivers": drivers}
+
+
+def _moat_breakdown(net_margin_pct, rev_growth_pct, earn_growth_pct,
+                    fcf_margin_pct, roe_pct, rev_ttm_bn):
+    """Return all four moat categories with applies/why fields so the UI
+    can render checkmarks across the panel — not just the first match.
+
+    Inputs are the same percentage scalars `_detect_moat` consumes.
+    Mirrors the existing thresholds so the composite "is_high_moat"
+    boolean (already computed elsewhere) stays consistent.
+    """
+    nm = net_margin_pct  or 0
+    rg = rev_growth_pct  or 0
+    eg = earn_growth_pct or 0
+    fm = fcf_margin_pct  or 0
+    rv = roe_pct         or 0
+    rb = rev_ttm_bn      or 0
+
+    cats = [
+        {
+            "key": "pricing_power",
+            "label": "Pricing Power",
+            "applies": (nm > 25),
+            "why": (f"Net margin {nm:.1f}% — keeps pricing despite competition."
+                    if nm > 25
+                    else f"Net margin {nm:.1f}% — below the 25% pricing-power bar."),
+        },
+        {
+            "key": "switching_costs",
+            "label": "Switching Costs",
+            "applies": (nm > 20 and rg > 15),
+            "why": (f"Net margin {nm:.1f}% + revenue growth {rg:.1f}% — sticky customer base compounding."
+                    if (nm > 20 and rg > 15)
+                    else f"Need >20% net margin and >15% revenue growth — current {nm:.1f}% / {rg:.1f}%."),
+        },
+        {
+            "key": "network_effects",
+            "label": "Network Effects / Scale",
+            "applies": (rb > 200 and rg > 8 and fm > 2),
+            "why": (f"${rb:.0f}B revenue at {rg:.1f}% growth + {fm:.1f}% FCF margin — platform scale flywheel."
+                    if (rb > 200 and rg > 8 and fm > 2)
+                    else f"Need >$200B revenue + >8% growth + >2% FCF margin — current ${rb:.0f}B / {rg:.1f}% / {fm:.1f}%."),
+        },
+        {
+            "key": "cost_advantage",
+            "label": "Cost Advantage / Capital-Light",
+            "applies": (nm > 20 and fm > 20 and rv > 25),
+            "why": (f"Net margin {nm:.1f}% + FCF margin {fm:.1f}% + ROE {rv:.1f}% — capital-light compounder."
+                    if (nm > 20 and fm > 20 and rv > 25)
+                    else f"Need >20% net + >20% FCF + >25% ROE — current {nm:.1f}% / {fm:.1f}% / {rv:.1f}%."),
+        },
+    ]
+    n_applies = sum(1 for c in cats if c["applies"])
+    if   n_applies >= 3: strength = "wide"
+    elif n_applies == 2: strength = "narrow"
+    elif n_applies == 1: strength = "single"
+    else:                strength = "none"
+    return {"strength": strength, "n_applies": n_applies, "categories": cats}
+
+
+def _sanity_check_vs_analyst(intrinsic_value, analyst_target, price):
+    """Compare VALUS IV to Wall-Street consensus target.
+
+    Returns a structured payload the UI can render verbatim — alignment
+    tier + gap percentage + a single-sentence reading.  None when either
+    side is missing.
+
+    Tiers:
+      aligned   — gap within ±10% (model and street agree)
+      below     — VALUS sees less upside than analysts (we're conservative)
+      above     — VALUS sees more upside than analysts (we're optimistic)
+      contrary  — model and analysts disagree on direction vs current price
+    """
+    if not intrinsic_value or not analyst_target or not price:
+        return None
+    iv = float(intrinsic_value)
+    at = float(analyst_target)
+    px = float(price)
+    if iv <= 0 or at <= 0 or px <= 0:
+        return None
+
+    gap_pct = round((iv - at) / at * 100.0, 1)
+    valus_mos    = round((iv - px) / px * 100.0, 1)
+    analyst_mos  = round((at - px) / px * 100.0, 1)
+
+    # Direction agreement: do both place fair value above/below current price?
+    same_side = ((iv > px and at > px) or (iv < px and at < px))
+
+    if   abs(gap_pct) <= 10:
+        tier   = "aligned"
+        label  = "Aligned with Wall Street"
+        narrative = (f"VALUS fair value ${iv:.2f} is within {abs(gap_pct):.1f}% "
+                     f"of the analyst consensus target ${at:.2f}. The model "
+                     f"and the street agree on this name.")
+    elif not same_side:
+        tier   = "contrary"
+        label  = "Contrary to Wall Street"
+        narrative = (f"VALUS sees fair value at ${iv:.2f} ({valus_mos:+.0f}% vs price); "
+                     f"analysts target ${at:.2f} ({analyst_mos:+.0f}% vs price). "
+                     f"Model and consensus disagree on direction — worth a closer look.")
+    elif gap_pct > 0:
+        tier   = "above"
+        label  = "VALUS more bullish than consensus"
+        narrative = (f"VALUS fair value ${iv:.2f} is {gap_pct:.0f}% above the analyst "
+                     f"target ${at:.2f}. The model is more optimistic than the "
+                     f"street — usually because we credit a moat, sovereign backstop, "
+                     f"or growth runway analysts haven't priced in yet.")
+    else:
+        tier   = "below"
+        label  = "VALUS more conservative than consensus"
+        narrative = (f"VALUS fair value ${iv:.2f} is {abs(gap_pct):.0f}% below the analyst "
+                     f"target ${at:.2f}. The model is more cautious than the "
+                     f"street — usually because we're not crediting a forward-EPS "
+                     f"spike, a transformative product cycle, or strategic re-rating "
+                     f"that analysts are pricing in.")
+
+    return {
+        "tier":           tier,
+        "label":          label,
+        "valus_iv":       round(iv, 2),
+        "analyst_target": round(at, 2),
+        "gap_pct":        gap_pct,
+        "valus_mos":      valus_mos,
+        "analyst_mos":    analyst_mos,
+        "same_direction": same_side,
+        "narrative":      narrative,
+    }
+
+
+def _sector_wacc_band(sector: str, industry: str):
+    """Industry-standard WACC band for the given sector — surfaced so the
+    user can sanity-check whether VALUS's computed WACC is in line with
+    how real analysts discount this kind of business.
+
+    Bands are textbook ranges (Damodaran's database, rounded to whole pp).
+    """
+    s = (sector or "").lower()
+    ind = (industry or "").lower()
+    if "biotech" in ind or "biotechnology" in ind:
+        return {"sector_label": "Biotech", "low_pct": 12.0, "high_pct": 15.0,
+                "rationale": "High pipeline risk + binary clinical outcomes → 12–15%."}
+    if "utilit" in s or "utilit" in ind:
+        return {"sector_label": "Utilities", "low_pct": 5.0, "high_pct": 7.0,
+                "rationale": "Rate-base regulated cash flows + low equity beta → 5–7%."}
+    if "real estate" in s or "reit" in ind:
+        return {"sector_label": "Real Estate / REIT", "low_pct": 6.0, "high_pct": 8.0,
+                "rationale": "Asset-backed rental cash flows → 6–8%."}
+    if "bank" in ind or "insurance" in ind:
+        return {"sector_label": "Financials (banks)", "low_pct": 8.0, "high_pct": 11.0,
+                "rationale": "Cost of equity ≈ Tier-1 hurdle + regulatory capital → 8–11%."}
+    if "energy" in s and "renewable" not in ind:
+        return {"sector_label": "Energy / Oil & Gas", "low_pct": 9.0, "high_pct": 12.0,
+                "rationale": "Commodity cycle + reserves depletion → 9–12%."}
+    if "consumer staples" in s or "consumer defensive" in s:
+        return {"sector_label": "Consumer Staples", "low_pct": 6.0, "high_pct": 8.0,
+                "rationale": "Recession-resistant brands + low beta → 6–8%."}
+    if ("communication" in s or "media" in ind) and ("internet content" in ind or "interactive" in ind):
+        return {"sector_label": "Internet / Media", "low_pct": 9.0, "high_pct": 12.0,
+                "rationale": "Platform monetization + ad-cycle exposure → 9–12%."}
+    if "technology" in s or "software" in ind or "semiconductor" in ind:
+        return {"sector_label": "Technology / Software", "low_pct": 8.0, "high_pct": 12.0,
+                "rationale": "Higher growth + cyclical demand → 8–12%."}
+    if "industrial" in s or "aerospace" in ind or "defense" in ind:
+        return {"sector_label": "Industrials", "low_pct": 8.0, "high_pct": 10.0,
+                "rationale": "Cyclical demand + multi-year backlogs → 8–10%."}
+    if "healthcare" in s and "biotech" not in ind:
+        return {"sector_label": "Healthcare (ex-biotech)", "low_pct": 7.0, "high_pct": 10.0,
+                "rationale": "Stable demand + regulatory exposure → 7–10%."}
+    # Default fall-back band.
+    return {"sector_label": "Broad market", "low_pct": 8.0, "high_pct": 10.0,
+            "rationale": "Equity-market median WACC band → 8–10%."}
+
+
+def _reverse_dcf_realism(implied_growth_pct, sector_ceiling_pct,
+                         analyst_growth_pct=None, sector_label=None):
+    """Verdict on whether the market-implied Stage-1 growth rate is realistic.
+
+    Tiers (vs sector ceiling):
+      below      — market expects sub-ceiling growth (often: undervalued / pessimism)
+      in-line    — within 0–20% of the ceiling (priced for sector-typical)
+      stretched  — 20–40% above ceiling (aggressive)
+      unrealistic — >40% above ceiling, or > 25% absolute (almost always a miss)
+    """
+    if implied_growth_pct is None or sector_ceiling_pct is None:
+        return None
+    ig = float(implied_growth_pct)
+    sc = float(sector_ceiling_pct)
+    sec_lbl = sector_label or "the sector"
+
+    if ig <= 0:
+        tier, label = "below", "Market expects decline"
+        narrative = (f"Market pricing implies negative growth of {ig:.1f}%/yr — "
+                     "the price is consistent with a contracting business.")
+    elif ig <= sc * 0.6:
+        tier, label = "below", "Market expects below-trend growth"
+        narrative = (f"Market implies {ig:.1f}%/yr vs sector ceiling {sc:.0f}%/yr — "
+                     f"meaningfully below {sec_lbl} norms.")
+    elif ig <= sc * 1.2:
+        tier, label = "in-line", "Market expects sector-typical growth"
+        narrative = (f"Market implies {ig:.1f}%/yr vs sector ceiling {sc:.0f}%/yr — "
+                     f"squarely in {sec_lbl} norms.")
+    elif ig <= sc * 1.4 or ig <= 25:
+        tier, label = "stretched", "Market expects above-trend growth"
+        narrative = (f"Market implies {ig:.1f}%/yr vs sector ceiling {sc:.0f}%/yr — "
+                     "aggressive but not impossible for a clear category leader.")
+    else:
+        tier, label = "unrealistic", "Market pricing assumes outlier growth"
+        narrative = (f"Market implies {ig:.1f}%/yr vs sector ceiling {sc:.0f}%/yr — "
+                     "few companies sustain growth this far above their sector "
+                     "ceiling for a full decade.")
+
+    out = {
+        "tier":              tier,
+        "label":             label,
+        "implied_pct":       round(ig, 1),
+        "sector_ceiling":    round(sc, 1),
+        "narrative":         narrative,
+    }
+    if analyst_growth_pct is not None:
+        out["analyst_pct"] = round(float(analyst_growth_pct), 1)
+    return out
+
+
+def _buffett_checklist(info, quality_metrics, base_fcf, rev_ttm):
+    """Five-criterion Buffett-style checklist with per-criterion pass/fail.
+
+    Each row: {key, label, passes, value, hint}.  `passes` is None when the
+    underlying data is missing so the UI can grey it out instead of falsely
+    failing the company.
+    """
+    out = []
+
+    # 1. ROE > 15% consistently
+    roe = safe(info.get("returnOnEquity"))
+    out.append({
+        "key": "roe", "label": "ROE > 15%",
+        "value": (f"{roe*100:.1f}%" if roe is not None else None),
+        "passes": (roe is not None and roe > 0.15),
+        "hint": "Capital efficiency — Buffett's first filter for a quality business.",
+    })
+
+    # 2. Low debt (D/E < 1.0)
+    de = safe(info.get("debtToEquity"))
+    de_ratio = (de / 100.0) if de is not None else None
+    out.append({
+        "key": "low_debt", "label": "Debt/Equity < 1.0",
+        "value": (f"{de_ratio:.2f}x" if de_ratio is not None else None),
+        "passes": (de_ratio is not None and de_ratio < 1.0),
+        "hint": "Conservative balance sheet — survives downturns.",
+    })
+
+    # 3. Strong, consistent margins (op margin > 15%)
+    om = safe(info.get("operatingMargins"))
+    out.append({
+        "key": "margins", "label": "Operating margin > 15%",
+        "value": (f"{om*100:.1f}%" if om is not None else None),
+        "passes": (om is not None and om > 0.15),
+        "hint": "Durable profitability — the kind that signals brand or moat.",
+    })
+
+    # 4. Cash conversion (FCF margin > 8%)
+    fcfm = None
+    if base_fcf and rev_ttm and rev_ttm > 0:
+        fcfm = float(base_fcf) / float(rev_ttm)
+    out.append({
+        "key": "fcf_conversion", "label": "FCF margin > 8%",
+        "value": (f"{fcfm*100:.1f}%" if fcfm is not None else None),
+        "passes": (fcfm is not None and fcfm > 0.08),
+        "hint": "Cash actually hitting the bank — harder to fake than reported EPS.",
+    })
+
+    # 5. Simple, understandable business — proxy: sector ∉ {biotech, specialty financials}
+    sector = (info.get("sector") or "").lower()
+    industry = (info.get("industry") or "").lower()
+    is_complex = ("biotech" in industry or "specialty" in industry
+                  or "asset management" in industry or "investment bank" in industry)
+    out.append({
+        "key": "simple_business", "label": "Simple, understandable business",
+        "value": info.get("sector") or "—",
+        "passes": (not is_complex) if sector else None,
+        "hint": "Buffett's circle-of-competence test — can you explain this in one sentence?",
+    })
+
+    n_pass = sum(1 for r in out if r["passes"] is True)
+    n_total = sum(1 for r in out if r["passes"] is not None)
+    return {
+        "rows":       out,
+        "passes":     n_pass,
+        "evaluated":  n_total,
+        "score_pct":  round(n_pass / n_total * 100) if n_total else None,
+    }
+
+
+def _earnings_quality_signal(info, base_fcf):
+    """Flag aggressive earnings (reported EPS growing faster than FCF) or
+    quality earnings (FCF growing faster than EPS).
+
+    Uses yfinance growth fields directly.  Returns None when either side
+    is missing.
+    """
+    if not info:
+        return None
+    eps_growth = safe(info.get("earningsGrowth"))
+    rev_growth = safe(info.get("revenueGrowth"))
+    fcf = base_fcf
+    if eps_growth is None or fcf is None:
+        return None
+
+    # Use revenue growth as a proxy for "real" growth pace because TTM
+    # FCF growth isn't directly exposed by yfinance.  When EPS grows
+    # materially faster than revenue, the gap is being filled by margin
+    # expansion, share buybacks, or accounting tailwinds — flag it.
+    if rev_growth is None:
+        return None
+
+    delta = (eps_growth - rev_growth) * 100  # pp
+    if delta >= 15:
+        tier  = "aggressive"
+        label = "Aggressive earnings"
+        narrative = (f"EPS growing {eps_growth*100:+.0f}% vs revenue {rev_growth*100:+.0f}% — "
+                     "the gap is being filled by margin expansion, buybacks, or accounting "
+                     "tailwinds. Worth checking how durable the EPS growth really is.")
+    elif delta <= -10:
+        tier  = "high_quality"
+        label = "High-quality growth"
+        narrative = (f"Revenue growing {rev_growth*100:+.0f}% while EPS grows {eps_growth*100:+.0f}% — "
+                     "the company is reinvesting through the income statement (R&D, hiring) "
+                     "rather than juicing reported earnings.")
+    else:
+        tier  = "in_line"
+        label = "EPS in line with revenue"
+        narrative = (f"EPS and revenue growth are tracking together "
+                     f"({eps_growth*100:+.0f}% vs {rev_growth*100:+.0f}%) — earnings are "
+                     "moving with the underlying business, not financial engineering.")
+
+    return {
+        "tier":         tier,
+        "label":        label,
+        "eps_growth":   round(eps_growth * 100, 1),
+        "rev_growth":   round(rev_growth * 100, 1),
+        "delta_pp":     round(delta, 1),
+        "narrative":    narrative,
+    }
+
+
+def _momentum_overlay(hist):
+    """50/200-day MA momentum read.  Returns {tier, label, ma50, ma200, ma_gap_pct}.
+
+    Tiers:
+      strong_uptrend   — price > MA50 > MA200, MA50 above MA200 (Golden Cross territory)
+      uptrend          — price > MA200 only
+      sideways         — within ±2% of MA200
+      downtrend        — price < MA200, MA50 above MA200
+      strong_downtrend — price < MA50 < MA200, MA50 below MA200 (Death Cross territory)
+    """
+    if hist is None or getattr(hist, "empty", True) or "Close" not in hist.columns:
+        return None
+    closes = hist["Close"].dropna()
+    if len(closes) < 50:
+        return None
+    last = float(closes.iloc[-1])
+    ma50 = float(closes.iloc[-50:].mean())
+    ma200 = float(closes.iloc[-200:].mean()) if len(closes) >= 200 else None
+
+    if ma200 is None:
+        # < 200 trading days of data — fall back to a 50-day-only read.
+        if last > ma50 * 1.02: tier, label = "uptrend", "Above 50-day MA"
+        elif last < ma50 * 0.98: tier, label = "downtrend", "Below 50-day MA"
+        else: tier, label = "sideways", "Trading around 50-day MA"
+        return {
+            "tier": tier, "label": label,
+            "price": round(last, 2),
+            "ma50":  round(ma50, 2),
+            "ma200": None,
+            "ma50_gap_pct":  round((last / ma50 - 1.0) * 100, 1),
+            "ma200_gap_pct": None,
+        }
+
+    above_50  = last > ma50
+    above_200 = last > ma200
+    cross_up  = ma50 > ma200
+    sideways_band = abs(last - ma200) / ma200 < 0.02
+
+    if sideways_band:
+        tier, label = "sideways", "Sideways around 200-day MA"
+    elif above_50 and above_200 and cross_up:
+        tier, label = "strong_uptrend", "Strong uptrend (Golden Cross)"
+    elif above_200:
+        tier, label = "uptrend", "Uptrend above 200-day MA"
+    elif (not above_50) and (not above_200) and (not cross_up):
+        tier, label = "strong_downtrend", "Strong downtrend (Death Cross)"
+    else:
+        tier, label = "downtrend", "Downtrend below 200-day MA"
+
+    return {
+        "tier":           tier,
+        "label":          label,
+        "price":          round(last, 2),
+        "ma50":           round(ma50, 2),
+        "ma200":          round(ma200, 2),
+        "ma50_gap_pct":   round((last / ma50  - 1.0) * 100, 1),
+        "ma200_gap_pct":  round((last / ma200 - 1.0) * 100, 1),
+    }
+
+
+def _net_insider_sentiment(items):
+    """Convert /api/insider items list into a NET buy/sell sentiment block.
+
+    Returns {tier, label, buys, sells, net_score, narrative} or None.
+    `net_score` is in [-100, +100] where +100 = all buys, -100 = all sells.
+    """
+    if not items:
+        return None
+    buys  = sum(1 for it in items if (it.get("type") or "").lower() in ("buy", "purchase"))
+    sells = sum(1 for it in items if (it.get("type") or "").lower() in ("sell", "sale"))
+    n     = buys + sells
+    if n == 0:
+        return None
+    net_score = round(((buys - sells) / n) * 100)
+    if   net_score >= 60:  tier, label = "buying",        "Insiders are net buyers"
+    elif net_score >= 20:  tier, label = "mild_buying",   "Insiders mildly buying"
+    elif net_score <= -60: tier, label = "selling",       "Insiders are net sellers"
+    elif net_score <= -20: tier, label = "mild_selling",  "Insiders mildly selling"
+    else:                  tier, label = "mixed",         "Insider activity is mixed"
+
+    narrative = (f"{buys} buy{'s' if buys != 1 else ''} vs {sells} "
+                 f"sell{'s' if sells != 1 else ''} over the last 90 days — "
+                 "Form 4 filings only (not options exercises).")
+    return {
+        "tier":      tier,
+        "label":     label,
+        "buys":      buys,
+        "sells":     sells,
+        "net_score": net_score,
+        "narrative": narrative,
+    }
+
+
+def _what_would_flip_verdict(intrinsic_value, price, margin_of_safety,
+                             priced_for_tier):
+    """Concrete answer to "what price or growth would change the rating?"
+
+    We surface the two thresholds users actually care about:
+      * the price at which margin of safety crosses into the next tier
+      * the price at which the current verdict flips entirely
+
+    Tier MOS bands (mirror _build_verdict_summary):
+      deep_discount  >= +40
+      discount       >= +15
+      fair_value     -10 .. +15
+      growth         -25 .. -10
+      excellence     -50 .. -25
+      miracle        <= -50
+    """
+    if not intrinsic_value or not price or margin_of_safety is None:
+        return None
+    iv  = float(intrinsic_value)
+    px  = float(price)
+    mos = float(margin_of_safety)
+
+    # Bands in (lower_mos_excl, upper_mos_incl, tier) order, ascending MoS.
+    bands = [
+        (-9999, -50, "miracle"),
+        (-50,   -25, "excellence"),
+        (-25,   -10, "growth"),
+        (-10,   +15, "fair_value"),
+        (+15,   +40, "discount"),
+        (+40, +9999, "deep_discount"),
+    ]
+    # Locate the band for the next-better and next-worse tier.
+    def mos_to_price(mos_pct):
+        # mos = (iv - p) / p * 100  →  p = iv / (1 + mos/100)
+        return iv / (1.0 + mos_pct / 100.0)
+
+    # Find current band index.
+    cur_idx = None
+    for i, (lo, hi, t) in enumerate(bands):
+        if lo < mos <= hi:
+            cur_idx = i
+            break
+    if cur_idx is None:
+        return None
+    nicer = bands[cur_idx + 1] if cur_idx + 1 < len(bands) else None
+    worse = bands[cur_idx - 1] if cur_idx - 1 >= 0           else None
+
+    rows = []
+    if nicer:
+        target_mos = nicer[0] + 0.1  # just inside the better tier
+        rows.append({
+            "key":     "better",
+            "label":   f"To upgrade to {nicer[2].replace('_', ' ').title()}",
+            "needs":   f"Price falls to ${mos_to_price(target_mos):.2f}",
+            "delta_pct": round((mos_to_price(target_mos) / px - 1.0) * 100, 1),
+        })
+    if worse:
+        target_mos = worse[1] - 0.1
+        rows.append({
+            "key":     "worse",
+            "label":   f"To downgrade to {worse[2].replace('_', ' ').title()}",
+            "needs":   f"Price rises to ${mos_to_price(target_mos):.2f}",
+            "delta_pct": round((mos_to_price(target_mos) / px - 1.0) * 100, 1),
+        })
+    # Always show the symmetric breakeven (MOS = 0 ↔ price = IV)
+    rows.append({
+        "key":       "breakeven",
+        "label":     "To reach exact fair value",
+        "needs":     f"Price moves to ${iv:.2f}",
+        "delta_pct": round((iv / px - 1.0) * 100, 1),
+    })
+    return {"rows": rows, "current_tier": priced_for_tier or None}
+
+
 def clean(v):
     if isinstance(v, float) and (np.isnan(v) or np.isinf(v)):
         return None
@@ -6427,6 +6982,9 @@ def api_insider():
     if not payload:
         return jsonify({"available": False, "reason": "No recent Form 4 filings or non-US filer."})
     payload["available"] = True
+    # NET buy/sell sentiment so the UI can show a single "Insiders are net
+    # buyers" pill instead of just a filings count.
+    payload["sentiment"] = _net_insider_sentiment(payload.get("items") or [])
     return jsonify(payload)
 
 
@@ -6911,6 +7469,188 @@ def _get_trending(days: int = 1, limit: int = 10) -> list:
                     counts[t] = counts.get(t, 0) + v
     ranked = sorted(counts.items(), key=lambda kv: -kv[1])[:limit]
     return [{"ticker": t, "count": c} for t, c in ranked]
+
+
+# ── Per-user "Recent tickers" history ───────────────────────────────────
+# Last N unique tickers a signed-in user searched, stored as a JSON list
+# in KV under valus:recent:{sub}. The list is bounded so the value never
+# grows past a few hundred bytes. Anonymous users get their history via
+# localStorage on the frontend.
+RECENT_KEY_FMT  = "valus:recent:{sub}"
+RECENT_MAX_LEN  = 10
+RECENT_TTL_S    = 90 * 86400   # auto-trim after 90 days of inactivity
+
+def _record_recent_ticker(user_sub: str, ticker: str):
+    """Push ticker to the front of the user's recent-list; dedupe + trim."""
+    if not user_sub or not ticker:
+        return
+    key = RECENT_KEY_FMT.format(sub=user_sub)
+    cur = []
+    if _kv:
+        try:
+            raw = _kv.get(key)
+            if raw:
+                cur = _json_top.loads(raw) or []
+        except Exception:
+            cur = []
+    cur = [t for t in cur if t != ticker]
+    cur.insert(0, ticker)
+    cur = cur[:RECENT_MAX_LEN]
+    if _kv:
+        try:
+            _kv.setex(key, RECENT_TTL_S, _json_top.dumps(cur))
+        except Exception:
+            pass
+
+def _read_recent_tickers(user_sub: str) -> list:
+    if not user_sub or not _kv:
+        return []
+    try:
+        raw = _kv.get(RECENT_KEY_FMT.format(sub=user_sub))
+        if raw:
+            return _json_top.loads(raw) or []
+    except Exception:
+        pass
+    return []
+
+
+@app.route("/api/compare")
+@limiter.limit(limit_medium)
+def api_compare():
+    """Side-by-side analysis of two tickers.
+
+    Reuses the analyze pipeline via internal request dispatch so the cache,
+    rate limiting, and gating logic stay consistent.  Returns:
+      {tickers: ["AAPL", "MSFT"], analyses: {AAPL: {...}, MSFT: {...}},
+       fields: [...meta...]}
+
+    `fields` is a curated list of comparison rows (label + per-ticker value)
+    so the frontend can render a stable table.
+    """
+    raw = request.args.get("tickers") or ""
+    tickers = [t.strip().upper() for t in raw.split(",") if t.strip()]
+    if len(tickers) != 2:
+        return jsonify({"error": "Pass exactly two tickers, e.g. ?tickers=AAPL,MSFT"}), 400
+
+    def _thin(d):
+        if not d or d.get("error"):
+            return None
+        return {
+            "ticker":          d.get("ticker"),
+            "name":            d.get("company_name"),
+            "sector":          d.get("sector"),
+            "industry":        d.get("industry"),
+            "price":           d.get("current_price"),
+            "iv":              d.get("intrinsic_value"),
+            "mos":             d.get("margin_of_safety"),
+            "tier":            (d.get("priced_for") or {}).get("tier"),
+            "tier_label":      (d.get("priced_for") or {}).get("label"),
+            "market_cap":      d.get("market_cap"),
+            "pe":              d.get("pe_ratio"),
+            "forward_pe":      d.get("forward_pe"),
+            "peg":             d.get("peg_ratio"),
+            "dividend_yield":  d.get("dividend_yield"),
+            "fcf_yield":       d.get("fcf_yield"),
+            "roe":             d.get("roe_pct"),
+            "rev_growth":      d.get("revenue_growth_pct"),
+            "wacc":            d.get("wacc"),
+            "implied_growth":  d.get("implied_growth_pct"),
+            "stage1_growth":   d.get("stage1_growth"),
+            "quality_score":   d.get("quality_score"),
+            "moat_breakdown":  d.get("moat_breakdown"),
+            "buffett_checklist": d.get("buffett_checklist"),
+            "momentum_overlay":d.get("momentum_overlay"),
+            "earnings_quality":d.get("earnings_quality"),
+            "iv_confidence":   d.get("iv_confidence"),
+        }
+
+    out = {}
+    for t in tickers:
+        try:
+            with app.test_request_context(
+                f"/api/analyze?ticker={t}",
+                headers={"X-Valus-Internal": "1"},
+            ):
+                resp = analyze()
+            if isinstance(resp, tuple):
+                resp = resp[0]
+            d = resp.get_json() if hasattr(resp, "get_json") else None
+            out[t] = _thin(d) or {"ticker": t, "error": "analysis unavailable"}
+        except Exception as e:
+            app.logger.exception("/api/compare failed for %s", t)
+            out[t] = {"ticker": t, "error": str(e)[:160]}
+    return jsonify({"tickers": tickers, "analyses": out})
+
+
+@app.route("/api/recent")
+def api_recent():
+    """Recent tickers for the signed-in user (last 10).  Empty when anon."""
+    user = session.get("user") or {}
+    if not user.get("sub"):
+        return jsonify({"items": [], "signed_in": False})
+    return jsonify({"items": _read_recent_tickers(user["sub"]), "signed_in": True})
+
+
+@app.route("/api/watchlist/movers")
+@limiter.limit(limit_medium)
+def api_watchlist_movers():
+    """Today's biggest absolute movers from the signed-in user's saved portfolio.
+
+    Reads the user's KV portfolio, fetches a fast quote for each ticker, and
+    returns up to `limit` rows sorted by |daily_change_pct| desc.  No external
+    /api/analyze cost — uses the lightweight /api/quote path (yfinance fast_info).
+    """
+    user, err = require_user()
+    if err: return err
+    try:
+        data = _read_user_portfolio(user["sub"])
+    except KVUnavailable as e:
+        return jsonify({"error": "portfolio store unavailable", "detail": str(e)}), 503
+    items = data.get("items") or []
+    if not items:
+        return jsonify({"items": [], "count": 0})
+    tickers = [(it.get("ticker") or "").upper() for it in items if it.get("ticker")]
+    tickers = [t for t in tickers if t][:30]   # cap to keep latency bounded
+    if not tickers:
+        return jsonify({"items": [], "count": 0})
+
+    # Reuse the existing /api/quote machinery via test_request_context so we
+    # benefit from its 30s cache + parallel fetcher.
+    try:
+        with app.test_request_context(
+            f"/api/quote?tickers={','.join(tickers)}",
+            headers={"X-Valus-Internal": "1"},
+        ):
+            resp = quote()
+        if isinstance(resp, tuple):
+            resp = resp[0]
+        body = resp.get_json() if hasattr(resp, "get_json") else None
+    except Exception as e:
+        app.logger.exception("watchlist movers: quote fetch failed")
+        return jsonify({"error": "quote feed unavailable", "detail": str(e)[:160]}), 502
+
+    quotes = (body or {}).get("quotes") or {}
+    by_ticker = {it.get("ticker"): it for it in items}
+    rows = []
+    for t in tickers:
+        q = quotes.get(t) or {}
+        chg = q.get("daily_change_pct")
+        if chg is None:
+            continue
+        snap = by_ticker.get(t) or {}
+        rows.append({
+            "ticker":            t,
+            "name":              snap.get("name") or "",
+            "sector":            snap.get("sector") or "",
+            "price":             q.get("price"),
+            "daily_change_pct":  round(float(chg), 2),
+            "previous_close":    q.get("prev_close"),
+            "tier":              snap.get("tier"),
+            "mos":               snap.get("mos"),
+        })
+    rows.sort(key=lambda r: -abs(r.get("daily_change_pct") or 0))
+    limit = max(1, min(int(request.args.get("limit", "5")), 20))
+    return jsonify({"items": rows[:limit], "count": len(rows)})
 
 
 def _is_market_hours() -> bool:
@@ -7915,6 +8655,8 @@ def analyze():
     # reflects real user interest, not background refresh).
     if request.headers.get("X-Valus-Internal") != "1":
         _track_ticker_search(ticker)
+        if _current_user and _current_user.get("sub"):
+            _record_recent_ticker(_current_user["sub"], ticker)
 
     # Cache lookup. VALUS+ subscribers may pass ?fresh=1 to bypass cache
     # and force a fresh pull (free users can't — would exhaust upstream
@@ -9990,6 +10732,35 @@ def analyze():
             "fifty_two_week_high":       safe(info.get("fiftyTwoWeekHigh")),
             "fifty_two_week_low":        safe(info.get("fiftyTwoWeekLow")),
             "quality_metrics": _build_quality_metrics(info, base_fcf, rev_ttm),
+            # ── New intelligence overlays (Phase 1+2 additions) ───────────
+            # Each is null-safe — the UI skips the card when data is missing.
+            "quality_score":      _composite_quality_score(
+                _build_quality_metrics(info, base_fcf, rev_ttm)
+            ),
+            "moat_breakdown":     _moat_breakdown(
+                net_margin_ttm, rev_growth_pct, earn_growth_pct,
+                fcf_margin_preview, roe_pct, _rev_ttm_bn,
+            ),
+            "sanity_check":       _sanity_check_vs_analyst(
+                intrinsic_value, analyst_target_price, price,
+            ),
+            "sector_wacc_band":   _sector_wacc_band(sector, industry),
+            "reverse_dcf_realism": _reverse_dcf_realism(
+                implied_growth_pct,
+                (_ceiling * 100) if _ceiling else None,
+                analyst_growth_pct=None,
+                sector_label=(sector or "the sector"),
+            ),
+            "buffett_checklist":  _buffett_checklist(
+                info, _build_quality_metrics(info, base_fcf, rev_ttm),
+                base_fcf, rev_ttm,
+            ),
+            "earnings_quality":   _earnings_quality_signal(info, base_fcf),
+            "momentum_overlay":   _momentum_overlay(hist),
+            "what_would_flip":    _what_would_flip_verdict(
+                intrinsic_value, price, margin_of_safety,
+                (priced_for or {}).get("tier") if priced_for else None,
+            ),
             # ── Per-ticker Haiku Lynch verdict (Buy/Hold/Avoid + thesis) ──
             # Generated once per ticker from the assembled snapshot above.
             # Falls back to a DCF-only verdict when Claude is unavailable.
