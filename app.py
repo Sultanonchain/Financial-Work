@@ -5878,27 +5878,6 @@ def require_user():
     return user, None
 
 
-def require_plus(feature: str = ""):
-    """Gate for VALUS+-only endpoints.
-
-    Returns (user_dict, None) when access is granted, otherwise (None, error)
-    with a payload the frontend can display verbatim ("Upgrade to VALUS+ to
-    unlock {feature}").  Uses 402 Payment Required for the upgrade case so
-    the JS layer can distinguish it from auth (401) and rate (429) errors.
-    """
-    user, err = require_user()
-    if err:
-        return None, err
-    if is_valus_plus(user):
-        return user, None
-    return None, (jsonify({
-        "error":   "valus_plus_required",
-        "feature": feature or "this feature",
-        "message": f"Upgrade to VALUS+ to unlock {feature or 'this feature'}.",
-        "tier":    "free",
-    }), 402)
-
-
 @app.route("/api/_diag/kv")
 def diag_kv():
     """Quick sanity check: is KV connected and writeable?  Public, no PII."""
@@ -6444,9 +6423,6 @@ def api_insider():
     ticker = request.args.get("ticker", "").strip().upper()
     if not ticker:
         return jsonify({"error": "ticker required"}), 400
-    # VALUS+ gate — insider Form 4 surfacing is a paid feature.
-    _user, err = require_plus("insider activity")
-    if err: return err
     payload = _fetch_insider_form4(ticker)
     if not payload:
         return jsonify({"available": False, "reason": "No recent Form 4 filings or non-US filer."})
@@ -6626,9 +6602,6 @@ def valuation_history():
     ticker = request.args.get("ticker", "").strip().upper()
     if not ticker:
         return jsonify({"error": "ticker required"}), 400
-    # VALUS+ gate — historical valuation replay is a paid feature.
-    _user, err = require_plus("historical valuation")
-    if err: return err
     try:
         info = {}
         sector = industry = ""
@@ -7254,13 +7227,12 @@ def _write_leaderboard(entries):
 @app.route("/api/leaderboard/submit", methods=["POST"])
 def leaderboard_submit():
     """
-    Submit a portfolio to the public leaderboard.  VALUS+ feature — free
-    users can browse the leaderboard but can't publish to it.
+    Submit a portfolio to the public leaderboard.  Requires sign-in.
     Body: { name: str (optional override), tickers: [str], note: str }
     Entries are keyed to the OAuth `sub` so re-publishing replaces the
     user's previous entry.
     """
-    user, err = require_plus("leaderboard publishing")
+    user, err = require_user()
     if err: return err
 
     body = request.get_json(silent=True) or {}
@@ -7924,32 +7896,6 @@ def leaderboard():
     return jsonify({"items": enriched[:50], "total": len(enriched)})
 
 
-def _gate_premium_fields(payload, user):
-    """Strip VALUS+-only data from the analyze response for free users.
-
-    We keep the cache copy whole (so an upgrade picks up the gated fields
-    immediately on the next refresh) and gate at response time. The free
-    payload retains everything needed for the basic DCF + verdict UI;
-    scenario analysis is replaced with a `*_locked: True` marker so the
-    frontend can render the upgrade overlay.
-
-    Internal callers (X-Valus-Internal header on Discover/warm cron) get
-    the full payload so the cache + heatmap stay correct.
-    """
-    if not isinstance(payload, dict):
-        return payload
-    if request.headers.get("X-Valus-Internal") == "1":
-        return payload
-    if is_valus_plus(user):
-        return payload
-    # Free tier: drop scenarios + sensitivity grid, mark as locked.
-    gated = dict(payload)
-    gated["scenarios"] = None
-    gated["sensitivity_grid"] = None
-    gated["scenarios_locked"] = True
-    return gated
-
-
 @app.route("/api/analyze")
 @limiter.limit(limit_analyze)
 def analyze():
@@ -7958,7 +7904,8 @@ def analyze():
         return jsonify({"error": "Ticker is required"}), 400
 
     _current_user = session.get("user")
-    # Anonymous-user daily search gate. Signed-in users skip.
+    # Daily search-limit gate. VALUS+ subscribers bypass; free tiers
+    # (anon 5/day per IP, signed-in 8/day per Google sub) are enforced.
     gate = _check_anon_search_limit(request, ticker)
     if gate is not None:
         return gate
@@ -7968,18 +7915,17 @@ def analyze():
     if request.headers.get("X-Valus-Internal") != "1":
         _track_ticker_search(ticker)
 
-    # Cache lookup
+    # Cache lookup. VALUS+ subscribers may pass ?fresh=1 to bypass cache
+    # and force a fresh pull (free users can't — would exhaust upstream
+    # rate-limit headroom for everyone else).
     _ck = _analyze_cache_key(ticker, dict(request.args))
-    # VALUS+ priority refresh: a plus user can pass ?fresh=1 to bypass the
-    # cache and force a full re-pull. Free users cannot (would let one user
-    # exhaust Yahoo's rate-limit headroom for everyone).
     _force_fresh = (
         is_valus_plus(_current_user)
         and request.args.get("fresh", "").lower() in ("1", "true", "yes")
     )
     _cached = None if _force_fresh else _analyze_cache_get(_ck)
     if _cached is not None:
-        resp = jsonify(_gate_premium_fields(_cached, _current_user))
+        resp = jsonify(_cached)
         resp.headers["X-Valus-Cache"] = "HIT"
         return resp
 
@@ -10060,7 +10006,7 @@ def analyze():
 
         cleaned = clean(result)
         _analyze_cache_set(_ck, cleaned)
-        resp = jsonify(_gate_premium_fields(cleaned, _current_user))
+        resp = jsonify(cleaned)
         resp.headers["X-Valus-Cache"] = "MISS"
         return resp
 
