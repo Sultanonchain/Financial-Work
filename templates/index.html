@@ -197,6 +197,23 @@
         <span class="trending-row__label">Trending today</span>
         <div class="trending-row__chips" id="trendingChips"></div>
       </div>
+      <!-- Recent-tickers chip row: shown when signed in and there is search
+           history.  Anonymous users see localStorage-backed history instead. -->
+      <div class="trending-row recent-row hidden" id="recentRow">
+        <span class="trending-row__label">Recently searched</span>
+        <div class="trending-row__chips" id="recentChips"></div>
+      </div>
+      <!-- Watchlist movers: biggest absolute % movers from saved portfolio. -->
+      <div class="trending-row movers-row hidden" id="moversRow">
+        <span class="trending-row__label">Watchlist movers</span>
+        <div class="trending-row__chips" id="moversChips"></div>
+      </div>
+      <!-- Compare two tickers — opens a side-by-side modal -->
+      <div class="hero-compare">
+        <button type="button" class="advanced-toggle hero-compare__btn" id="compareToggle">
+          <span>⇄</span> Compare two tickers side-by-side
+        </button>
+      </div>
 
       <button type="button" class="advanced-toggle" id="advancedToggle">
         <span>⚙</span> Customize DCF assumptions
@@ -238,15 +255,79 @@
 
 <!-- ── LOADING / ERROR ────────────────────────────────────────────────── -->
 <section class="container">
-  <div class="loading-shell hidden" id="loading">
-    <div class="spinner" aria-hidden="true"></div>
-    <span>Pulling live data…</span>
+  <!-- Layout-matching skeleton: the same hero verdict + scenarios + insights
+       layout users will see when the analysis lands.  Reduces perceived
+       latency and prevents the post-load layout shift. -->
+  <div class="skeleton-shell hidden" id="loading" aria-live="polite" aria-busy="true">
+    <span class="sr-only">Pulling live data…</span>
+    <section class="card sk-hero">
+      <div class="sk-row sk-row--head">
+        <div class="sk-block sk-block--lg" style="width: 200px;"></div>
+        <div class="sk-block" style="width: 72px;"></div>
+      </div>
+      <div class="sk-row sk-row--price">
+        <div class="sk-col">
+          <div class="sk-block sk-block--xs" style="width: 90px;"></div>
+          <div class="sk-block sk-block--xl" style="width: 130px;"></div>
+        </div>
+        <div class="sk-col sk-col--bar">
+          <div class="sk-block sk-block--xs" style="width: 100px;"></div>
+          <div class="sk-block sk-block--bar"></div>
+        </div>
+        <div class="sk-col sk-col--right">
+          <div class="sk-block sk-block--xs" style="width: 80px;"></div>
+          <div class="sk-block sk-block--xl" style="width: 130px;"></div>
+        </div>
+      </div>
+      <div class="sk-block sk-block--pill" style="width: 220px;"></div>
+      <div class="sk-block sk-block--md" style="width: 95%;"></div>
+      <div class="sk-block sk-block--md" style="width: 88%;"></div>
+    </section>
+    <section class="sk-verdict-grid">
+      <div class="card sk-mini-card"><div class="sk-block sk-block--md"></div><div class="sk-block sk-block--sm"></div><div class="sk-block sk-block--sm"></div></div>
+      <div class="card sk-mini-card"><div class="sk-block sk-block--md"></div><div class="sk-block sk-block--sm"></div><div class="sk-block sk-block--sm"></div></div>
+      <div class="card sk-mini-card"><div class="sk-block sk-block--md"></div><div class="sk-block sk-block--sm"></div><div class="sk-block sk-block--sm"></div></div>
+    </section>
+    <section class="card sk-scenarios">
+      <div class="sk-block sk-block--md" style="width: 180px;"></div>
+      <div class="sk-scenarios__row">
+        <div class="sk-sc-card"></div>
+        <div class="sk-sc-card"></div>
+        <div class="sk-sc-card"></div>
+      </div>
+    </section>
   </div>
   <div class="error-shell hidden" id="error">
     <span class="error-shell__icon">⚠</span>
     <span id="errorMsg">Something went wrong.</span>
   </div>
 </section>
+
+<!-- ── COMPARE MODAL — two tickers side-by-side ──────────────────────── -->
+<div class="modal hidden" id="compareModal" role="dialog" aria-modal="true" aria-labelledby="compareModalTitle">
+  <div class="modal__backdrop" data-modal-close></div>
+  <div class="modal__panel" style="max-width: 720px;">
+    <div class="modal__head">
+      <h2 class="modal__title" id="compareModalTitle">Compare side-by-side</h2>
+      <button class="modal__close" data-modal-close aria-label="Close">✕</button>
+    </div>
+    <div class="modal__body">
+      <p class="signin-detail">Pick any two stocks. We'll run VALUS on both and show the deltas across price, fair value, quality, moat, and momentum.</p>
+      <div class="cmp-form">
+        <input class="lb-input" id="cmpInputA" type="text" placeholder="First ticker, e.g. AAPL" maxlength="12" autocomplete="off" spellcheck="false"/>
+        <span class="cmp-vs">vs</span>
+        <input class="lb-input" id="cmpInputB" type="text" placeholder="Second ticker, e.g. MSFT" maxlength="12" autocomplete="off" spellcheck="false"/>
+        <button class="copy-btn copy-btn--primary" id="cmpRunBtn" type="button">Compare</button>
+      </div>
+      <div class="cmp-loading hidden" id="cmpLoading">
+        <div class="spinner"></div>
+        <span>Running VALUS on both…</span>
+      </div>
+      <div class="cmp-error hidden" id="cmpError"></div>
+      <div class="cmp-results hidden" id="cmpResults"></div>
+    </div>
+  </div>
+</div>
 
 <!-- ── VALUS+ UPGRADE MODAL ─────────────────────────────────────────── -->
 <div class="modal hidden" id="plusModal" role="dialog" aria-modal="true" aria-labelledby="plusModalTitle">
@@ -732,10 +813,13 @@
       </div>
       <div class="disc-filter-row">
         <span class="disc-filter-label">Sort:</span>
-        <button class="disc-tier-pill active" data-disc-sort="mos" type="button">By MOS</button>
+        <button class="disc-tier-pill active" data-disc-sort="opportunity" type="button" title="Margin of safety × DCF confidence">Best opportunity</button>
+        <button class="disc-tier-pill" data-disc-sort="mos" type="button">By MOS</button>
         <button class="disc-tier-pill" data-disc-sort="ticker" type="button">By Ticker</button>
         <button class="disc-tier-pill" data-disc-sort="sector" type="button">By Sector</button>
       </div>
+      <!-- Dynamic sector-filter row, populated from live data. -->
+      <div class="disc-filter-row" id="discSectorRow"></div>
     </div>
 
     <div class="card">
@@ -955,6 +1039,59 @@
       </div>
     </section>
 
+    <!-- VERDICT INTELLIGENCE ROW — sanity check, what-flips, reverse-DCF -->
+    <section class="verdict-grid hidden" id="verdictGrid">
+      <div class="card vg-card" id="sanityCard" hidden>
+        <div class="vg-head">
+          <span class="vg-icon" aria-hidden="true">⚖</span>
+          <span class="vg-title">Sanity check vs Wall Street</span>
+          <span class="vg-pill" id="sanityTier">—</span>
+        </div>
+        <div class="vg-row">
+          <div class="vg-stat">
+            <span class="vg-stat__label">VALUS fair value</span>
+            <span class="vg-stat__value numeric" id="sanityValusIv">—</span>
+          </div>
+          <div class="vg-stat">
+            <span class="vg-stat__label">Analyst consensus</span>
+            <span class="vg-stat__value numeric" id="sanityAnalyst">—</span>
+          </div>
+          <div class="vg-stat">
+            <span class="vg-stat__label">Gap</span>
+            <span class="vg-stat__value numeric" id="sanityGap">—</span>
+          </div>
+        </div>
+        <p class="vg-narrative" id="sanityNarrative">—</p>
+      </div>
+
+      <div class="card vg-card" id="flipCard" hidden>
+        <div class="vg-head">
+          <span class="vg-icon" aria-hidden="true">🎯</span>
+          <span class="vg-title">What would change this verdict</span>
+        </div>
+        <div class="flip-list" id="flipList"></div>
+      </div>
+
+      <div class="card vg-card" id="reverseDcfCard" hidden>
+        <div class="vg-head">
+          <span class="vg-icon" aria-hidden="true">↩</span>
+          <span class="vg-title">Reverse-DCF — what is the market pricing in?</span>
+          <span class="vg-pill" id="reverseDcfTier">—</span>
+        </div>
+        <div class="vg-row">
+          <div class="vg-stat">
+            <span class="vg-stat__label">Market-implied growth</span>
+            <span class="vg-stat__value numeric" id="rdcfImplied">—</span>
+          </div>
+          <div class="vg-stat">
+            <span class="vg-stat__label">Sector ceiling</span>
+            <span class="vg-stat__value numeric" id="rdcfCeiling">—</span>
+          </div>
+        </div>
+        <p class="vg-narrative" id="rdcfNarrative">—</p>
+      </div>
+    </section>
+
     <!-- MINI STATS — moved up; sits right under scenarios -->
     <section class="mini-stats">
       <div class="mini-stat">
@@ -1038,7 +1175,61 @@
           <div class="ic-title">Quality scorecard</div>
           <div class="ic-sub" id="qualitySub">Profitability, returns, leverage</div>
         </div>
+        <div class="quality-score hidden" id="qualityScoreBlock">
+          <div class="quality-score__num numeric" id="qualityScoreNum">—</div>
+          <div class="quality-score__meta">
+            <span class="quality-score__grade" id="qualityScoreGrade">—</span>
+            <span class="quality-score__sub">0–100 composite</span>
+          </div>
+        </div>
         <div class="quality-grid" id="qualityGrid"></div>
+      </div>
+      <div class="card insights-card" id="moatCard" hidden>
+        <div class="ic-head">
+          <div class="ic-title">Moat breakdown</div>
+          <div class="ic-sub"><span id="moatStrength">—</span></div>
+        </div>
+        <div class="moat-list" id="moatList"></div>
+      </div>
+      <div class="card insights-card" id="buffettCard" hidden>
+        <div class="ic-head">
+          <div class="ic-title">Buffett checklist</div>
+          <div class="ic-sub"><span id="buffettScore">—</span></div>
+        </div>
+        <ul class="buffett-list" id="buffettList"></ul>
+      </div>
+      <div class="card insights-card" id="momentumCard" hidden>
+        <div class="ic-head">
+          <div class="ic-title">Momentum overlay</div>
+          <div class="ic-sub" id="momentumSub">50/200-day moving averages</div>
+        </div>
+        <div class="momentum-body">
+          <div class="momentum-tier" id="momentumTier">—</div>
+          <div class="momentum-mas">
+            <div class="momentum-ma">
+              <span class="momentum-ma__label">Price</span>
+              <span class="momentum-ma__value numeric" id="momPrice">—</span>
+            </div>
+            <div class="momentum-ma">
+              <span class="momentum-ma__label">50-day MA</span>
+              <span class="momentum-ma__value numeric" id="momMa50">—</span>
+              <span class="momentum-ma__gap" id="momMa50Gap"></span>
+            </div>
+            <div class="momentum-ma">
+              <span class="momentum-ma__label">200-day MA</span>
+              <span class="momentum-ma__value numeric" id="momMa200">—</span>
+              <span class="momentum-ma__gap" id="momMa200Gap"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card insights-card" id="earningsQualityCard" hidden>
+        <div class="ic-head">
+          <div class="ic-title">Earnings quality</div>
+          <div class="ic-sub">FCF vs reported EPS</div>
+        </div>
+        <div class="eq-tier" id="eqTier">—</div>
+        <p class="eq-narrative" id="eqNarrative">—</p>
       </div>
       <div class="card insights-card" id="riskCard" hidden>
         <div class="ic-head">

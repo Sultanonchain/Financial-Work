@@ -141,6 +141,11 @@ async function analyze(ticker, params = {}) {
     }
     hideLoading();
     pushTickerToURL(ticker);
+    pushRecentLocal(ticker);   // localStorage fallback for guests
+    // Re-render the "Recently searched" chip row to reflect the new hit.
+    // For signed-in users the server already wrote to KV via /api/analyze;
+    // anon users get their list from localStorage.  Either way, refresh.
+    loadRecentTickers();
     if (isBTC) {
       renderBTCHero(data);
     } else if (data.is_etf) {
@@ -311,9 +316,16 @@ function renderResults(d) {
   renderHeroVerdict(d);
   renderHaikuVerdict(d);
   renderMethodology(d);
+  renderSanityCard(d);
+  renderFlipCard(d);
+  renderReverseDcfCard(d);
   renderScenarios(d);
   renderMiniStats(d);
   renderQualityCard(d);
+  renderMoatCard(d);
+  renderBuffettCard(d);
+  renderMomentumCard(d);
+  renderEarningsQualityCard(d);
   renderRiskCard(d);
   renderInsiderCard(d.ticker);
   renderCongressCard(d.ticker);
@@ -1628,6 +1640,21 @@ function renderQualityCard(d) {
     card.hidden = true;
     return;
   }
+
+  // Composite 0-100 score header.  Hidden when backend didn't populate it
+  // (older cached payloads from before the intel rev get None here).
+  const block = document.getElementById("qualityScoreBlock");
+  const score = d.quality_score;
+  if (block && score && Number.isFinite(score.score)) {
+    document.getElementById("qualityScoreNum").textContent = score.score;
+    const grade = document.getElementById("qualityScoreGrade");
+    grade.textContent = score.grade || "—";
+    block.classList.remove("hidden");
+    block.dataset.grade = (score.grade || "").toLowerCase();
+  } else if (block) {
+    block.classList.add("hidden");
+  }
+
   grid.innerHTML = metrics.map(m => {
     const v = m.value_pct != null ? `${fmt(m.value_pct, 1)}%`
             : m.value_ratio != null ? `${fmt(m.value_ratio, 2)}×`
@@ -1640,6 +1667,182 @@ function renderQualityCard(d) {
   }).join("");
   card.hidden = false;
   if (insightsGrid) insightsGrid.classList.remove("hidden");
+}
+
+// ── Moat breakdown card ────────────────────────────────────────────────
+function renderMoatCard(d) {
+  const card = document.getElementById("moatCard");
+  const list = document.getElementById("moatList");
+  const insightsGrid = document.getElementById("insightsGrid");
+  if (!card || !list) return;
+  const mb = d.moat_breakdown;
+  if (!mb || !Array.isArray(mb.categories) || mb.categories.length === 0) {
+    card.hidden = true;
+    return;
+  }
+  const strengthLabel = ({wide: "Wide moat", narrow: "Narrow moat",
+                         single: "Single edge", none: "No structural moat"})[mb.strength] || "—";
+  document.getElementById("moatStrength").textContent =
+    `${strengthLabel} · ${mb.n_applies}/4 dimensions`;
+  list.innerHTML = mb.categories.map(c => `
+    <div class="moat-row ${c.applies ? "moat-row--on" : "moat-row--off"}">
+      <span class="moat-row__icon" aria-hidden="true">${c.applies ? "✓" : "·"}</span>
+      <div class="moat-row__body">
+        <span class="moat-row__label">${escHtml(c.label)}</span>
+        <span class="moat-row__why">${escHtml(c.why || "")}</span>
+      </div>
+    </div>
+  `).join("");
+  card.hidden = false;
+  if (insightsGrid) insightsGrid.classList.remove("hidden");
+}
+
+// ── Buffett checklist card ──────────────────────────────────────────────
+function renderBuffettCard(d) {
+  const card = document.getElementById("buffettCard");
+  const list = document.getElementById("buffettList");
+  const insightsGrid = document.getElementById("insightsGrid");
+  if (!card || !list) return;
+  const b = d.buffett_checklist;
+  if (!b || !Array.isArray(b.rows) || b.rows.length === 0) {
+    card.hidden = true;
+    return;
+  }
+  const score = document.getElementById("buffettScore");
+  if (score) {
+    if (Number.isFinite(b.passes) && Number.isFinite(b.evaluated)) {
+      score.textContent = `Passes ${b.passes}/${b.evaluated} criteria`;
+    } else {
+      score.textContent = "—";
+    }
+  }
+  list.innerHTML = b.rows.map(r => {
+    const cls = r.passes === true ? "buf-row--pass"
+              : r.passes === false ? "buf-row--fail"
+              : "buf-row--na";
+    const icon = r.passes === true ? "✓" : r.passes === false ? "✕" : "—";
+    return `
+      <li class="buf-row ${cls}" title="${escHtml(r.hint || '')}">
+        <span class="buf-row__icon" aria-hidden="true">${icon}</span>
+        <span class="buf-row__label">${escHtml(r.label)}</span>
+        <span class="buf-row__value">${escHtml(r.value != null ? r.value : "—")}</span>
+      </li>
+    `;
+  }).join("");
+  card.hidden = false;
+  if (insightsGrid) insightsGrid.classList.remove("hidden");
+}
+
+// ── Momentum overlay card ──────────────────────────────────────────────
+function renderMomentumCard(d) {
+  const card = document.getElementById("momentumCard");
+  if (!card) return;
+  const m = d.momentum_overlay;
+  if (!m || !m.tier) { card.hidden = true; return; }
+  const tierEl = document.getElementById("momentumTier");
+  if (tierEl) {
+    tierEl.textContent = m.label || "—";
+    tierEl.dataset.tier = m.tier;
+  }
+  document.getElementById("momPrice").textContent = m.price != null ? fmtPrice(m.price) : "—";
+  document.getElementById("momMa50").textContent  = m.ma50  != null ? fmtPrice(m.ma50)  : "—";
+  document.getElementById("momMa200").textContent = m.ma200 != null ? fmtPrice(m.ma200) : "—";
+  const fmtGap = (g) => g == null ? "" : `${g >= 0 ? "+" : ""}${fmt(g, 1)}%`;
+  const setGap = (id, g) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (g == null) { el.textContent = ""; return; }
+    el.textContent = fmtGap(g);
+    el.classList.toggle("positive", g >= 0);
+    el.classList.toggle("negative", g < 0);
+  };
+  setGap("momMa50Gap",  m.ma50_gap_pct);
+  setGap("momMa200Gap", m.ma200_gap_pct);
+  card.hidden = false;
+  const insightsGrid = document.getElementById("insightsGrid");
+  if (insightsGrid) insightsGrid.classList.remove("hidden");
+}
+
+// ── Earnings quality (FCF vs reported EPS) ──────────────────────────────
+function renderEarningsQualityCard(d) {
+  const card = document.getElementById("earningsQualityCard");
+  if (!card) return;
+  const eq = d.earnings_quality;
+  if (!eq || !eq.tier) { card.hidden = true; return; }
+  const tierEl = document.getElementById("eqTier");
+  if (tierEl) {
+    tierEl.textContent = eq.label || "—";
+    tierEl.dataset.tier = eq.tier;
+  }
+  document.getElementById("eqNarrative").textContent = eq.narrative || "";
+  card.hidden = false;
+  const insightsGrid = document.getElementById("insightsGrid");
+  if (insightsGrid) insightsGrid.classList.remove("hidden");
+}
+
+// ── Sanity check vs Wall Street ────────────────────────────────────────
+function renderSanityCard(d) {
+  const card = document.getElementById("sanityCard");
+  const grid = document.getElementById("verdictGrid");
+  if (!card) return;
+  const s = d.sanity_check;
+  if (!s || !s.tier) { card.hidden = true; return; }
+  document.getElementById("sanityValusIv").textContent = fmtPrice(s.valus_iv);
+  document.getElementById("sanityAnalyst").textContent = fmtPrice(s.analyst_target);
+  const gap = document.getElementById("sanityGap");
+  gap.textContent = `${s.gap_pct >= 0 ? "+" : ""}${fmt(s.gap_pct, 1)}%`;
+  gap.classList.toggle("positive", s.gap_pct >= 0);
+  gap.classList.toggle("negative", s.gap_pct < 0);
+  const tier = document.getElementById("sanityTier");
+  tier.textContent = s.label || "";
+  tier.dataset.tier = s.tier;
+  document.getElementById("sanityNarrative").textContent = s.narrative || "";
+  card.hidden = false;
+  if (grid) grid.classList.remove("hidden");
+}
+
+// ── What would flip the verdict ────────────────────────────────────────
+function renderFlipCard(d) {
+  const card = document.getElementById("flipCard");
+  const list = document.getElementById("flipList");
+  const grid = document.getElementById("verdictGrid");
+  if (!card || !list) return;
+  const f = d.what_would_flip;
+  if (!f || !Array.isArray(f.rows) || f.rows.length === 0) {
+    card.hidden = true;
+    return;
+  }
+  list.innerHTML = f.rows.map(r => {
+    const tone = r.delta_pct == null ? "neutral"
+               : r.delta_pct > 0 ? "positive" : "negative";
+    return `
+      <div class="flip-row">
+        <span class="flip-row__label">${escHtml(r.label)}</span>
+        <span class="flip-row__needs">${escHtml(r.needs)}</span>
+        <span class="flip-row__delta ${tone}">${r.delta_pct == null ? "" :
+          (r.delta_pct >= 0 ? "+" : "") + fmt(r.delta_pct, 1) + "% from here"}</span>
+      </div>
+    `;
+  }).join("");
+  card.hidden = false;
+  if (grid) grid.classList.remove("hidden");
+}
+
+// ── Reverse-DCF realism card ───────────────────────────────────────────
+function renderReverseDcfCard(d) {
+  const card = document.getElementById("reverseDcfCard");
+  const grid = document.getElementById("verdictGrid");
+  if (!card) return;
+  const r = d.reverse_dcf_realism;
+  if (!r || !r.tier) { card.hidden = true; return; }
+  document.getElementById("rdcfImplied").textContent  = `${fmt(r.implied_pct, 1)}%`;
+  document.getElementById("rdcfCeiling").textContent = `${fmt(r.sector_ceiling, 1)}%`;
+  const tier = document.getElementById("reverseDcfTier");
+  tier.textContent = r.label || "";
+  tier.dataset.tier = r.tier;
+  document.getElementById("rdcfNarrative").textContent = r.narrative || "";
+  card.hidden = false;
+  if (grid) grid.classList.remove("hidden");
 }
 
 // ── Insider activity (Form 4) ────────────────────────────────────────────
@@ -1659,10 +1862,20 @@ async function renderInsiderCard(ticker) {
       card.hidden = true;
       return;
     }
-    const tone = j.filings >= 5 ? "active" : j.filings >= 2 ? "moderate" : "quiet";
-    const pill = tone === "active" ? "Active" : tone === "moderate" ? "Moderate" : "Quiet";
-    summary.innerHTML =
-      `<span class="insider-pill insider-pill--${tone}">${j.filings} Form 4 filing${j.filings === 1 ? "" : "s"} · ${pill}</span>`;
+    // Prefer the NET buy/sell sentiment pill — single, clear read.  Fall
+    // back to the activity tone if sentiment wasn't computed (no buy/sell
+    // breakdown in payload).
+    const s = j.sentiment;
+    if (s && s.tier) {
+      summary.innerHTML =
+        `<span class="insider-pill insider-pill--${s.tier}">${escHtml(s.label)}</span>` +
+        `<span class="insider-pill-sub">${s.buys} buy${s.buys === 1 ? "" : "s"} · ${s.sells} sell${s.sells === 1 ? "" : "s"} · ${j.filings} filing${j.filings === 1 ? "" : "s"}</span>`;
+    } else {
+      const tone = j.filings >= 5 ? "active" : j.filings >= 2 ? "moderate" : "quiet";
+      const pill = tone === "active" ? "Active" : tone === "moderate" ? "Moderate" : "Quiet";
+      summary.innerHTML =
+        `<span class="insider-pill insider-pill--${tone}">${j.filings} Form 4 filing${j.filings === 1 ? "" : "s"} · ${pill}</span>`;
+    }
     list.innerHTML = j.items.slice(0, 6).map(it => `
       <a class="insider-row" href="${escHtml(it.url || '#')}" target="_blank" rel="noopener">
         <span class="insider-row__date">${escHtml(it.date)}</span>
@@ -3521,6 +3734,9 @@ async function refreshMe() {
   // When signed in, sync the saved portfolio so it follows the user
   // across devices/browsers.
   if (_ME) pfPullFromServer();
+  // Refresh the home-page chip rows now that we know the user's tier.
+  loadRecentTickers();
+  loadWatchlistMovers();
 }
 
 function updateAuthControl() {
@@ -3885,6 +4101,207 @@ async function loadTrending() {
     });
     row.classList.remove("hidden");
   } catch {}
+}
+
+// ── Recently searched tickers (per-user when signed in; localStorage anon) ──
+const RECENT_LS_KEY = "valus.recent.v1";
+function pushRecentLocal(ticker) {
+  if (!ticker) return;
+  try {
+    const raw = localStorage.getItem(RECENT_LS_KEY);
+    let cur = raw ? JSON.parse(raw) : [];
+    cur = cur.filter(t => t !== ticker);
+    cur.unshift(ticker);
+    localStorage.setItem(RECENT_LS_KEY, JSON.stringify(cur.slice(0, 10)));
+  } catch {}
+}
+function readRecentLocal() {
+  try {
+    const raw = localStorage.getItem(RECENT_LS_KEY);
+    return raw ? (JSON.parse(raw) || []) : [];
+  } catch { return []; }
+}
+
+async function loadRecentTickers() {
+  const row = document.getElementById("recentRow");
+  const chipsEl = document.getElementById("recentChips");
+  if (!row || !chipsEl) return;
+  let items = [];
+  if (_ME) {
+    try {
+      const r = await fetch("/api/recent", { credentials: "same-origin" });
+      if (r.ok) {
+        const j = await r.json();
+        items = Array.isArray(j.items) ? j.items : [];
+      }
+    } catch {}
+  } else {
+    items = readRecentLocal();
+  }
+  if (!items.length) { row.classList.add("hidden"); return; }
+  chipsEl.innerHTML = items.slice(0, 10).map(t =>
+    `<button class="trending-chip" type="button" data-ticker="${escHtml(t)}">${escHtml(t)}</button>`
+  ).join("");
+  chipsEl.querySelectorAll(".trending-chip").forEach(b => {
+    b.onclick = () => {
+      const t = b.dataset.ticker;
+      $("tickerInput").value = t;
+      analyze(t);
+    };
+  });
+  row.classList.remove("hidden");
+}
+
+// ── Watchlist movers (signed-in only, when portfolio non-empty) ─────────
+async function loadWatchlistMovers() {
+  const row = document.getElementById("moversRow");
+  const chipsEl = document.getElementById("moversChips");
+  if (!row || !chipsEl) return;
+  if (!_ME) { row.classList.add("hidden"); return; }
+  if (pfRead().length === 0) { row.classList.add("hidden"); return; }
+  try {
+    const r = await fetch("/api/watchlist/movers?limit=5", { credentials: "same-origin" });
+    if (!r.ok) { row.classList.add("hidden"); return; }
+    const j = await r.json();
+    const items = Array.isArray(j.items) ? j.items : [];
+    if (items.length === 0) { row.classList.add("hidden"); return; }
+    chipsEl.innerHTML = items.map(it => {
+      const tone = (it.daily_change_pct || 0) >= 0 ? "positive" : "negative";
+      const sign = (it.daily_change_pct || 0) >= 0 ? "+" : "";
+      return `<button class="movers-chip" type="button" data-ticker="${escHtml(it.ticker)}">
+                <span>${escHtml(it.ticker)}</span>
+                <span class="movers-chip__delta ${tone}">${sign}${fmt(it.daily_change_pct, 2)}%</span>
+              </button>`;
+    }).join("");
+    chipsEl.querySelectorAll(".movers-chip").forEach(b => {
+      b.onclick = () => {
+        const t = b.dataset.ticker;
+        $("tickerInput").value = t;
+        analyze(t);
+      };
+    });
+    row.classList.remove("hidden");
+  } catch { row.classList.add("hidden"); }
+}
+
+// ── Compare modal ──────────────────────────────────────────────────────
+function setupCompareModal() {
+  const toggle  = document.getElementById("compareToggle");
+  const modal   = document.getElementById("compareModal");
+  const runBtn  = document.getElementById("cmpRunBtn");
+  const a       = document.getElementById("cmpInputA");
+  const b       = document.getElementById("cmpInputB");
+  const loading = document.getElementById("cmpLoading");
+  const errEl   = document.getElementById("cmpError");
+  const results = document.getElementById("cmpResults");
+  if (!toggle || !modal || !runBtn) return;
+
+  toggle.onclick = () => {
+    modal.classList.remove("hidden");
+    setTimeout(() => a?.focus(), 50);
+  };
+
+  const COMPARE_FIELDS = [
+    ["price",          "Price",           v => v != null ? fmtPrice(v) : "—", "higher_better:false"],
+    ["iv",             "VALUS fair value",v => v != null ? fmtPrice(v) : "—", "higher_better:true"],
+    ["mos",            "Margin of safety",v => v != null ? fmtPct(v)  : "—", "higher_better:true"],
+    ["tier_label",     "Verdict",         v => v || "—",                       "neutral"],
+    ["quality_score",  "Quality (0-100)", v => v && v.score != null ? `${v.score} (${v.grade})` : "—", "higher_better:true_quality"],
+    ["roe",            "ROE",             v => v != null ? `${fmt(v, 1)}%` : "—", "higher_better:true"],
+    ["rev_growth",     "Revenue growth",  v => v != null ? `${fmt(v, 1)}%` : "—", "higher_better:true"],
+    ["forward_pe",     "Forward P/E",     v => v != null ? `${fmt(v, 1)}×` : "—", "higher_better:false"],
+    ["peg",            "PEG ratio",       v => v != null ? `${fmt(v, 2)}×` : "—", "higher_better:false"],
+    ["dividend_yield", "Dividend yield",  v => v != null ? `${fmt(v, 2)}%` : "—", "higher_better:true"],
+    ["fcf_yield",      "FCF yield",       v => v != null ? `${fmt(v, 2)}%` : "—", "higher_better:true"],
+    ["wacc",           "Discount (WACC)", v => v != null ? `${fmt(v, 2)}%` : "—", "higher_better:false"],
+    ["implied_growth", "Market-implied growth", v => v != null ? `${fmt(v, 1)}%` : "—", "neutral"],
+    ["iv_confidence",  "DCF confidence",  v => v || "—", "neutral"],
+  ];
+
+  runBtn.onclick = async () => {
+    const ta = (a.value || "").trim().toUpperCase();
+    const tb = (b.value || "").trim().toUpperCase();
+    if (!ta || !tb) {
+      errEl.textContent = "Enter both tickers.";
+      errEl.classList.remove("hidden");
+      return;
+    }
+    if (ta === tb) {
+      errEl.textContent = "Pick two different tickers.";
+      errEl.classList.remove("hidden");
+      return;
+    }
+    errEl.classList.add("hidden");
+    results.classList.add("hidden");
+    loading.classList.remove("hidden");
+    runBtn.disabled = true;
+    try {
+      const r = await fetch(`/api/compare?tickers=${encodeURIComponent(ta)},${encodeURIComponent(tb)}`);
+      const j = await r.json();
+      if (!r.ok || j.error) {
+        errEl.textContent = j.error || `Compare failed (HTTP ${r.status}).`;
+        errEl.classList.remove("hidden");
+        return;
+      }
+      const dA = j.analyses[ta] || {};
+      const dB = j.analyses[tb] || {};
+      if (dA.error || dB.error) {
+        errEl.textContent = `Couldn't analyze ${dA.error ? ta : tb}. Try a different symbol.`;
+        errEl.classList.remove("hidden");
+        return;
+      }
+      const head = `
+        <thead>
+          <tr>
+            <th></th>
+            <th>
+              <div class="cmp-ticker-cell">${escHtml(dA.ticker)}
+                <span class="cmp-ticker-cell__sub">${escHtml(dA.name || "")}</span>
+              </div>
+            </th>
+            <th>
+              <div class="cmp-ticker-cell">${escHtml(dB.ticker)}
+                <span class="cmp-ticker-cell__sub">${escHtml(dB.name || "")}</span>
+              </div>
+            </th>
+          </tr>
+        </thead>`;
+      const rows = COMPARE_FIELDS.map(([key, label, fmtFn, hint]) => {
+        const vA = dA[key], vB = dB[key];
+        // Pick a winner cell for higher-better numeric fields.
+        let winA = false, winB = false;
+        if (hint === "higher_better:true" || hint === "higher_better:false") {
+          const na = Number.isFinite(vA) ? vA : null;
+          const nb = Number.isFinite(vB) ? vB : null;
+          if (na != null && nb != null && na !== nb) {
+            const aIsBetter = hint === "higher_better:true" ? na > nb : na < nb;
+            winA = aIsBetter; winB = !aIsBetter;
+          }
+        } else if (hint === "higher_better:true_quality") {
+          const na = vA && Number.isFinite(vA.score) ? vA.score : null;
+          const nb = vB && Number.isFinite(vB.score) ? vB.score : null;
+          if (na != null && nb != null && na !== nb) {
+            winA = na > nb; winB = !winA;
+          }
+        }
+        return `
+          <tr>
+            <td>${escHtml(label)}</td>
+            <td class="${winA ? "cmp-winner" : ""}">${fmtFn(vA)}</td>
+            <td class="${winB ? "cmp-winner" : ""}">${fmtFn(vB)}</td>
+          </tr>
+        `;
+      }).join("");
+      results.innerHTML = `<table class="cmp-table">${head}<tbody>${rows}</tbody></table>`;
+      results.classList.remove("hidden");
+    } catch (e) {
+      errEl.textContent = "Network error — try again.";
+      errEl.classList.remove("hidden");
+    } finally {
+      loading.classList.add("hidden");
+      runBtn.disabled = false;
+    }
+  };
 }
 
 function setupAuthControl() {
@@ -4273,7 +4690,8 @@ function setupLeaderboard() {
 // ── Discovery page ────────────────────────────────────────────────────
 let _DISC_DATA = [];
 let _DISC_TIER_FILTER = "all";
-let _DISC_SORT = "mos";
+let _DISC_SECTOR_FILTER = "all";
+let _DISC_SORT = "opportunity";   // new default — confidence-adjusted
 
 function tierBucket(tier) {
   if (!tier) return "neutral";
@@ -4469,9 +4887,27 @@ async function loadDiscover(opts = {}) {
   renderDiscover(failed);
 }
 
+function renderDiscoverSectorChips() {
+  // Populate the sector-filter row from the unique sectors in the current
+  // data set. Called every time fresh data lands so chips reflect reality.
+  const row = document.getElementById("discSectorRow");
+  if (!row) return;
+  const sectors = Array.from(
+    new Set(_DISC_DATA.map(it => it.sector).filter(s => s && s.trim()))
+  ).sort();
+  const chips = [
+    `<button class="disc-tier-pill ${_DISC_SECTOR_FILTER === "all" ? "active" : ""}" data-disc-sector="all" type="button">All sectors</button>`,
+    ...sectors.map(s =>
+      `<button class="disc-tier-pill ${_DISC_SECTOR_FILTER === s ? "active" : ""}" data-disc-sector="${escHtml(s)}" type="button">${escHtml(s)}</button>`
+    ),
+  ];
+  row.innerHTML = `<span class="disc-filter-label">Sector:</span>${chips.join("")}`;
+}
+
 function renderDiscover(failed = false) {
   const grid = $("discGrid");
   if (!grid) return;
+  renderDiscoverSectorChips();
   if (_DISC_DATA.length === 0) {
     grid.innerHTML = `
       <div class="disc-empty" style="grid-column:1/-1;text-align:center;padding:48px 16px;color:var(--text-muted,#888);">
@@ -4493,12 +4929,29 @@ function renderDiscover(failed = false) {
   if (_DISC_TIER_FILTER !== "all") {
     items = items.filter(it => tierBucket(it.tier) === _DISC_TIER_FILTER);
   }
+  // Optional sector filter (independent of tier filter).
+  if (_DISC_SECTOR_FILTER && _DISC_SECTOR_FILTER !== "all") {
+    items = items.filter(it =>
+      (it.sector || "").toLowerCase() === _DISC_SECTOR_FILTER.toLowerCase());
+  }
+
   function sortMos(it) {
     if (it.extreme || it.mos == null) return -Infinity;
     return it.mos;
   }
+  // Confidence-adjusted opportunity = MOS × confidence weight.  Keeps the
+  // top picks honest — a +200% MOS on a low-confidence emergency-cascade
+  // payload shouldn't outrank a +30% MOS with high DCF confidence.
+  function sortOpportunity(it) {
+    if (it.extreme || it.mos == null) return -Infinity;
+    const conf = (it.iv_confidence || "").toLowerCase();
+    const w = conf === "high" ? 1.0 : conf === "moderate" ? 0.55 : 0.25;
+    return it.mos * w;
+  }
   if (_DISC_SORT === "mos") {
     items.sort((a, b) => sortMos(b) - sortMos(a));
+  } else if (_DISC_SORT === "opportunity") {
+    items.sort((a, b) => sortOpportunity(b) - sortOpportunity(a));
   } else if (_DISC_SORT === "ticker") {
     items.sort((a, b) => (a.ticker || "").localeCompare(b.ticker || ""));
   } else if (_DISC_SORT === "sector") {
@@ -4833,6 +5286,19 @@ function setupDiscover() {
       renderDiscover();
     };
   });
+  // Sector-filter chips are rendered dynamically from the live data set
+  // each time the page opens; delegate the click handler at parent level.
+  const sectorRow = document.getElementById("discSectorRow");
+  if (sectorRow) {
+    sectorRow.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-disc-sector]");
+      if (!b) return;
+      _DISC_SECTOR_FILTER = b.dataset.discSector;
+      sectorRow.querySelectorAll("[data-disc-sector]").forEach(x =>
+        x.classList.toggle("active", x === b));
+      renderDiscover();
+    });
+  }
   document.querySelectorAll("[data-disc-sort]").forEach(b => {
     b.onclick = () => {
       _DISC_SORT = b.dataset.discSort;
@@ -5053,7 +5519,10 @@ document.addEventListener("DOMContentLoaded", () => {
   setupLeaderboard();
   setupAuthControl();
   setupSettings();
+  setupCompareModal();
   loadTrending();
+  loadRecentTickers();
+  loadWatchlistMovers();
   pfUpdateBadge();
   // Fetch identity in parallel with bootFromURL — non-blocking
   refreshMe();
