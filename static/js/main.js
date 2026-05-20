@@ -1079,32 +1079,6 @@ function renderScenarios(d) {
   const sc = d.scenarios || {};
   const grid = $("scGrid");
 
-  // Premium gate — server strips scenarios for free users and sets
-  // scenarios_locked: true. Render the lock overlay instead of the cards.
-  if (d.scenarios_locked) {
-    grid.innerHTML = `
-      <div class="sc-card sc-card--locked" style="grid-column: 1 / -1;">
-        <div class="plus-lock-overlay" style="position: relative; inset: auto; padding: 28px 16px;">
-          <span class="plus-lock-overlay__icon">🔒</span>
-          <div class="plus-lock-overlay__title">Scenario analysis is VALUS+</div>
-          <div class="plus-lock-overlay__sub">
-            Bear / base / bull weighted fair-value scenarios, with probability
-            blending and per-case g₁ / WACC assumptions.
-          </div>
-          <button class="plus-lock-overlay__cta" type="button" id="scLockedUpgrade">
-            Upgrade — $2/month
-          </button>
-        </div>
-      </div>
-    `;
-    const btn = document.getElementById("scLockedUpgrade");
-    if (btn) btn.onclick = () => startCheckout();
-    $("scWeightNote").textContent = "";
-    $("scWeighted").textContent = "—";
-    $("scWeightedDelta").textContent = "";
-    return;
-  }
-
   $("scWeightNote").textContent = sc.weight_basis ? `Weights: ${sc.weight_basis}` : "";
 
   // Sector-aware case-narratives so users understand what each scenario assumes
@@ -1370,29 +1344,6 @@ async function fetchAndRenderValuationHistory(ticker) {
   if (empty) empty.classList.add("hidden");
   try {
     const res = await fetch(`/api/valuation-history?ticker=${encodeURIComponent(ticker)}`);
-    // 402 Payment Required → VALUS+ gate. Render the lock state in the
-    // chart area instead of hiding the card.
-    if (res.status === 402) {
-      destroyValuationHistoryChart();
-      const wrap = card.querySelector(".vh-chart-wrap");
-      if (wrap) {
-        wrap.innerHTML = `
-          <div class="plus-lock-overlay" style="position: relative; inset: auto; padding: 36px 16px; border-radius: var(--radius);">
-            <span class="plus-lock-overlay__icon">🔒</span>
-            <div class="plus-lock-overlay__title">Historical valuation is VALUS+</div>
-            <div class="plus-lock-overlay__sub">
-              Replay VALUS at every yearly 10-K cutoff for the last 5 years —
-              point-in-time DCF vs. the price the market actually paid.
-            </div>
-            <button class="plus-lock-overlay__cta" type="button" data-plus-cta>Upgrade — $2/month</button>
-          </div>
-        `;
-        const cta = wrap.querySelector("[data-plus-cta]");
-        if (cta) cta.onclick = () => startCheckout();
-      }
-      if (empty) empty.classList.add("hidden");
-      return;
-    }
     const j = await res.json();
     if (!j || j.available === false || !Array.isArray(j.iv_points) || j.iv_points.length === 0) {
       if (empty) empty.classList.remove("hidden");
@@ -1645,26 +1596,6 @@ async function renderInsiderCard(ticker) {
   card.hidden = true;
   try {
     const r = await fetch(`/api/insider?ticker=${encodeURIComponent(ticker)}`);
-    // 402 Payment Required → VALUS+ upgrade gate. Show the lock state
-    // instead of hiding silently, so the user knows the feature exists.
-    if (r.status === 402) {
-      summary.innerHTML = `<span class="insider-pill insider-pill--quiet">🔒 VALUS+</span>`;
-      list.innerHTML = `
-        <div class="plus-lock-overlay" style="position: relative; inset: auto; padding: 22px 16px; border-radius: var(--radius);">
-          <span class="plus-lock-overlay__icon">🔒</span>
-          <div class="plus-lock-overlay__title">Insider activity is VALUS+</div>
-          <div class="plus-lock-overlay__sub">
-            Form 4 buys, sells, and option exercises filed by C-suite and 10%+ holders over the last 90 days.
-          </div>
-          <button class="plus-lock-overlay__cta" type="button" data-plus-cta>Upgrade — $2/month</button>
-        </div>
-      `;
-      const cta = list.querySelector("[data-plus-cta]");
-      if (cta) cta.onclick = () => startCheckout();
-      card.hidden = false;
-      if (insightsGrid) insightsGrid.classList.remove("hidden");
-      return;
-    }
     const j = await r.json();
     if (!j.available || !Array.isArray(j.items) || j.items.length === 0) {
       card.hidden = true;
@@ -3514,7 +3445,6 @@ async function refreshMe() {
     _PLUS_RENEWS_AT = null;
   }
   updateAuthControl();
-  refreshPlusLockUI();
   // First-time sign-in: claim any legacy soft-token entries
   if (_ME && !sessionStorage.getItem("valus.claimed")) {
     const legacy = getValusUser();
@@ -3533,21 +3463,6 @@ async function refreshMe() {
   // When signed in, sync the saved portfolio so it follows the user
   // across devices/browsers.
   if (_ME) pfPullFromServer();
-}
-
-// Decorate paid-feature buttons with a visible lock for free users so the
-// gate is discoverable, not surprising-at-click.  Idempotent + safe to call
-// on every refreshMe() — we restore the original label when the user
-// becomes VALUS+.
-function refreshPlusLockUI() {
-  const decorate = (btn, baseHTML) => {
-    if (!btn) return;
-    if (!btn.dataset.baseHtml) btn.dataset.baseHtml = btn.innerHTML || baseHTML;
-    btn.innerHTML = _IS_PLUS
-      ? (btn.dataset.baseHtml || baseHTML)
-      : `${btn.dataset.baseHtml || baseHTML} <span class="plus-inline-lock">🔒 VALUS+</span>`;
-  };
-  decorate(document.getElementById("pfPublishBtn"), "🏆 Publish");
 }
 
 function updateAuthControl() {
@@ -4059,12 +3974,6 @@ function setupSubmitToLeaderboard() {
     }
     // Gate on real auth — sign-in modal is shown if not signed in.
     if (!(await requireAuthWithRedirectIntent("publish"))) return;
-    // Phase 4 — publishing is VALUS+ only. Show the upgrade modal so the
-    // user understands why and can convert in one click.
-    if (!_IS_PLUS) {
-      showPlusModal();
-      return;
-    }
     // Pre-populate display name from the OAuth identity
     if (_ME?.name) nameEl.value = _ME.name;
     modal.classList.remove("hidden");
@@ -4104,13 +4013,6 @@ function setupSubmitToLeaderboard() {
         submitBtn.textContent = "Publish";
         submitBtn.disabled = false;
         showSignInModal("publish");
-        return;
-      }
-      if (res.status === 402) {
-        modal.classList.add("hidden");
-        submitBtn.textContent = "Publish";
-        submitBtn.disabled = false;
-        showPlusModal();
         return;
       }
       if (data.error) throw new Error(data.error);
