@@ -4500,12 +4500,24 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
    ════════════════════════════════════════════════════════════════════════ */
 .verdict-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  /* min(280px, 100%) keeps the responsive multi-column layout but prevents the
+     280px track from overflowing the container on narrow viewports. */
+  grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
   gap: var(--space-4);
   margin: var(--space-5) 0;
 }
 .verdict-grid.hidden { display: none; }
-.vg-card { padding: var(--space-5); }
+.vg-card {
+  padding: var(--space-5);
+  box-sizing: border-box;
+  /* Grid items default to min-width:auto, which lets long unbreakable text
+     stretch the card past its track. min-width:0 lets it shrink so text
+     wraps instead of escaping the card boundary. */
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+}
 .vg-head {
   display: flex; align-items: center; gap: 10px;
   margin-bottom: var(--space-3);
@@ -4521,11 +4533,14 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
 }
 .vg-title {
   flex: 1;
+  min-width: 0;
   font-family: var(--font-display);
   font-size: 13px;
   font-weight: 600;
   color: var(--ink-primary);
   letter-spacing: 0.02em;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
 }
 .vg-pill {
   font-family: var(--font-mono);
@@ -4555,13 +4570,15 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
   gap: 12px;
   margin-bottom: var(--space-3);
 }
-.vg-stat { display: flex; flex-direction: column; gap: 2px; }
+.vg-stat { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .vg-stat__label {
   font-family: var(--font-mono);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--ink-muted);
+  overflow-wrap: break-word;
+  word-wrap: break-word;
 }
 .vg-stat__value {
   font-family: var(--font-display);
@@ -4576,6 +4593,8 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
   font-size: 13px;
   line-height: 1.5;
   color: var(--ink-secondary);
+  overflow-wrap: break-word;
+  word-wrap: break-word;
 }
 .flip-list {
   display: flex; flex-direction: column;
@@ -4590,10 +4609,17 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
   background: rgba(255,255,255,0.03);
   border: 1px solid rgba(255,255,255,0.06);
   border-radius: 10px;
+  min-width: 0;
+  box-sizing: border-box;
 }
 .flip-row__label {
   font-size: 12px;
   color: var(--ink-secondary);
+  /* Scenario labels live in the 1fr track next to nowrap stats; min-width:0
+     lets the label wrap instead of forcing the row wider than the card. */
+  min-width: 0;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
 }
 .flip-row__needs {
   font-family: var(--font-display);
