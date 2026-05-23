@@ -4519,7 +4519,9 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
   word-wrap: break-word;
 }
 .vg-head {
-  display: flex; align-items: center; gap: 10px;
+  /* flex-wrap lets the (nowrap) tier pill drop to its own line when it would
+     otherwise squeeze the title to zero width and stack it one char per line. */
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px;
   margin-bottom: var(--space-3);
 }
 .vg-icon {
@@ -4532,7 +4534,9 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
   color: var(--accent);
 }
 .vg-title {
-  flex: 1;
+  /* flex-basis:auto (not 0) so the title's natural width pushes a long tier
+     pill onto the next line instead of letting it collapse the title. */
+  flex: 1 1 auto;
   min-width: 0;
   font-family: var(--font-display);
   font-size: 13px;
@@ -4601,10 +4605,14 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
   gap: 8px;
 }
 .flip-row {
+  /* Label sits on its own full-width line above the price + delta, so a long
+     scenario label ("To upgrade to Fair Value") can't get crushed into a
+     sliver of a column next to the two nowrap stats. */
   display: grid;
-  grid-template-columns: 1fr auto auto;
-  gap: 12px;
-  align-items: center;
+  grid-template-columns: 1fr auto;
+  column-gap: 12px;
+  row-gap: 4px;
+  align-items: baseline;
   padding: 10px 12px;
   background: rgba(255,255,255,0.03);
   border: 1px solid rgba(255,255,255,0.06);
@@ -4613,10 +4621,9 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
   box-sizing: border-box;
 }
 .flip-row__label {
+  grid-column: 1 / -1;
   font-size: 12px;
   color: var(--ink-secondary);
-  /* Scenario labels live in the 1fr track next to nowrap stats; min-width:0
-     lets the label wrap instead of forcing the row wider than the card. */
   min-width: 0;
   overflow-wrap: break-word;
   word-wrap: break-word;
@@ -4626,7 +4633,9 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
   font-size: 14px;
   font-weight: 600;
   color: var(--ink-primary);
-  white-space: nowrap;
+  min-width: 0;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
 }
 .flip-row__delta {
   font-family: var(--font-mono);
@@ -4634,6 +4643,8 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
   font-weight: 600;
   color: var(--ink-muted);
   white-space: nowrap;
+  justify-self: end;
+  text-align: right;
 }
 .flip-row__delta.positive { color: #22c55e; }
 .flip-row__delta.negative { color: #f87171; }
