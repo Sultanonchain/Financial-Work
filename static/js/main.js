@@ -3048,18 +3048,44 @@ async function pfSetActive(pid) {
 // the legacy one-portfolio UX (no nav noise for a feature they can't
 // meaningfully use without sync).
 
+// The PORTFOLIO button is now the switcher — there's only one nav element
+// for portfolios.  When signed in it shows the active portfolio's name
+// and a caret; clicking opens the dropdown of all portfolios + actions.
+// When signed out it shows the static "Portfolio" label and the caret +
+// menu stay hidden; clicking falls through to openPortfolioPage() which
+// triggers the sign-in gate.
 function pfUpdateSwitcher() {
-  const root = $("pfSwitcher");
+  const root    = $("pfNav");
   if (!root) return;
-  if (!_ME) { root.classList.add("hidden"); return; }
-  root.classList.remove("hidden");
+  const btn     = $("portfolioBtn");
+  const labelEl = $("pfNavLabel");
+  const caretEl = $("pfNavCaret");
+  const menuEl  = $("pfNavMenu");
 
+  if (!_ME) {
+    if (labelEl) {
+      labelEl.textContent = "Portfolio";
+      labelEl.classList.remove("header-btn__label--name");
+    }
+    if (caretEl) caretEl.hidden = true;
+    if (menuEl)  menuEl.classList.add("hidden");
+    if (btn) {
+      btn.setAttribute("aria-expanded", "false");
+      btn.removeAttribute("aria-haspopup");
+    }
+    return;
+  }
+
+  // Signed-in: show active portfolio name + caret, populate menu.
   const s = pfState();
   const active = s.portfolios[s.active_pid] || {};
-  const nameEl = $("pfSwitcherName");
-  if (nameEl) nameEl.textContent = active.name || "My Portfolio";
+  if (btn) btn.setAttribute("aria-haspopup", "menu");
+  if (labelEl) {
+    labelEl.textContent = active.name || "My Portfolio";
+    labelEl.classList.add("header-btn__label--name");
+  }
+  if (caretEl) caretEl.hidden = false;
 
-  // List items: sorted by created_at asc to match the server's ordering.
   const ordered = Object.entries(s.portfolios).sort(
     (a, b) => (a[1].created_at || 0) - (b[1].created_at || 0) || a[0].localeCompare(b[0])
   );
@@ -3103,21 +3129,21 @@ function pfUpdateSwitcher() {
 }
 
 function _pfMenuOpen() {
-  const menu = $("pfSwitcherMenu");
-  const btn  = $("pfSwitcherBtn");
+  const menu = $("pfNavMenu");
+  const btn  = $("portfolioBtn");
   if (!menu || !btn) return;
   menu.classList.remove("hidden");
   btn.setAttribute("aria-expanded", "true");
 }
 function _pfMenuClose() {
-  const menu = $("pfSwitcherMenu");
-  const btn  = $("pfSwitcherBtn");
+  const menu = $("pfNavMenu");
+  const btn  = $("portfolioBtn");
   if (!menu || !btn) return;
   menu.classList.add("hidden");
   btn.setAttribute("aria-expanded", "false");
 }
 function _pfMenuToggle() {
-  const menu = $("pfSwitcherMenu");
+  const menu = $("pfNavMenu");
   if (!menu) return;
   if (menu.classList.contains("hidden")) _pfMenuOpen(); else _pfMenuClose();
 }
@@ -3182,25 +3208,35 @@ async function _pfPromptDelete() {
 }
 
 function setupPfSwitcher() {
-  const btn = $("pfSwitcherBtn");
+  const btn = $("portfolioBtn");
   if (!btn) return;
-  btn.addEventListener("click", (e) => { e.stopPropagation(); _pfMenuToggle(); });
 
-  // Picking a portfolio in the list.
+  // Single click handler for the PORTFOLIO button.  Signed-out → open the
+  // portfolio page (which gates on sign-in).  Signed-in → toggle the
+  // dropdown of all portfolios + actions.  Picking a portfolio in the
+  // dropdown switches active + opens its page.
+  btn.addEventListener("click", (e) => {
+    if (!_ME) { openPortfolioPage(); return; }
+    e.stopPropagation();
+    _pfMenuToggle();
+  });
+
+  // Picking a portfolio in the list: switch active (if not already) AND
+  // open the page.  Picking the active one is also valid — opens its page.
   const list = $("pfSwitcherList");
   if (list) {
     list.addEventListener("click", async (e) => {
-      const btn = e.target.closest("[data-pf-pick]");
-      if (!btn) return;
-      const pid = btn.getAttribute("data-pf-pick");
+      const item = e.target.closest("[data-pf-pick]");
+      if (!item) return;
+      const pid = item.getAttribute("data-pf-pick");
       _pfMenuClose();
-      if (pid === pfState().active_pid) return;
-      await pfSetActive(pid);
-      // Refresh views that depend on the active portfolio.
-      if (!$("portfolioPage")?.classList.contains("hidden")) renderPortfolioPage();
-      pfUpdateBadge();
-      syncAddPortfolioButtonForCurrent?.();
-      loadWatchlistMovers?.();
+      if (pid !== pfState().active_pid) {
+        await pfSetActive(pid);
+        pfUpdateBadge();
+        syncAddPortfolioButtonForCurrent?.();
+        loadWatchlistMovers?.();
+      }
+      openPortfolioPage();
     });
   }
 
@@ -3210,7 +3246,7 @@ function setupPfSwitcher() {
 
   // Outside-click + Escape close the menu.
   document.addEventListener("click", (e) => {
-    const root = $("pfSwitcher");
+    const root = $("pfNav");
     if (!root) return;
     if (root.contains(e.target)) return;
     _pfMenuClose();
@@ -3450,8 +3486,9 @@ async function refreshPortfolioPrices() {
 }
 
 function setupPortfolioPage() {
-  const btn = $("portfolioBtn");
-  if (btn) btn.onclick = openPortfolioPage;
+  // #portfolioBtn's click handler lives in setupPfSwitcher() — it routes
+  // between "open menu" (signed in) and "open page" (signed out) via a
+  // single dispatcher so the two handlers don't double-fire.
 
   const back = $("pfBackBtn");
   if (back) back.onclick = closePortfolioPage;

@@ -44,22 +44,19 @@
         <span class="header-btn__icon">⌖</span>
         <span class="header-btn__label">Discover</span>
       </button>
-      <button class="header-btn" id="portfolioBtn" type="button" aria-label="Open portfolio">
-        <span class="header-btn__icon">★</span>
-        <span class="header-btn__label">Portfolio</span>
-        <span class="header-btn__count" id="portfolioCount" hidden>0</span>
-      </button>
-      <!-- Multi-portfolio switcher: hidden until the user is signed in and
-           a server portfolio record is loaded.  The button surfaces the
-           active portfolio's name; the popover lists every portfolio plus
-           New / Rename / Delete actions. -->
-      <div class="pf-switcher hidden" id="pfSwitcher">
-        <button class="header-btn pf-switcher__btn" id="pfSwitcherBtn" type="button"
-                aria-haspopup="menu" aria-expanded="false" aria-label="Switch portfolio">
-          <span class="pf-switcher__name" id="pfSwitcherName">My Portfolio</span>
-          <span class="pf-switcher__caret" aria-hidden="true">▾</span>
+      <!-- Unified portfolio nav: ONE button.  When signed in, clicking
+           opens a dropdown of all portfolios (active checked) plus New /
+           Rename / Delete actions; picking a portfolio switches to it AND
+           opens its page.  When signed out, click falls through to the
+           sign-in gate via openPortfolioPage(). -->
+      <div class="pf-nav" id="pfNav">
+        <button class="header-btn pf-nav__btn" id="portfolioBtn" type="button" aria-label="Portfolio">
+          <span class="header-btn__icon">★</span>
+          <span class="header-btn__label" id="pfNavLabel">Portfolio</span>
+          <span class="header-btn__count" id="portfolioCount" hidden>0</span>
+          <span class="pf-nav__caret" id="pfNavCaret" aria-hidden="true" hidden>▾</span>
         </button>
-        <div class="pf-switcher__menu hidden" id="pfSwitcherMenu" role="menu">
+        <div class="pf-nav__menu hidden" id="pfNavMenu" role="menu">
           <ul class="pf-switcher__list" id="pfSwitcherList" role="none"></ul>
           <div class="pf-switcher__sep"></div>
           <button class="pf-switcher__action" id="pfSwitcherNew" role="menuitem" type="button">

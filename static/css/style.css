@@ -777,13 +777,23 @@ button { font-family: inherit; cursor: pointer; }
   box-shadow: 0 4px 20px rgba(0,0,0,0.25);
 }
 .advanced-panel.hidden { display: none; }
-.advanced-field { display: flex; flex-direction: column; gap: 6px; text-align: left; }
+.advanced-field {
+  display: flex; flex-direction: column; gap: 6px; text-align: left;
+  /* min-width:0 lets the column shrink to the grid track instead of being
+     stretched by the label's intrinsic width; combined with the
+     white-space:nowrap below it keeps every label on a single line. */
+  min-width: 0;
+}
 .advanced-field label {
   font-size: 12px; color: rgba(230, 233, 239, 0.85);
   font-family: inherit;
   font-weight: 500; letter-spacing: 0.01em;
   display: inline-flex; align-items: center; gap: 6px;
+  /* Stop "Projection years" wrapping while the other 3 labels stay single
+     line.  All four labels fit at the current font/column sizes. */
+  white-space: nowrap;
 }
+.advanced-field input { width: 100%; min-width: 0; }
 .advanced-field label .field-help {
   display: inline-flex; align-items: center; justify-content: center;
   width: 14px; height: 14px; border-radius: 50%;
@@ -5091,37 +5101,38 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
    Styling mirrors .header-btn (pill, mono, uppercase) and .auth-menu
    (popover panel, list items, separator). */
 
-.pf-switcher { position: relative; display: inline-flex; }
-.pf-switcher.hidden { display: none; }
+/* The Portfolio button IS the switcher — clicking it opens the dropdown
+   below.  Anonymous users get a plain pill (the caret is hidden, the menu
+   is never shown), so the same element handles both states. */
+.pf-nav { position: relative; display: inline-flex; }
 
-.pf-switcher__btn {
-  /* Inherits .header-btn pill styling.  Gap is tighter than the icon-led
-     buttons because there's only a name + caret. */
-  gap: 8px;
-  max-width: 200px;          /* keep the nav from sprawling on long names */
-}
-.pf-switcher__name {
+.pf-nav__btn { gap: 8px; max-width: 220px; }
+
+/* When the button is showing a portfolio NAME (signed-in state) rather
+   than the static "PORTFOLIO" label, the label adopts the user's casing
+   instead of the header buttons' uppercase mono. */
+.header-btn__label--name {
+  text-transform: none;
+  letter-spacing: 0.02em;
+  font-weight: 600;
+  max-width: 130px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
-  max-width: 150px;
-  /* Names are user-provided, so they're TitleCase, not uppercase like
-     other header labels.  Override to keep the casing the user typed. */
-  text-transform: none;
-  letter-spacing: 0.02em;
-  font-weight: 600;
 }
-.pf-switcher__caret {
+
+.pf-nav__caret {
   color: var(--ink-muted);
   font-size: 10px;
+  margin-left: 2px;
   transition: transform 150ms var(--ease-out);
 }
-.pf-switcher__btn[aria-expanded="true"] .pf-switcher__caret {
+.pf-nav__btn[aria-expanded="true"] .pf-nav__caret {
   transform: rotate(180deg);
 }
 
-.pf-switcher__menu {
+.pf-nav__menu {
   position: absolute; top: calc(100% + 8px); right: 0;
   background: var(--bg-elevated);
   border: 1px solid rgba(255,255,255,0.08);
@@ -5132,7 +5143,7 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
   max-width: 320px;
   z-index: 100;
 }
-.pf-switcher__menu.hidden { display: none; }
+.pf-nav__menu.hidden { display: none; }
 
 .pf-switcher__list {
   list-style: none;
@@ -5236,9 +5247,13 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
 }
 
 @media (max-width: 640px) {
-  /* Keep the active portfolio name on mobile (truncated) — a bare caret
-     is too ambiguous as a switcher affordance. */
-  .pf-switcher__btn  { padding: 7px 10px; max-width: 140px; gap: 6px; }
-  .pf-switcher__name { max-width: 88px; font-size: 11px; }
-  .pf-switcher__menu { right: -40px; min-width: 220px; max-width: calc(100vw - 24px); }
+  /* On mobile the .header-btn__label hides (icon-only nav).  Keep the
+     portfolio NAME visible (truncated) when signed in so the user still
+     sees which portfolio is active; the icon alone is too ambiguous. */
+  .pf-nav__btn { padding: 7px 10px; max-width: 160px; gap: 6px; }
+  .header-btn__label--name {
+    display: inline-block;
+    max-width: 90px; font-size: 11px;
+  }
+  .pf-nav__menu { right: -40px; min-width: 220px; max-width: calc(100vw - 24px); }
 }
