@@ -49,6 +49,34 @@
         <span class="header-btn__label">Portfolio</span>
         <span class="header-btn__count" id="portfolioCount" hidden>0</span>
       </button>
+      <!-- Multi-portfolio switcher: hidden until the user is signed in and
+           a server portfolio record is loaded.  The button surfaces the
+           active portfolio's name; the popover lists every portfolio plus
+           New / Rename / Delete actions. -->
+      <div class="pf-switcher hidden" id="pfSwitcher">
+        <button class="header-btn pf-switcher__btn" id="pfSwitcherBtn" type="button"
+                aria-haspopup="menu" aria-expanded="false" aria-label="Switch portfolio">
+          <span class="pf-switcher__name" id="pfSwitcherName">My Portfolio</span>
+          <span class="pf-switcher__caret" aria-hidden="true">▾</span>
+        </button>
+        <div class="pf-switcher__menu hidden" id="pfSwitcherMenu" role="menu">
+          <ul class="pf-switcher__list" id="pfSwitcherList" role="none"></ul>
+          <div class="pf-switcher__sep"></div>
+          <button class="pf-switcher__action" id="pfSwitcherNew" role="menuitem" type="button">
+            <span class="pf-switcher__action-icon" aria-hidden="true">＋</span>
+            <span class="pf-switcher__action-label">New portfolio…</span>
+            <span class="pf-switcher__action-cap" id="pfSwitcherCapHint" hidden></span>
+          </button>
+          <button class="pf-switcher__action" id="pfSwitcherRename" role="menuitem" type="button">
+            <span class="pf-switcher__action-icon" aria-hidden="true">✎</span>
+            <span class="pf-switcher__action-label">Rename current…</span>
+          </button>
+          <button class="pf-switcher__action pf-switcher__action--danger" id="pfSwitcherDelete" role="menuitem" type="button">
+            <span class="pf-switcher__action-icon" aria-hidden="true">🗑</span>
+            <span class="pf-switcher__action-label">Delete current…</span>
+          </button>
+        </div>
+      </div>
       <span class="disclaimer-pill" title="VALUS is an educational research tool. Not investment advice.">⚠ Not financial advice</span>
       <!-- Auth control sits at the far right when signed in: a circular
            avatar to the right of the disclaimer pill.  When signed out,
