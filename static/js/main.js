@@ -33,6 +33,62 @@ const fmtBig = (n) => {
 
 const fmtX = (n) => n == null ? "—" : `${fmt(n, 1)}×`;
 
+// ── VALUS A-F grade badge (Phase 5) ──────────────────────────────────
+// Renders the {grade,label,explanation,mos} payload the backend ships in
+// d.valus_grade.  Two variants — default chip, used in row contexts, and
+// large, used on the stock detail hero.  Returns an empty string when
+// the input is null/missing so callers can string-interpolate safely.
+function renderGradeBadge(g, opts) {
+  if (!g || !g.grade) return "";
+  const large = opts && opts.large;
+  const showLabel = opts ? opts.showLabel !== false : true;
+  const cls = "valus-grade" + (large ? " valus-grade--large" : "");
+  const label = showLabel
+    ? `<span class="valus-grade__label">${escHtml(g.label || "")}</span>`
+    : "";
+  return `
+    <span class="${cls}" data-grade="${escHtml(g.grade)}"
+          title="${escHtml((g.label || "") + " — " + (g.explanation || ""))}">
+      <span class="valus-grade__letter">${escHtml(g.grade)}</span>
+      ${label}
+    </span>`;
+}
+
+// Pure client-side derivation: an MOS percent → A-F letter chip.  Used
+// in row contexts (portfolio, watchlist) where we already have the MOS
+// number snapshot and don't want to re-fetch /api/analyze to get the
+// server's valus_grade payload.  Mirrors the bands in compute_valus_grade
+// in app.py — keep the two in sync if you tweak thresholds.
+function mosToGrade(mos) {
+  if (mos == null || isNaN(mos)) return null;
+  const m = Number(mos);
+  let grade;
+  if      (m >=  30) grade = "A";
+  else if (m >=  15) grade = "B";
+  else if (m >  -15) grade = "C";
+  else if (m >  -30) grade = "D";
+  else               grade = "F";
+  return grade;
+}
+
+// Compact "grade letter + MOS%" chip suitable for table-style rows. The
+// letter sits left, the MOS% sits right, both color-keyed by grade.
+function mosToGradeChip(mos) {
+  const g = mosToGrade(mos);
+  if (!g) {
+    return `<span class="valus-grade" data-grade="C"
+             title="MOS unavailable"><span class="valus-grade__letter">—</span></span>`;
+  }
+  const sign = mos >= 0 ? "+" : "";
+  const pct  = `${sign}${fmt(mos, 1)}%`;
+  return `
+    <span class="valus-grade" data-grade="${g}"
+          title="VALUS grade ${g} · ${pct}">
+      <span class="valus-grade__letter">${g}</span>
+      <span class="valus-grade__label">${pct}</span>
+    </span>`;
+}
+
 /* ════════════════════════════════════════════════════════════════════════
    Tier color mapping
    ════════════════════════════════════════════════════════════════════════ */
@@ -615,6 +671,23 @@ function renderHeroVerdict(d) {
   tierBadge.classList.remove("tier-positive","tier-info","tier-warning","tier-negative");
   tierBadge.classList.add(tierCls);
   $("vTierLabel").textContent = pf.label || "Verdict pending";
+
+  // VALUS A-F grade badge (large) + one-line explanation.
+  const gRow     = $("vValusGradeRow");
+  const gBadgeEl = $("vValusGradeBadge");
+  const gExplain = $("vValusGradeExplain");
+  const g = d.valus_grade;
+  if (gRow && gBadgeEl && gExplain) {
+    if (g && g.grade) {
+      gBadgeEl.innerHTML  = renderGradeBadge(g, { large: true });
+      gExplain.textContent = g.explanation || "";
+      gRow.hidden = false;
+    } else {
+      gBadgeEl.innerHTML = "";
+      gExplain.textContent = "";
+      gRow.hidden = true;
+    }
+  }
 
   // Strategic IV floor breakdown — only when survival_floor tier lifted DCF.
   // Format: DCF model: $X · Strategic floor: $Y · Used: $Z
@@ -3429,8 +3502,6 @@ function renderWatchlistPage() {
   if (empty) empty.classList.add("hidden");
   list.innerHTML = items.map(it => {
     const mos      = (typeof it.mos === "number") ? it.mos : null;
-    const mosCls   = mos == null ? "neutral" : (mos >= 0 ? "positive" : "negative");
-    const mosTxt   = mos == null ? "—" : `${mos >= 0 ? "+" : ""}${fmt(mos, 1)}%`;
     const priceTxt = (typeof it.price === "number") ? fmtPrice(it.price) : "—";
     const ivTxt    = (typeof it.iv    === "number") ? fmtPrice(it.iv)    : "—";
     return `
@@ -3441,7 +3512,7 @@ function renderWatchlistPage() {
         <span class="pf-item__name">${escHtml(it.name || "")}</span>
         <span class="pf-item__price">${priceTxt}</span>
         <span class="pf-item__price">${ivTxt}</span>
-        <span class="pf-item__mos ${mosCls}">${mosTxt}</span>
+        <span class="pf-item__grade-cell">${mosToGradeChip(mos)}</span>
         <button class="pf-item__remove" data-wl-remove="${escHtml(it.ticker)}"
                 type="button" aria-label="Remove ${escHtml(it.ticker)}">×</button>
       </div>`;
@@ -3607,15 +3678,16 @@ function renderPortfolioPage() {
   empty.classList.add("hidden");
   $("pfAllocationCard").style.display = "";
 
-  // Render holdings
+  // Render holdings — grade chip replaces the old plain MOS pill so users
+  // can scan A/B/C/D/F across their portfolio in one glance.  The chip
+  // still surfaces the MOS percent next to the letter.
   list.innerHTML = items.map(it => {
-    const mosClass = it.mos == null ? "neutral" : (it.mos > 5 ? "positive" : (it.mos < -5 ? "negative" : "neutral"));
     return `
       <div class="pf-item" data-pf-ticker="${escHtml(it.ticker)}">
         <span class="pf-item__ticker">${escHtml(it.ticker)}</span>
         <span class="pf-item__name">${escHtml(it.name || "")}</span>
         <span class="pf-item__price">${it.price != null ? fmtPrice(it.price) : "—"}</span>
-        <span class="pf-item__mos ${mosClass}">${it.mos != null ? fmtPct(it.mos) : "—"}</span>
+        <span class="pf-item__grade-cell">${mosToGradeChip(it.mos)}</span>
         <button class="pf-item__remove" data-pf-remove="${escHtml(it.ticker)}" aria-label="Remove">✕</button>
       </div>
     `;
@@ -4913,6 +4985,7 @@ function setupCompareModal() {
     ["iv",             "VALUS fair value",v => v != null ? fmtPrice(v) : "—", "higher_better:true"],
     ["mos",            "Margin of safety",v => v != null ? fmtPct(v)  : "—",  "higher_better:true"],
     ["tier_label",     "Verdict",         v => v || "—",                       "neutral"],
+    ["valus_grade",    "VALUS grade",     v => v ? renderGradeBadge(v, {showLabel:false}) : "—", "neutral"],
     ["market_cap",     "Market cap",      fmtMktCap,                           "neutral"],
     ["analyst_target", "Analyst target",  v => v != null ? fmtPrice(v) : "—", "higher_better:true"],
     ["quality_score",  "Quality (0-100)", v => v && v.score != null ? `${v.score} (${v.grade})` : "—", "higher_better:true_quality"],
