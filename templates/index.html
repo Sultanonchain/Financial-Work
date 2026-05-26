@@ -366,17 +366,19 @@
 <!-- ── COMPARE MODAL — two tickers side-by-side ──────────────────────── -->
 <div class="modal hidden" id="compareModal" role="dialog" aria-modal="true" aria-labelledby="compareModalTitle">
   <div class="modal__backdrop" data-modal-close></div>
-  <div class="modal__panel" style="max-width: 720px;">
+  <div class="modal__panel" style="max-width: 880px;">
     <div class="modal__head">
       <h2 class="modal__title" id="compareModalTitle">Compare side-by-side</h2>
       <button class="modal__close" data-modal-close aria-label="Close">✕</button>
     </div>
     <div class="modal__body">
-      <p class="signin-detail">Pick any two stocks. We'll run VALUS on both and show the deltas across price, fair value, quality, moat, and momentum.</p>
+      <p class="signin-detail">Pick 2 or 3 stocks. We'll run VALUS on each and show the deltas across price, fair value, market cap, analyst target, quality, moat, and momentum. Best in each row is highlighted.</p>
       <div class="cmp-form">
-        <input class="lb-input" id="cmpInputA" type="text" placeholder="First ticker, e.g. AAPL" maxlength="12" autocomplete="off" spellcheck="false"/>
+        <input class="lb-input" id="cmpInputA" type="text" placeholder="Ticker 1, e.g. AAPL" maxlength="12" autocomplete="off" spellcheck="false"/>
         <span class="cmp-vs">vs</span>
-        <input class="lb-input" id="cmpInputB" type="text" placeholder="Second ticker, e.g. MSFT" maxlength="12" autocomplete="off" spellcheck="false"/>
+        <input class="lb-input" id="cmpInputB" type="text" placeholder="Ticker 2, e.g. MSFT" maxlength="12" autocomplete="off" spellcheck="false"/>
+        <span class="cmp-vs">vs</span>
+        <input class="lb-input" id="cmpInputC" type="text" placeholder="Ticker 3 (optional)" maxlength="12" autocomplete="off" spellcheck="false"/>
         <button class="copy-btn copy-btn--primary" id="cmpRunBtn" type="button">Compare</button>
       </div>
       <div class="cmp-loading hidden" id="cmpLoading">

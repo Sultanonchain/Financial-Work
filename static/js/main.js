@@ -4883,6 +4883,7 @@ function setupCompareModal() {
   const runBtn  = document.getElementById("cmpRunBtn");
   const a       = document.getElementById("cmpInputA");
   const b       = document.getElementById("cmpInputB");
+  const c       = document.getElementById("cmpInputC");
   const loading = document.getElementById("cmpLoading");
   const errEl   = document.getElementById("cmpError");
   const results = document.getElementById("cmpResults");
@@ -4893,11 +4894,27 @@ function setupCompareModal() {
     setTimeout(() => a?.focus(), 50);
   };
 
+  // Format a market-cap number into a compact $1.23T / $456B / $7.8B / $123M.
+  // Falls back to plain dollars under $1M (rare in this app, but defensive).
+  function fmtMktCap(v) {
+    if (v == null || !Number.isFinite(v)) return "—";
+    const abs = Math.abs(v);
+    if (abs >= 1e12) return `$${fmt(v / 1e12, 2)}T`;
+    if (abs >= 1e9)  return `$${fmt(v / 1e9,  2)}B`;
+    if (abs >= 1e6)  return `$${fmt(v / 1e6,  1)}M`;
+    return `$${fmt(v, 0)}`;
+  }
+
+  // Per-ticker rows.  Order is high-signal → low-signal so the most
+  // important deltas (fair value, MOS, market cap, analyst target) sit
+  // at the top of the table.
   const COMPARE_FIELDS = [
     ["price",          "Price",           v => v != null ? fmtPrice(v) : "—", "higher_better:false"],
     ["iv",             "VALUS fair value",v => v != null ? fmtPrice(v) : "—", "higher_better:true"],
-    ["mos",            "Margin of safety",v => v != null ? fmtPct(v)  : "—", "higher_better:true"],
+    ["mos",            "Margin of safety",v => v != null ? fmtPct(v)  : "—",  "higher_better:true"],
     ["tier_label",     "Verdict",         v => v || "—",                       "neutral"],
+    ["market_cap",     "Market cap",      fmtMktCap,                           "neutral"],
+    ["analyst_target", "Analyst target",  v => v != null ? fmtPrice(v) : "—", "higher_better:true"],
     ["quality_score",  "Quality (0-100)", v => v && v.score != null ? `${v.score} (${v.grade})` : "—", "higher_better:true_quality"],
     ["roe",            "ROE",             v => v != null ? `${fmt(v, 1)}%` : "—", "higher_better:true"],
     ["rev_growth",     "Revenue growth",  v => v != null ? `${fmt(v, 1)}%` : "—", "higher_better:true"],
@@ -4910,16 +4927,47 @@ function setupCompareModal() {
     ["iv_confidence",  "DCF confidence",  v => v || "—", "neutral"],
   ];
 
+  // For an N-ticker row of values, return a Set of column indices that
+  // tied for "best" given a higher_better:* hint.  Multiple ties all get
+  // highlighted; non-numeric / all-missing rows highlight nothing.
+  function _bestIndices(values, hint) {
+    const nums = values.map(v => Number.isFinite(v) ? v : null);
+    const valid = nums.filter(n => n != null);
+    if (valid.length < 2) return new Set();
+    const want = hint === "higher_better:true" ? Math.max(...valid) : Math.min(...valid);
+    if (valid.every(v => v === want)) return new Set();   // all tied
+    const winners = new Set();
+    nums.forEach((n, i) => { if (n === want) winners.add(i); });
+    return winners;
+  }
+  function _bestIndicesQuality(values) {
+    const scores = values.map(v => (v && Number.isFinite(v.score)) ? v.score : null);
+    const valid = scores.filter(n => n != null);
+    if (valid.length < 2) return new Set();
+    const want = Math.max(...valid);
+    if (valid.every(v => v === want)) return new Set();
+    const winners = new Set();
+    scores.forEach((n, i) => { if (n === want) winners.add(i); });
+    return winners;
+  }
+
   runBtn.onclick = async () => {
-    const ta = (a.value || "").trim().toUpperCase();
-    const tb = (b.value || "").trim().toUpperCase();
-    if (!ta || !tb) {
-      errEl.textContent = "Enter both tickers.";
+    const inputs = [a, b, c].map(el => (el?.value || "").trim().toUpperCase()).filter(Boolean);
+    // Dedupe while preserving order.
+    const tickers = [...new Set(inputs)];
+    if (tickers.length < 2) {
+      errEl.textContent = "Enter at least two tickers.";
       errEl.classList.remove("hidden");
       return;
     }
-    if (ta === tb) {
-      errEl.textContent = "Pick two different tickers.";
+    if (tickers.length !== inputs.length) {
+      errEl.textContent = "Pick distinct tickers.";
+      errEl.classList.remove("hidden");
+      return;
+    }
+    if (tickers.length > 3) {
+      // Defensive — the UI only exposes 3 inputs, but guard anyway.
+      errEl.textContent = "Compare up to 3 tickers at a time.";
       errEl.classList.remove("hidden");
       return;
     }
@@ -4928,63 +4976,43 @@ function setupCompareModal() {
     loading.classList.remove("hidden");
     runBtn.disabled = true;
     try {
-      const r = await fetch(`/api/compare?tickers=${encodeURIComponent(ta)},${encodeURIComponent(tb)}`);
+      const r = await fetch(`/api/compare?tickers=${tickers.map(encodeURIComponent).join(",")}`);
       const j = await r.json();
       if (!r.ok || j.error) {
         errEl.textContent = j.error || `Compare failed (HTTP ${r.status}).`;
         errEl.classList.remove("hidden");
         return;
       }
-      const dA = j.analyses[ta] || {};
-      const dB = j.analyses[tb] || {};
-      if (dA.error || dB.error) {
-        errEl.textContent = `Couldn't analyze ${dA.error ? ta : tb}. Try a different symbol.`;
+      const datas = tickers.map(t => j.analyses[t] || { ticker: t, error: "missing" });
+      const failed = datas.find(d => d.error);
+      if (failed) {
+        errEl.textContent = `Couldn't analyze ${failed.ticker}. Try a different symbol.`;
         errEl.classList.remove("hidden");
         return;
       }
-      const head = `
-        <thead>
-          <tr>
-            <th></th>
-            <th>
-              <div class="cmp-ticker-cell">${escHtml(dA.ticker)}
-                <span class="cmp-ticker-cell__sub">${escHtml(dA.name || "")}</span>
-              </div>
-            </th>
-            <th>
-              <div class="cmp-ticker-cell">${escHtml(dB.ticker)}
-                <span class="cmp-ticker-cell__sub">${escHtml(dB.name || "")}</span>
-              </div>
-            </th>
-          </tr>
-        </thead>`;
+      const headerCells = datas.map(d => `
+        <th>
+          <div class="cmp-ticker-cell">${escHtml(d.ticker)}
+            <span class="cmp-ticker-cell__sub">${escHtml(d.name || "")}</span>
+          </div>
+        </th>`).join("");
+      const head = `<thead><tr><th></th>${headerCells}</tr></thead>`;
+
       const rows = COMPARE_FIELDS.map(([key, label, fmtFn, hint]) => {
-        const vA = dA[key], vB = dB[key];
-        // Pick a winner cell for higher-better numeric fields.
-        let winA = false, winB = false;
+        const values = datas.map(d => d[key]);
+        let winners = new Set();
         if (hint === "higher_better:true" || hint === "higher_better:false") {
-          const na = Number.isFinite(vA) ? vA : null;
-          const nb = Number.isFinite(vB) ? vB : null;
-          if (na != null && nb != null && na !== nb) {
-            const aIsBetter = hint === "higher_better:true" ? na > nb : na < nb;
-            winA = aIsBetter; winB = !aIsBetter;
-          }
+          winners = _bestIndices(values, hint);
         } else if (hint === "higher_better:true_quality") {
-          const na = vA && Number.isFinite(vA.score) ? vA.score : null;
-          const nb = vB && Number.isFinite(vB.score) ? vB.score : null;
-          if (na != null && nb != null && na !== nb) {
-            winA = na > nb; winB = !winA;
-          }
+          winners = _bestIndicesQuality(values);
         }
-        return `
-          <tr>
-            <td>${escHtml(label)}</td>
-            <td class="${winA ? "cmp-winner" : ""}">${fmtFn(vA)}</td>
-            <td class="${winB ? "cmp-winner" : ""}">${fmtFn(vB)}</td>
-          </tr>
-        `;
+        const cells = values.map((v, i) =>
+          `<td class="${winners.has(i) ? "cmp-winner" : ""}">${fmtFn(v)}</td>`
+        ).join("");
+        return `<tr><td>${escHtml(label)}</td>${cells}</tr>`;
       }).join("");
-      results.innerHTML = `<table class="cmp-table">${head}<tbody>${rows}</tbody></table>`;
+
+      results.innerHTML = `<table class="cmp-table cmp-table--cols-${datas.length}">${head}<tbody>${rows}</tbody></table>`;
       results.classList.remove("hidden");
     } catch (e) {
       errEl.textContent = "Network error — try again.";
