@@ -5706,10 +5706,54 @@ function renderDiscoverSectorChips() {
   row.innerHTML = `<span class="disc-filter-label">Sector:</span>${chips.join("")}`;
 }
 
+// Render the Top Picks card row above the heatmap.  Picks A/B-grade names
+// from the full discovery set sorted by MOS desc, capped at 5.  Hidden
+// when there's nothing meaningful to show (< 3 candidates).
+function renderTopPicks() {
+  const root = $("discTopPicks");
+  const row  = $("discTopPicksRow");
+  if (!root || !row) return;
+  const picks = (_DISC_DATA || [])
+    .filter(it => !it.extreme && typeof it.mos === "number" && it.mos > 0)
+    .filter(it => {
+      const g = mosToGrade(it.mos);
+      return g === "A" || g === "B";
+    })
+    .sort((a, b) => b.mos - a.mos)
+    .slice(0, 5);
+  if (picks.length < 3) { root.classList.add("hidden"); return; }
+  root.classList.remove("hidden");
+  row.innerHTML = picks.map(it => {
+    const g = mosToGrade(it.mos);
+    const sign = it.mos >= 0 ? "+" : "";
+    const pct  = `${sign}${fmt(it.mos, 1)}%`;
+    return `
+      <button class="disc-toppick" type="button" data-toppick="${escHtml(it.ticker)}"
+              title="VALUS grade ${g} · ${pct}">
+        <span class="valus-grade" data-grade="${g}">
+          <span class="valus-grade__letter">${g}</span>
+          <span class="valus-grade__label">${pct}</span>
+        </span>
+        <span class="disc-toppick__ticker">${escHtml(it.ticker)}</span>
+        <span class="disc-toppick__name">${escHtml(it.name || "")}</span>
+      </button>`;
+  }).join("");
+  // Wire click → analyze that ticker.
+  row.querySelectorAll("[data-toppick]").forEach(btn => {
+    btn.onclick = () => {
+      const t = btn.getAttribute("data-toppick");
+      closeDiscoverPage();
+      $("tickerInput").value = t;
+      $("analyzeBtn")?.click();
+    };
+  });
+}
+
 function renderDiscover(failed = false) {
   const grid = $("discGrid");
   if (!grid) return;
   renderDiscoverSectorChips();
+  renderTopPicks();
   if (_DISC_DATA.length === 0) {
     grid.innerHTML = `
       <div class="disc-empty" style="grid-column:1/-1;text-align:center;padding:48px 16px;color:var(--text-muted,#888);">
@@ -5750,8 +5794,17 @@ function renderDiscover(failed = false) {
     const w = conf === "high" ? 1.0 : conf === "moderate" ? 0.55 : 0.25;
     return it.mos * w;
   }
-  if (_DISC_SORT === "mos") {
+  if (_DISC_SORT === "mos" || _DISC_SORT === "undervalued") {
+    // Highest positive MOS first (most undervalued).
     items.sort((a, b) => sortMos(b) - sortMos(a));
+  } else if (_DISC_SORT === "overvalued") {
+    // Lowest (most negative) MOS first.  Push extreme-flag outliers to
+    // the bottom rather than the top so they don't dominate the head.
+    items.sort((a, b) => {
+      const va = (a.extreme || a.mos == null) ?  Infinity : a.mos;
+      const vb = (b.extreme || b.mos == null) ?  Infinity : b.mos;
+      return va - vb;
+    });
   } else if (_DISC_SORT === "opportunity") {
     items.sort((a, b) => sortOpportunity(b) - sortOpportunity(a));
   } else if (_DISC_SORT === "ticker") {
