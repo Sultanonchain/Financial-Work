@@ -5505,3 +5505,115 @@ button:disabled { cursor: not-allowed; }
   .container { padding-left: 12px; padding-right: 12px; }
   .card      { padding: var(--space-4); }
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+   Grade explainer (the "How are grades calculated?" affordance)
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* The link/button on the detail page that opens the explainer modal.
+   Sits below the large grade badge alongside the one-line explanation. */
+.grade-explain-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px dashed rgba(255,255,255,0.18);
+  border-radius: var(--radius-pill);
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.grade-explain-link:hover {
+  color: var(--accent);
+  border-color: var(--accent-strong);
+}
+
+/* Every .valus-grade chip is now a clickable affordance (cursor:pointer
+   + subtle hover lift).  Click handler is bound globally in
+   setupGradeExplainer() via event delegation so newly-rendered chips
+   pick it up automatically. */
+.valus-grade {
+  cursor: pointer;
+  user-select: none;
+}
+.valus-grade:hover {
+  filter: brightness(1.10);
+}
+/* Non-clickable variant (e.g. inside a wider clickable row) — opt out
+   to avoid double cursors / nested click handlers. */
+.valus-grade.is-static {
+  cursor: default;
+}
+.valus-grade.is-static:hover {
+  filter: none;
+}
+
+/* The modal body's list of bands. */
+.grade-explainer__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.grade-explainer__item {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  align-items: start;
+  gap: 14px;
+  padding: 12px 14px;
+  background: var(--bg-elevated-2);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: var(--radius);
+}
+.grade-explainer__badge {
+  /* A focused grade-letter chip — uses the same color tokens as
+     .valus-grade but visually scaled up for legibility in the modal. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+.grade-explainer__badge[data-grade="A"] { background: rgba(34,197,94,0.18); color:#22c55e; border-color: rgba(34,197,94,0.50); }
+.grade-explainer__badge[data-grade="B"] { background: rgba(94,234,212,0.16);color:#5eead4; border-color: rgba(94,234,212,0.44); }
+.grade-explainer__badge[data-grade="C"] { background: rgba(148,163,184,0.18);color:#94a3b8; border-color: rgba(148,163,184,0.40); }
+.grade-explainer__badge[data-grade="D"] { background: rgba(251,191,36,0.16);color:#fbbf24; border-color: rgba(251,191,36,0.46); }
+.grade-explainer__badge[data-grade="F"] { background: rgba(248,113,113,0.18);color:#f87171; border-color: rgba(248,113,113,0.50); }
+.grade-explainer__text { min-width: 0; }
+.grade-explainer__label {
+  display: flex; align-items: baseline; gap: 8px;
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink-primary);
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+.grade-explainer__range {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: rgba(255,255,255,0.06);
+}
+.grade-explainer__desc {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-secondary);
+  margin: 0;
+}
