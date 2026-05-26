@@ -8545,6 +8545,147 @@ def portfolios_set_default():
     return jsonify({"ok": True, "default_pid": pid})
 
 
+# ── Watchlist storage ────────────────────────────────────────────────────
+# Conceptually separate from portfolios: a watchlist is what you're WATCHING
+# (no holding semantics, no allocation), a portfolio is what you OWN.  We
+# keep them in distinct KV records so the two surfaces stay independent —
+# users can have a 50-ticker watchlist and a 5-name portfolio without those
+# 50 tickers cluttering their allocation chart or their movers feed.
+#
+# One watchlist per user (no naming / no multi-watchlist).  Free for
+# everyone — no plan gating.
+WATCHLIST_FILE      = "/tmp/.valus_watchlists.json"
+WATCHLIST_KEY_FMT   = "valus:watchlist:{sub}"
+WATCHLIST_MAX_ITEMS = 200
+_WATCHLISTS_MEM     = {}
+
+
+def _read_user_watchlist(user_sub):
+    """Returns {'items': [...], 'updated_at': float|None}.
+    Raises KVUnavailable on KV read failure."""
+    key = WATCHLIST_KEY_FMT.format(sub=user_sub)
+    if _kv:
+        try:
+            raw = _kv.get(key)
+        except Exception as e:
+            raise KVUnavailable(f"kv_get({key}) failed: {e}")
+        if raw:
+            try:
+                data = _json.loads(raw)
+                items = data.get("items") or []
+                if not isinstance(items, list):
+                    items = []
+                return {"items": items, "updated_at": data.get("updated_at")}
+            except Exception:
+                return {"items": [], "updated_at": None}
+        return {"items": [], "updated_at": None}
+    # Local-dev mirror — same shape, persisted to /tmp.
+    if not _WATCHLISTS_MEM and os.path.exists(WATCHLIST_FILE):
+        try:
+            with open(WATCHLIST_FILE) as f:
+                _WATCHLISTS_MEM.update(_json.load(f) or {})
+        except Exception:
+            pass
+    rec = _WATCHLISTS_MEM.get(user_sub) or {}
+    return {"items": rec.get("items") or [], "updated_at": rec.get("updated_at")}
+
+
+def _write_user_watchlist(user_sub, items):
+    """Persist items for one user.  Raises KVUnavailable on KV write failure."""
+    ts = time.time()
+    record = {"items": items, "updated_at": ts}
+    if _kv:
+        key = WATCHLIST_KEY_FMT.format(sub=user_sub)
+        try:
+            _kv.set(key, _json.dumps(record))
+        except Exception as e:
+            raise KVUnavailable(f"kv_set({key}) failed: {e}")
+        return
+    _WATCHLISTS_MEM[user_sub] = record
+    try:
+        with open(WATCHLIST_FILE, "w") as f:
+            _json.dump(_WATCHLISTS_MEM, f, default=str)
+    except Exception:
+        pass
+
+
+def _clean_watchlist_items(raw):
+    """Trim + dedupe + cap the user-submitted list.  Returns the cleaned list."""
+    cleaned, seen = [], set()
+    if not isinstance(raw, list):
+        return cleaned
+    for it in raw[:WATCHLIST_MAX_ITEMS]:
+        if not isinstance(it, dict):
+            continue
+        t = str(it.get("ticker") or "").strip().upper()[:12]
+        if not t or t in seen:
+            continue
+        seen.add(t)
+        cleaned.append({
+            "ticker":  t,
+            "name":    str(it.get("name")   or "")[:120],
+            "sector":  str(it.get("sector") or "")[:60],
+            "addedAt": it.get("addedAt") if isinstance(it.get("addedAt"), (int, float)) else None,
+        })
+    return cleaned
+
+
+@app.route("/api/watchlist", methods=["GET"])
+def watchlist_get():
+    """Return the signed-in user's watchlist."""
+    user, err = require_user()
+    if err: return err
+    try:
+        data = _read_user_watchlist(user["sub"])
+    except KVUnavailable as e:
+        return jsonify({"error": "watchlist store unavailable", "detail": str(e)}), 503
+    return jsonify({
+        "items":      data["items"],
+        "updated_at": data["updated_at"],
+        "count":      len(data["items"]),
+        "max":        WATCHLIST_MAX_ITEMS,
+    })
+
+
+@app.route("/api/watchlist", methods=["POST"])
+def watchlist_save():
+    """Replace the watchlist.  Body: {items: [{ticker,name,sector,addedAt}, ...]}.
+    Server dedupes by ticker, caps at WATCHLIST_MAX_ITEMS, trims strings to
+    safe sizes — same hygiene applied to the portfolio save endpoint."""
+    user, err = require_user()
+    if err: return err
+    body = request.get_json(silent=True) or {}
+    raw = body.get("items")
+    if not isinstance(raw, list):
+        return jsonify({"error": "items must be a list"}), 400
+    cleaned = _clean_watchlist_items(raw)
+    try:
+        _write_user_watchlist(user["sub"], cleaned)
+    except KVUnavailable as e:
+        return jsonify({"error": "watchlist store unavailable", "detail": str(e)}), 503
+    return jsonify({"ok": True, "count": len(cleaned)})
+
+
+@app.route("/api/watchlist", methods=["DELETE"])
+def watchlist_remove():
+    """Single-ticker remove shortcut.  ?ticker=AAPL."""
+    user, err = require_user()
+    if err: return err
+    ticker = (request.args.get("ticker") or "").strip().upper()
+    if not ticker:
+        return jsonify({"error": "ticker query param required"}), 400
+    try:
+        data = _read_user_watchlist(user["sub"])
+        before = data["items"] or []
+        after  = [it for it in before if (it.get("ticker") or "").upper() != ticker]
+        if len(after) == len(before):
+            return jsonify({"error": "not_found"}), 404
+        _write_user_watchlist(user["sub"], after)
+    except KVUnavailable as e:
+        return jsonify({"error": "watchlist store unavailable", "detail": str(e)}), 503
+    return jsonify({"ok": True, "count": len(after)})
+
+
 # ── Portfolio Templates: Strategies (client-side) + Investor 13F ──────────
 # A curated registry of well-known investment managers. CIKs are SEC-assigned
 # and stable. Pulling 13F-HR filings live from EDGAR keeps holdings fresh

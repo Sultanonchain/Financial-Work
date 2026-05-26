@@ -5257,3 +5257,31 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
   }
   .pf-nav__menu { right: -40px; min-width: 220px; max-width: calc(100vw - 24px); }
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+   Watchlist (Phase 2)
+   ════════════════════════════════════════════════════════════════════════
+   The watchlist page reuses the portfolio page's .card / .pf-item chrome
+   so the two surfaces feel like siblings.  Only difference: one extra
+   column in each row (Fair Value, alongside current Price) and a header
+   row that labels the columns. */
+
+.watchlist-list .pf-item {
+  /* ticker · name · price · fair value · mos · remove */
+  grid-template-columns: auto 1fr auto auto auto auto;
+}
+
+@media (max-width: 640px) {
+  .watchlist-list .pf-item {
+    /* Stack price/fair-value/mos under the name on narrow screens so
+       nothing overflows. */
+    grid-template-columns: auto 1fr auto;
+    row-gap: 6px;
+  }
+  .watchlist-list .pf-item__name {
+    grid-column: 2 / -1;
+  }
+  .watchlist-list .pf-item > .pf-item__price:nth-of-type(2) {
+    grid-column: 2 / 3;
+  }
+}

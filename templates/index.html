@@ -44,6 +44,14 @@
         <span class="header-btn__icon">⌖</span>
         <span class="header-btn__label">Discover</span>
       </button>
+      <!-- Watchlist — what you're WATCHING (no holdings).  Separate from
+           portfolios; free for everyone.  Signed-out users keep using it
+           via localStorage; sign-in pulls/merges. -->
+      <button class="header-btn" id="watchlistBtn" type="button" aria-label="Open watchlist">
+        <span class="header-btn__icon">👁</span>
+        <span class="header-btn__label">Watchlist</span>
+        <span class="header-btn__count" id="watchlistCount" hidden>0</span>
+      </button>
       <!-- Unified portfolio nav: ONE button.  When signed in, clicking
            opens a dropdown of all portfolios (active checked) plus New /
            Rename / Delete actions; picking a portfolio switches to it AND
@@ -184,6 +192,33 @@
         <button class="copy-btn" id="pfStartBtn" type="button" style="margin-top: 16px;">Start adding stocks</button>
       </div>
       <div class="portfolio-list" id="portfolioList"></div>
+    </div>
+  </div>
+</main>
+
+<!-- ── WATCHLIST PAGE ─────────────────────────────────────────────────── -->
+<!-- Mirrors the portfolio page chrome (header + card list) but stripped
+     to a single read-only list — no allocation chart, no sort modes,
+     no templates / share / leaderboard. -->
+<main class="portfolio-page hidden" id="watchlistPage">
+  <div class="container">
+    <div class="pf-page__head">
+      <button class="copy-btn" id="wlBackBtn" type="button">← Back to research</button>
+      <div class="pf-page__title">
+        <h1>Watchlist</h1>
+        <p>Stocks you're tracking — price vs VALUS fair value at a glance.
+           <span id="watchlistCountInline">0</span> tracked.</p>
+      </div>
+      <div class="pf-page__actions"></div>
+    </div>
+
+    <div class="card">
+      <div class="portfolio-empty" id="watchlistEmpty">
+        <div class="portfolio-empty__icon">👁</div>
+        <div class="portfolio-empty__title">No stocks in your watchlist yet</div>
+        <div class="portfolio-empty__sub">Search any ticker and tap "Add to Watchlist" to start tracking it.</div>
+      </div>
+      <div class="portfolio-list watchlist-list" id="watchlistList"></div>
     </div>
   </div>
 </main>
@@ -942,6 +977,9 @@
         <div class="hero-verdict__actions">
           <button class="copy-btn" id="addPortfolioBtn" type="button" aria-label="Add to portfolio">
             <span id="addPortfolioTxt">★ Add to Portfolio</span>
+          </button>
+          <button class="copy-btn" id="addWatchlistBtn" type="button" aria-label="Add to watchlist">
+            <span id="addWatchlistTxt">👁 Add to Watchlist</span>
           </button>
           <button class="copy-btn" id="copyBtn" type="button">
             <span id="copyBtnTxt">Copy summary</span>

@@ -332,6 +332,7 @@ function renderResults(d) {
   renderNewsSummaryCard(d);
   renderDrawerContent(d);
   syncAddPortfolioButtonForCurrent();
+  syncAddWatchlistButtonForCurrent();
   if (typeof window._cdReset === "function") window._cdReset();
 
   attachCardGlow();
@@ -3258,6 +3259,223 @@ function setupPfSwitcher() {
   pfUpdateSwitcher();
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// Watchlist (Phase 2) — separate from portfolios.
+//
+// Conceptually: portfolios are what you OWN, watchlists are what you're
+// WATCHING.  We keep them as separate localStorage keys + separate KV
+// records so the two surfaces never interfere (the watchlist's 50 tickers
+// don't pollute the portfolio allocation chart or movers feed).
+//
+// One watchlist per user.  Free for everyone — no plan gating.
+// Storage shape on disk and in localStorage: array of
+//   {ticker, name, sector, price, iv, mos, tier, addedAt}
+// — same snapshot shape the portfolio uses, so the add button on the
+// analysis page can fill the same fields.
+// ════════════════════════════════════════════════════════════════════════
+const WL_KEY = "valus.watchlist.v1";
+let _WL_SYNC_TIMER = null;
+
+function wlRead() {
+  try { return JSON.parse(localStorage.getItem(WL_KEY) || "[]"); }
+  catch { return []; }
+}
+function wlWrite(items) {
+  localStorage.setItem(WL_KEY, JSON.stringify(items));
+  wlUpdateBadge();
+  wlSyncToServer();
+}
+function wlHas(ticker)  { return wlRead().some(it => it.ticker === ticker); }
+function wlAdd(snap) {
+  const items = wlRead();
+  if (items.some(it => it.ticker === snap.ticker)) return;
+  items.push({ ...snap, addedAt: Date.now() });
+  wlWrite(items);
+}
+function wlRemove(ticker) { wlWrite(wlRead().filter(it => it.ticker !== ticker)); }
+
+function wlUpdateBadge() {
+  const n = wlRead().length;
+  const el = $("watchlistCount");
+  if (!el) return;
+  if (n > 0) { el.textContent = n; el.hidden = false; }
+  else       { el.hidden = true; }
+}
+
+function wlSyncToServer() {
+  if (!_ME) return;
+  clearTimeout(_WL_SYNC_TIMER);
+  _WL_SYNC_TIMER = setTimeout(async () => {
+    try {
+      await fetch("/api/watchlist", {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: wlRead() }),
+      });
+    } catch (e) { /* offline / transient — local copy stays authoritative */ }
+  }, 600);
+}
+
+async function wlPullFromServer() {
+  if (!_ME) return;
+  try {
+    const r = await fetch("/api/watchlist", { credentials: "same-origin" });
+    if (!r.ok) return;
+    const data = await r.json();
+    const remote = data.items || [];
+    const local  = wlRead();
+    const byTicker = new Map();
+    // Local wins on conflict (its snapshot is fresher — was computed at add time
+    // on this device).  Remote-only entries get unioned in.
+    for (const it of local)  byTicker.set(it.ticker, it);
+    for (const it of remote) if (!byTicker.has(it.ticker)) byTicker.set(it.ticker, it);
+    const merged = Array.from(byTicker.values());
+    localStorage.setItem(WL_KEY, JSON.stringify(merged));
+    wlUpdateBadge();
+    if (merged.length !== remote.length || merged.length !== local.length) {
+      wlSyncToServer();
+    }
+  } catch (e) { /* network blip — keep local */ }
+}
+
+// ── Add-to-watchlist button (lives next to the ⭐ on the analysis page) ──
+function setupAddWatchlistButton() {
+  const btn = $("addWatchlistBtn");
+  const txt = $("addWatchlistTxt");
+  if (!btn) return;
+  btn.onclick = async () => {
+    if (!_LAST_DATA) return;
+    const t = _LAST_DATA.ticker;
+    if (wlHas(t)) {
+      wlRemove(t);
+      btn.classList.remove("starred");
+      txt.textContent = "👁 Add to Watchlist";
+      return;
+    }
+    if (!(await requireAuthWithRedirectIntent("watchlist"))) return;
+    wlAdd({
+      ticker: t,
+      name:   _LAST_DATA.company_name || t,
+      sector: _LAST_DATA.sector || "",
+      price:  _LAST_DATA.current_price,
+      iv:     _LAST_DATA.intrinsic_value,
+      mos:    _LAST_DATA.margin_of_safety,
+      tier:   _LAST_DATA.priced_for?.label || "",
+    });
+    btn.classList.add("starred");
+    txt.textContent = "👁 In Watchlist";
+  };
+}
+
+function syncAddWatchlistButtonForCurrent() {
+  const btn = $("addWatchlistBtn");
+  const txt = $("addWatchlistTxt");
+  if (!btn || !_LAST_DATA) return;
+  if (wlHas(_LAST_DATA.ticker)) {
+    btn.classList.add("starred");
+    txt.textContent = "👁 In Watchlist";
+  } else {
+    btn.classList.remove("starred");
+    txt.textContent = "👁 Add to Watchlist";
+  }
+}
+
+// ── Watchlist page ────────────────────────────────────────────────────
+// Mirrors the portfolio page layout but stripped to a single read-only
+// list — no allocation chart, no sort modes (just "added desc"), no
+// templates.  Same .card / .pf-item visual chrome so the two pages feel
+// like siblings without duplicating CSS.
+async function openWatchlistPage() {
+  if (!_ME) {
+    const ok = await requireAuthWithRedirectIntent("watchlist");
+    if (!ok) return;
+  }
+  hideAllViews?.();
+  $("results")?.classList.add("hidden");
+  $("btcHero")?.classList.add("hidden");
+  $("etfHero")?.classList.add("hidden");
+  $("discoverPage")?.classList.add("hidden");
+  $("portfolioPage")?.classList.add("hidden");
+  document.querySelector(".hero")?.classList.add("hidden");
+  $("loading")?.classList.add("hidden");
+  $("error")?.classList.add("hidden");
+  $("watchlistPage")?.classList.remove("hidden");
+  renderWatchlistPage();
+  setViewHash("watchlist");
+  window.scrollTo({ top: 0, behavior: "instant" });
+}
+
+function closeWatchlistPage() {
+  $("watchlistPage")?.classList.add("hidden");
+  document.querySelector(".hero")?.classList.remove("hidden");
+  if (_LAST_DATA && isBTCTicker(_LAST_DATA.ticker)) {
+    $("btcHero")?.classList.remove("hidden");
+  } else if (_LAST_DATA) {
+    $("results")?.classList.remove("hidden");
+  }
+  setViewHash("");
+}
+
+function renderWatchlistPage() {
+  const items = wlRead().slice().sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+  const list  = $("watchlistList");
+  const empty = $("watchlistEmpty");
+  if (!list) return;
+  if (!items.length) {
+    list.innerHTML = "";
+    if (empty) empty.classList.remove("hidden");
+    return;
+  }
+  if (empty) empty.classList.add("hidden");
+  list.innerHTML = items.map(it => {
+    const mos      = (typeof it.mos === "number") ? it.mos : null;
+    const mosCls   = mos == null ? "neutral" : (mos >= 0 ? "positive" : "negative");
+    const mosTxt   = mos == null ? "—" : `${mos >= 0 ? "+" : ""}${fmt(mos, 1)}%`;
+    const priceTxt = (typeof it.price === "number") ? fmtPrice(it.price) : "—";
+    const ivTxt    = (typeof it.iv    === "number") ? fmtPrice(it.iv)    : "—";
+    return `
+      <div class="pf-item" data-wl-row="${escHtml(it.ticker)}">
+        <button class="pf-item__ticker" data-wl-open="${escHtml(it.ticker)}" type="button">
+          ${escHtml(it.ticker)}
+        </button>
+        <span class="pf-item__name">${escHtml(it.name || "")}</span>
+        <span class="pf-item__price">${priceTxt}</span>
+        <span class="pf-item__price">${ivTxt}</span>
+        <span class="pf-item__mos ${mosCls}">${mosTxt}</span>
+        <button class="pf-item__remove" data-wl-remove="${escHtml(it.ticker)}"
+                type="button" aria-label="Remove ${escHtml(it.ticker)}">×</button>
+      </div>`;
+  }).join("");
+
+  // Click handlers: ticker → analyze; × → remove.
+  list.querySelectorAll("[data-wl-open]").forEach(b => {
+    b.onclick = () => {
+      const t = b.getAttribute("data-wl-open");
+      closeWatchlistPage();
+      $("tickerInput").value = t;
+      $("analyzeBtn")?.click();
+    };
+  });
+  list.querySelectorAll("[data-wl-remove]").forEach(b => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const t = b.getAttribute("data-wl-remove");
+      wlRemove(t);
+      renderWatchlistPage();
+    };
+  });
+  // Update count in the page header summary.
+  const cEl = $("watchlistCountInline");
+  if (cEl) cEl.textContent = items.length;
+}
+
+function setupWatchlistPage() {
+  const navBtn = $("watchlistBtn");
+  if (navBtn) navBtn.onclick = openWatchlistPage;
+  const back = $("wlBackBtn");
+  if (back) back.onclick = closeWatchlistPage;
+}
+
 function setupAddPortfolioButton() {
   const btn = $("addPortfolioBtn");
   const txt = $("addPortfolioTxt");
@@ -4207,7 +4425,7 @@ async function refreshMe() {
   }
   // When signed in, sync the saved portfolio so it follows the user
   // across devices/browsers.
-  if (_ME) pfPullFromServer();
+  if (_ME) { pfPullFromServer(); wlPullFromServer(); }
   // Refresh the home-page chip rows now that we know the user's tier.
   loadRecentTickers();
   loadWatchlistMovers();
@@ -4851,10 +5069,15 @@ function setupAuthControl() {
     try { localStorage.removeItem(PF_KEY_V2); } catch {}
     try { localStorage.removeItem(PF_KEY_V1); } catch {}
     try { localStorage.removeItem(PF_ACTIVE_KEY); } catch {}
+    try { localStorage.removeItem(WL_KEY); } catch {}
     pfUpdateBadge();
+    wlUpdateBadge();
     pfUpdateSwitcher();        // hides the dropdown again
     if (typeof renderPortfolioPage === "function") {
       try { renderPortfolioPage(); } catch {}
+    }
+    if (typeof renderWatchlistPage === "function") {
+      try { renderWatchlistPage(); } catch {}
     }
     updateAuthControl();
   };
@@ -5954,6 +6177,7 @@ async function bootFromURL() {
   // bouncing back to the search hero.
   if (view === "discover")        { openDiscoverPage();    return; }
   if (view === "portfolio")       { openPortfolioPage();   return; }
+  if (view === "watchlist")       { openWatchlistPage();   return; }
   if (view === "leaderboard")     { openLeaderboardPage(); return; }
 
   // No active view, no ticker — pre-warm the Discover cache in the
@@ -5985,7 +6209,9 @@ document.addEventListener("DOMContentLoaded", () => {
   setupAdvancedToggle();
   setupCopyButton();
   setupAddPortfolioButton();
+  setupAddWatchlistButton();
   setupPortfolioPage();
+  setupWatchlistPage();
   setupTemplatesTabs();
   setupTierGlossary();
   setupModalDismiss();
@@ -6003,6 +6229,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadRecentTickers();
   loadWatchlistMovers();
   pfUpdateBadge();
+  wlUpdateBadge();
   pfUpdateSwitcher();
   // Fetch identity in parallel with bootFromURL — non-blocking
   refreshMe();
@@ -6017,9 +6244,11 @@ document.addEventListener("DOMContentLoaded", () => {
     // Hash-only navigation — close everything and re-route to the view.
     closeDiscoverPage();
     closePortfolioPage();
+    closeWatchlistPage();
     closeLeaderboardPage();
     if (view === "discover")    openDiscoverPage();
     else if (view === "portfolio")  openPortfolioPage();
+    else if (view === "watchlist")  openWatchlistPage();
     else if (view === "leaderboard") openLeaderboardPage();
   });
 });
