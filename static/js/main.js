@@ -2720,27 +2720,156 @@ function setupCopyButton() {
    Portfolio (localStorage-backed watchlist)
    ════════════════════════════════════════════════════════════════════════ */
 
-const PF_KEY = "valus.portfolio.v1";
+// ── Multi-portfolio state (localStorage v2) ──────────────────────────
+// v1 was a single array of items at "valus.portfolio.v1".  v2 wraps that
+// into a collection of named portfolios so the user can keep "Long Term",
+// "Speculative", etc. side-by-side:
+//
+//   {
+//     schema: 2,
+//     active_pid: "<12-hex>",
+//     portfolios: {
+//       "<12-hex>": { name, items, created_at, updated_at }
+//     }
+//   }
+//
+// On first read, any v1 data is migrated into a default "My Portfolio"
+// entry so users with cached state lose nothing.  pfRead/pfWrite/pfHas/
+// pfAdd/pfRemove all operate on the CURRENTLY ACTIVE portfolio — so the
+// existing call sites (the ⭐ button, the portfolio page) keep working
+// unchanged; switching active just changes what they read.
 
-function pfRead() {
-  try { return JSON.parse(localStorage.getItem(PF_KEY) || "[]"); }
-  catch { return []; }
+const PF_KEY_V1     = "valus.portfolio.v1";    // legacy: bare array
+const PF_KEY_V2     = "valus.portfolios.v2";   // current: full state dict
+const PF_ACTIVE_KEY = "valus.active_pid";      // mirror, for fast active-id reads
+
+let _PF_CAP     = 3;       // refreshed from /api/portfolios on sign-in
+let _PF_IS_PLUS = false;
+let _PF_SYNC_TIMER = null;
+
+function _pfNewLocalId() {
+  // 12 hex chars — matches the server format so server-assigned ids can
+  // be swapped in transparently on sign-in.
+  const hex = "0123456789abcdef";
+  let s = "";
+  for (let i = 0; i < 12; i++) s += hex[Math.floor(Math.random() * 16)];
+  return s;
 }
-function pfWrite(items) {
-  localStorage.setItem(PF_KEY, JSON.stringify(items));
+
+function _pfNewEmptyState() {
+  const pid = _pfNewLocalId();
+  const ts  = Date.now() / 1000;
+  return {
+    schema: 2,
+    active_pid: pid,
+    portfolios: {
+      [pid]: { name: "My Portfolio", items: [], created_at: ts, updated_at: ts },
+    },
+  };
+}
+
+function _pfMigrateV1IfNeeded() {
+  // No-op if v2 already exists.
+  try { if (localStorage.getItem(PF_KEY_V2)) return; } catch { return; }
+  let items = [];
+  try {
+    const raw = localStorage.getItem(PF_KEY_V1);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) items = parsed;
+    }
+  } catch {}
+  const pid = _pfNewLocalId();
+  const ts  = Date.now() / 1000;
+  const state = {
+    schema: 2,
+    active_pid: pid,
+    portfolios: {
+      [pid]: { name: "My Portfolio", items, created_at: ts, updated_at: ts },
+    },
+  };
+  try {
+    localStorage.setItem(PF_KEY_V2, JSON.stringify(state));
+    localStorage.setItem(PF_ACTIVE_KEY, pid);
+  } catch {}
+}
+
+function pfState() {
+  _pfMigrateV1IfNeeded();
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(PF_KEY_V2) || "null"); } catch {}
+  if (!s || typeof s !== "object" || !s.portfolios || !Object.keys(s.portfolios).length) {
+    s = _pfNewEmptyState();
+    try { localStorage.setItem(PF_KEY_V2, JSON.stringify(s)); } catch {}
+  }
+  // Self-heal: if active_pid points at a deleted portfolio, fall back.
+  if (!(s.active_pid in s.portfolios)) {
+    s.active_pid = Object.keys(s.portfolios)[0];
+  }
+  return s;
+}
+
+function pfWriteState(state) {
+  try { localStorage.setItem(PF_KEY_V2, JSON.stringify(state)); } catch {}
+  try { localStorage.setItem(PF_ACTIVE_KEY, state.active_pid); } catch {}
   pfUpdateBadge();
-  // If the user is signed in, mirror to the server so the portfolio
-  // follows them across devices. Debounced to coalesce burst writes.
+  pfUpdateSwitcher();
+}
+
+function pfActive() {
+  const s = pfState();
+  const p = s.portfolios[s.active_pid] || {};
+  return { pid: s.active_pid, name: p.name || "My Portfolio",
+           items: p.items || [], updated_at: p.updated_at };
+}
+
+// ── Per-portfolio API (operates on the ACTIVE portfolio) ────────────
+function pfRead() {
+  return pfActive().items;
+}
+
+function pfWrite(items) {
+  const s = pfState();
+  const pid = s.active_pid;
+  if (!s.portfolios[pid]) return;
+  s.portfolios[pid].items      = items;
+  s.portfolios[pid].updated_at = Date.now() / 1000;
+  pfWriteState(s);
+  // Mirror to the server (debounced) when signed in.
   pfSyncToServer();
 }
 
-let _PF_SYNC_TIMER = null;
+function pfHas(ticker) {
+  return pfRead().some(it => it.ticker === ticker);
+}
+
+function pfAdd(snap) {
+  const items = pfRead();
+  if (items.some(it => it.ticker === snap.ticker)) return;
+  items.push({ ...snap, addedAt: Date.now() });
+  pfWrite(items);
+}
+
+function pfRemove(ticker) {
+  pfWrite(pfRead().filter(it => it.ticker !== ticker));
+}
+
+function pfUpdateBadge() {
+  const n = pfRead().length;
+  const el = $("portfolioCount");
+  if (!el) return;
+  if (n > 0) { el.textContent = n; el.hidden = false; }
+  else       { el.hidden = true; }
+}
+
+// ── Server sync ─────────────────────────────────────────────────────
 function pfSyncToServer() {
-  if (!_ME) return;  // signed-out → localStorage-only, no server copy
+  if (!_ME) return;                              // anon → localStorage-only
   clearTimeout(_PF_SYNC_TIMER);
+  const pid = pfState().active_pid;
   _PF_SYNC_TIMER = setTimeout(async () => {
     try {
-      await fetch("/api/portfolio", {
+      await fetch(`/api/portfolio?pid=${encodeURIComponent(pid)}`, {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
@@ -2750,50 +2879,347 @@ function pfSyncToServer() {
   }, 600);
 }
 
-// On sign-in, pull the server copy and union with whatever the user has
-// added locally on this device. Server-stored entries persist across
-// devices; any tickers added while signed-out on this device get pushed up.
+// On sign-in, pull the full server collection and reconcile with local
+// state.  Any local-only items in the user's current active portfolio get
+// unioned into the server's default (one-time, for users who built a
+// portfolio while signed-out).  Server is canonical after this.
 async function pfPullFromServer() {
   if (!_ME) return;
   try {
-    const r = await fetch("/api/portfolio", { credentials: "same-origin" });
+    const r = await fetch("/api/portfolios", { credentials: "same-origin" });
     if (!r.ok) return;
-    const data = await r.json();
-    const remote = data.items || [];
-    const local  = pfRead();
-    const byTicker = new Map();
-    // Local first so its more-recent snapshot wins on conflict (price/iv
-    // were freshly computed when the user added it on this device).
-    for (const it of local)  byTicker.set(it.ticker, it);
-    for (const it of remote) if (!byTicker.has(it.ticker)) byTicker.set(it.ticker, it);
-    const merged = Array.from(byTicker.values());
-    localStorage.setItem(PF_KEY, JSON.stringify(merged));
-    pfUpdateBadge();
-    // If we added anything from remote, or local-only entries weren't on
-    // the server yet, push the union back so both sides agree.
-    if (merged.length !== remote.length || merged.length !== local.length) {
-      pfSyncToServer();
+    const meta = await r.json();
+    _PF_CAP     = (meta.cap === null || typeof meta.cap === "number") ? meta.cap : 3;
+    _PF_IS_PLUS = !!meta.is_plus;
+
+    // Fetch items for each server portfolio in parallel.
+    const serverPortfolios = {};
+    const results = await Promise.all(
+      (meta.portfolios || []).map(async p => {
+        const ri = await fetch(`/api/portfolio?pid=${encodeURIComponent(p.id)}`,
+                               { credentials: "same-origin" });
+        const data = ri.ok ? await ri.json() : { items: [] };
+        return [p.id, {
+          name: p.name,
+          items: data.items || [],
+          created_at: p.created_at,
+          updated_at: p.updated_at,
+        }];
+      })
+    );
+    for (const [pid, p] of results) serverPortfolios[pid] = p;
+
+    // One-time merge: if the user had items locally before signing in,
+    // union them into the server's default portfolio.
+    const localState  = pfState();
+    const localActive = localState.portfolios[localState.active_pid];
+    const defaultPid  = meta.default_pid;
+    if (localActive && Array.isArray(localActive.items) && localActive.items.length
+        && defaultPid in serverPortfolios) {
+      const serverDefault = serverPortfolios[defaultPid];
+      const byTicker = new Map();
+      for (const it of localActive.items)   byTicker.set(it.ticker, it);  // local wins on conflict
+      for (const it of serverDefault.items) if (!byTicker.has(it.ticker)) byTicker.set(it.ticker, it);
+      const merged = Array.from(byTicker.values());
+      if (merged.length !== serverDefault.items.length) {
+        try {
+          await fetch(`/api/portfolio?pid=${encodeURIComponent(defaultPid)}`, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ items: merged }),
+          });
+          serverDefault.items = merged;
+        } catch (e) { /* network blip — leave server as-is */ }
+      }
     }
-  } catch (e) { /* network blip — keep local copy */ }
+
+    // Replace local state with server state — server is canonical now.
+    pfWriteState({ schema: 2, active_pid: defaultPid, portfolios: serverPortfolios });
+
+    // Discard the legacy v1 key — its contents are either on the server
+    // or have just been merged in.
+    try { localStorage.removeItem(PF_KEY_V1); } catch {}
+  } catch (e) { /* network blip — local copy still serves */ }
 }
-function pfHas(ticker) {
-  return pfRead().some(it => it.ticker === ticker);
+
+// ── Multi-portfolio operations (signed-in only) ──────────────────────
+// These hit the server first, then mirror the result locally so the
+// switcher reflects the authoritative state.  Errors surface to the
+// caller as an Error so the modal/prompt can display them.
+
+async function pfCreatePortfolio(name) {
+  if (!_ME) throw new Error("Sign in to create more portfolios.");
+  const r = await fetch("/api/portfolios", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const err = new Error(data.message || data.error || "Could not create portfolio.");
+    err.status = r.status;
+    err.body   = data;
+    throw err;
+  }
+  // Mirror locally and switch to the new one.
+  const s = pfState();
+  s.portfolios[data.id] = {
+    name: data.name, items: [],
+    created_at: data.created_at, updated_at: data.updated_at,
+  };
+  s.active_pid = data.id;
+  pfWriteState(s);
+  // Server's default doesn't change automatically on create — we leave
+  // default as-is and let active follow the user's just-made choice.
+  return data;
 }
-function pfAdd(snap) {
-  const items = pfRead();
-  if (items.some(it => it.ticker === snap.ticker)) return;
-  items.push({ ...snap, addedAt: Date.now() });
-  pfWrite(items);
+
+async function pfRenamePortfolio(pid, name) {
+  if (!_ME) throw new Error("Sign in to rename portfolios.");
+  const r = await fetch(`/api/portfolios/${encodeURIComponent(pid)}`, {
+    method: "PATCH",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const err = new Error(data.message || data.error || "Could not rename portfolio.");
+    err.status = r.status;
+    throw err;
+  }
+  const s = pfState();
+  if (s.portfolios[pid]) {
+    s.portfolios[pid].name       = data.name;
+    s.portfolios[pid].updated_at = data.updated_at;
+    pfWriteState(s);
+  }
+  return data;
 }
-function pfRemove(ticker) {
-  pfWrite(pfRead().filter(it => it.ticker !== ticker));
+
+async function pfDeletePortfolio(pid) {
+  if (!_ME) throw new Error("Sign in to delete portfolios.");
+  const r = await fetch(`/api/portfolios/${encodeURIComponent(pid)}`, {
+    method: "DELETE",
+    credentials: "same-origin",
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const err = new Error(data.message || data.error || "Could not delete portfolio.");
+    err.status = r.status;
+    throw err;
+  }
+  const s = pfState();
+  if (s.portfolios[pid]) delete s.portfolios[pid];
+  // If we just deleted the active one, follow the server's new default.
+  if (s.active_pid === pid) {
+    s.active_pid = (data.default_pid && data.default_pid in s.portfolios)
+      ? data.default_pid
+      : Object.keys(s.portfolios)[0];
+  }
+  pfWriteState(s);
+  return data;
 }
-function pfUpdateBadge() {
-  const n = pfRead().length;
-  const el = $("portfolioCount");
-  if (!el) return;
-  if (n > 0) { el.textContent = n; el.hidden = false; }
-  else       { el.hidden = true; }
+
+async function pfSetActive(pid) {
+  const s = pfState();
+  if (!(pid in s.portfolios)) return;
+  s.active_pid = pid;
+  pfWriteState(s);
+  // Tell the server which portfolio is now the default for this user so
+  // other endpoints (movers, etc.) follow.  Fire-and-forget — local
+  // active is the source of truth for the UI.
+  if (_ME) {
+    try {
+      await fetch("/api/portfolios/default", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pid }),
+      });
+    } catch (e) { /* tolerated — next pfPullFromServer reconciles */ }
+  }
+}
+
+// ── Switcher UI ──────────────────────────────────────────────────────
+// The dropdown is rendered only when signed in.  Anonymous users keep
+// the legacy one-portfolio UX (no nav noise for a feature they can't
+// meaningfully use without sync).
+
+function pfUpdateSwitcher() {
+  const root = $("pfSwitcher");
+  if (!root) return;
+  if (!_ME) { root.classList.add("hidden"); return; }
+  root.classList.remove("hidden");
+
+  const s = pfState();
+  const active = s.portfolios[s.active_pid] || {};
+  const nameEl = $("pfSwitcherName");
+  if (nameEl) nameEl.textContent = active.name || "My Portfolio";
+
+  // List items: sorted by created_at asc to match the server's ordering.
+  const ordered = Object.entries(s.portfolios).sort(
+    (a, b) => (a[1].created_at || 0) - (b[1].created_at || 0) || a[0].localeCompare(b[0])
+  );
+  const list = $("pfSwitcherList");
+  if (list) {
+    list.innerHTML = ordered.map(([pid, p]) => {
+      const isActive = pid === s.active_pid;
+      return `
+        <li>
+          <button class="pf-switcher__item" type="button" role="menuitem"
+                  aria-current="${isActive}" data-pf-pick="${pid}">
+            <span class="pf-switcher__check" aria-hidden="true">${isActive ? "✓" : ""}</span>
+            <span class="pf-switcher__item-name">${escHtml(p.name || "(unnamed)")}</span>
+            <span class="pf-switcher__item-count">${(p.items || []).length}</span>
+          </button>
+        </li>`;
+    }).join("");
+  }
+
+  // Action availability — delete is blocked when only one remains; cap
+  // hint surfaces when at limit so the user understands why "New" is off.
+  const total = ordered.length;
+  const atCap = (typeof _PF_CAP === "number") && total >= _PF_CAP;
+  const newBtn    = $("pfSwitcherNew");
+  const renameBtn = $("pfSwitcherRename");
+  const deleteBtn = $("pfSwitcherDelete");
+  const capHint   = $("pfSwitcherCapHint");
+  if (newBtn)    newBtn.disabled    = atCap;
+  if (renameBtn) renameBtn.disabled = !active.name;
+  if (deleteBtn) deleteBtn.disabled = total <= 1;
+  if (capHint) {
+    if (atCap) {
+      capHint.textContent = "At cap";
+      capHint.hidden = false;
+      newBtn.title = `Free plan is limited to ${_PF_CAP} portfolios. VALUS+ unlocks unlimited.`;
+    } else {
+      capHint.hidden = true;
+      newBtn.title = "";
+    }
+  }
+}
+
+function _pfMenuOpen() {
+  const menu = $("pfSwitcherMenu");
+  const btn  = $("pfSwitcherBtn");
+  if (!menu || !btn) return;
+  menu.classList.remove("hidden");
+  btn.setAttribute("aria-expanded", "true");
+}
+function _pfMenuClose() {
+  const menu = $("pfSwitcherMenu");
+  const btn  = $("pfSwitcherBtn");
+  if (!menu || !btn) return;
+  menu.classList.add("hidden");
+  btn.setAttribute("aria-expanded", "false");
+}
+function _pfMenuToggle() {
+  const menu = $("pfSwitcherMenu");
+  if (!menu) return;
+  if (menu.classList.contains("hidden")) _pfMenuOpen(); else _pfMenuClose();
+}
+
+async function _pfPromptCreate() {
+  _pfMenuClose();
+  if ((typeof _PF_CAP === "number") && Object.keys(pfState().portfolios).length >= _PF_CAP) {
+    alert(`Free plan is limited to ${_PF_CAP} portfolios.\n\nVALUS+ unlocks unlimited portfolios for $2/month.`);
+    return;
+  }
+  const raw = window.prompt("Name your new portfolio (e.g. Speculative, Dividend Picks):", "");
+  if (raw === null) return;
+  const name = raw.trim();
+  if (!name) return;
+  try {
+    await pfCreatePortfolio(name);
+    // Repaint the portfolio page if it's currently open so the title
+    // updates and the list shows the (empty) new portfolio.
+    if (!$("portfolioPage")?.classList.contains("hidden")) renderPortfolioPage();
+  } catch (e) {
+    if (e.status === 402) {
+      alert(`Free plan is limited to ${e.body?.cap || _PF_CAP} portfolios.\n\nVALUS+ unlocks unlimited portfolios for $2/month.`);
+    } else {
+      alert(e.message || "Could not create portfolio.");
+    }
+  }
+}
+
+async function _pfPromptRename() {
+  _pfMenuClose();
+  const active = pfActive();
+  if (!active.pid) return;
+  const raw = window.prompt("Rename portfolio:", active.name || "");
+  if (raw === null) return;
+  const name = raw.trim();
+  if (!name || name === active.name) return;
+  try {
+    await pfRenamePortfolio(active.pid, name);
+    if (!$("portfolioPage")?.classList.contains("hidden")) renderPortfolioPage();
+  } catch (e) {
+    alert(e.message || "Could not rename portfolio.");
+  }
+}
+
+async function _pfPromptDelete() {
+  _pfMenuClose();
+  const active = pfActive();
+  if (!active.pid) return;
+  if (Object.keys(pfState().portfolios).length <= 1) {
+    alert("You must keep at least one portfolio.");
+    return;
+  }
+  const n = (active.items || []).length;
+  const tail = n ? `\n\nThis portfolio has ${n} holding${n === 1 ? "" : "s"} — they will be permanently removed.` : "";
+  if (!window.confirm(`Delete "${active.name}"?${tail}`)) return;
+  try {
+    await pfDeletePortfolio(active.pid);
+    if (!$("portfolioPage")?.classList.contains("hidden")) renderPortfolioPage();
+  } catch (e) {
+    alert(e.message || "Could not delete portfolio.");
+  }
+}
+
+function setupPfSwitcher() {
+  const btn = $("pfSwitcherBtn");
+  if (!btn) return;
+  btn.addEventListener("click", (e) => { e.stopPropagation(); _pfMenuToggle(); });
+
+  // Picking a portfolio in the list.
+  const list = $("pfSwitcherList");
+  if (list) {
+    list.addEventListener("click", async (e) => {
+      const btn = e.target.closest("[data-pf-pick]");
+      if (!btn) return;
+      const pid = btn.getAttribute("data-pf-pick");
+      _pfMenuClose();
+      if (pid === pfState().active_pid) return;
+      await pfSetActive(pid);
+      // Refresh views that depend on the active portfolio.
+      if (!$("portfolioPage")?.classList.contains("hidden")) renderPortfolioPage();
+      pfUpdateBadge();
+      syncAddPortfolioButtonForCurrent?.();
+      loadWatchlistMovers?.();
+    });
+  }
+
+  $("pfSwitcherNew")?.addEventListener("click", _pfPromptCreate);
+  $("pfSwitcherRename")?.addEventListener("click", _pfPromptRename);
+  $("pfSwitcherDelete")?.addEventListener("click", _pfPromptDelete);
+
+  // Outside-click + Escape close the menu.
+  document.addEventListener("click", (e) => {
+    const root = $("pfSwitcher");
+    if (!root) return;
+    if (root.contains(e.target)) return;
+    _pfMenuClose();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") _pfMenuClose();
+  });
+
+  pfUpdateSwitcher();
 }
 
 function setupAddPortfolioButton() {
@@ -2862,7 +3288,7 @@ async function openPortfolioPage() {
   // showing a shared view from a /?p=... deep link)
   _IS_SHARED_VIEW = false;
   $("pfSharedBanner")?.classList.add("hidden");
-  $("pfPageTitle").textContent = "My Portfolio";
+  $("pfPageTitle").textContent = pfActive().name || "My Portfolio";
   $("pfPageTagline").textContent = "Real-time DCF tracking across your watchlist.";
   $("pfRefreshBtn").style.display = "";
   $("pfShareBtn").style.display = "";
@@ -2891,6 +3317,13 @@ const SECTOR_PALETTE = [
 function getSectorColor(idx) { return SECTOR_PALETTE[idx % SECTOR_PALETTE.length]; }
 
 function renderPortfolioPage() {
+  // Reflect the currently-active portfolio's name in the page title (the
+  // user might have switched via the header dropdown while the page is
+  // open).  Shared-portfolio views set their own title and are skipped.
+  if (!_IS_SHARED_VIEW) {
+    const titleEl = $("pfPageTitle");
+    if (titleEl) titleEl.textContent = pfActive().name || "My Portfolio";
+  }
   const itemsRaw = pfRead();
   const list  = $("portfolioList");
   const empty = $("portfolioEmpty");
@@ -3716,6 +4149,10 @@ async function refreshMe() {
     _PLUS_RENEWS_AT = null;
   }
   updateAuthControl();
+  // Show/hide the portfolio switcher to match the current auth state.
+  // (pfPullFromServer below will also refresh it once the server data
+  // arrives — this call covers the visibility flip ahead of that.)
+  pfUpdateSwitcher();
   // First-time sign-in: claim any legacy soft-token entries
   if (_ME && !sessionStorage.getItem("valus.claimed")) {
     const legacy = getValusUser();
@@ -4370,11 +4807,15 @@ function setupAuthControl() {
     } catch {}
     sessionStorage.removeItem("valus.claimed");
     _ME = null;
-    // Clear the local portfolio view — it's tied to the signed-in
-    // identity. The server copy is preserved (keyed to the user's sub)
-    // and will be pulled back on next sign-in.
-    localStorage.removeItem(PF_KEY);
+    // Clear the local portfolio mirror — it's tied to the signed-in
+    // identity.  The server copy is preserved (keyed to the user's sub)
+    // and will be pulled back on next sign-in.  We clear both the v2
+    // multi-portfolio state and the long-retired v1 single-array key.
+    try { localStorage.removeItem(PF_KEY_V2); } catch {}
+    try { localStorage.removeItem(PF_KEY_V1); } catch {}
+    try { localStorage.removeItem(PF_ACTIVE_KEY); } catch {}
     pfUpdateBadge();
+    pfUpdateSwitcher();        // hides the dropdown again
     if (typeof renderPortfolioPage === "function") {
       try { renderPortfolioPage(); } catch {}
     }
@@ -5520,10 +5961,12 @@ document.addEventListener("DOMContentLoaded", () => {
   setupAuthControl();
   setupSettings();
   setupCompareModal();
+  setupPfSwitcher();
   loadTrending();
   loadRecentTickers();
   loadWatchlistMovers();
   pfUpdateBadge();
+  pfUpdateSwitcher();
   // Fetch identity in parallel with bootFromURL — non-blocking
   refreshMe();
   handleStripeRedirect();

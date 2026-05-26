@@ -7602,8 +7602,9 @@ def api_watchlist_movers():
     """
     user, err = require_user()
     if err: return err
+    pid = (request.args.get("pid") or "").strip() or None
     try:
-        data = _read_user_portfolio(user["sub"])
+        data = _read_user_portfolio(user["sub"], pid=pid)
     except KVUnavailable as e:
         return jsonify({"error": "portfolio store unavailable", "detail": str(e)}), 503
     items = data.get("items") or []
@@ -8024,21 +8025,45 @@ def leaderboard_delete():
     return jsonify({"ok": True})
 
 
-# ── Portfolio storage ────────────────────────────────────────────────────
-# When KV is configured, KV is the AUTHORITATIVE source of truth — one key
-# per user (`valus:portfolio:{user_sub}`) holding {items, updated_at}.
-# Per-user keys eliminate the read-modify-write clobber the legacy shared
-# dict had on transient KV failures, and they're safe under concurrent
-# writes from different users.  KV read/write failures surface as 503 to
-# the client so we never silently fall back to ephemeral storage and
+# ── Portfolio storage (schema v3 — multi-named portfolios) ──────────────
+# KV remains the authoritative source of truth when configured.  One key
+# per user (`valus:portfolio:{user_sub}`) holds the user's full collection
+# in a single document:
+#
+#   {
+#     "schema": 3,
+#     "default_pid": "<12-hex-id>",
+#     "portfolios": {
+#       "<12-hex-id>": {
+#         "name": "My Portfolio",
+#         "items": [{ticker, name, sector, price, iv, mos, tier, addedAt}, ...],
+#         "created_at": <float>, "updated_at": <float>,
+#       },
+#       ...
+#     }
+#   }
+#
+# A single document keeps create/rename/delete atomic — no orphaned
+# portfolios on a partial write.  Migration from v2 ({items, updated_at})
+# and the very-old v1 shared dict happens on first read and is persisted
+# back so subsequent reads are pure v3.  KV read/write failures still
+# surface as 503 — we never silently fall back to ephemeral storage and
 # overwrite durable data with an empty snapshot.
 #
-# When KV is NOT configured (local dev only), we fall back to a process
-# dict + /tmp file — ephemeral on serverless, never reached in production.
-PORTFOLIO_FILE       = "/tmp/.valus_portfolios.json"
-PORTFOLIO_KEY_FMT    = "valus:portfolio:{sub}"        # v2 — per-user
-PORTFOLIO_LEGACY_KEY = "valus:portfolios:v1"          # v1 — shared dict, migration source
-_PORTFOLIOS_MEM = {}
+# When KV is NOT configured (local dev), we mirror the same record shape
+# in _PORTFOLIOS_MEM + /tmp file so the code paths stay identical.
+import uuid as _pf_uuid
+
+PORTFOLIO_FILE          = "/tmp/.valus_portfolios.json"
+PORTFOLIO_KEY_FMT       = "valus:portfolio:{sub}"        # one document per user
+PORTFOLIO_LEGACY_KEY    = "valus:portfolios:v1"          # very-old shared dict, migration source
+_PORTFOLIOS_MEM         = {}
+
+PORTFOLIO_SCHEMA        = 3
+MAX_PORTFOLIOS_FREE     = 3                              # VALUS+ = unlimited
+MAX_PORTFOLIO_NAME_LEN  = 40
+DEFAULT_PORTFOLIO_NAME  = "My Portfolio"
+_PF_ID_RE               = re.compile(r"^[a-f0-9]{12}$")
 
 
 class KVUnavailable(Exception):
@@ -8047,9 +8072,88 @@ class KVUnavailable(Exception):
     fallback."""
 
 
-def _read_user_portfolio(user_sub):
-    """Returns {'items': [...], 'updated_at': float|None}.
-    Raises KVUnavailable if KV is configured but a read errored."""
+def _pf_new_id():
+    return _pf_uuid.uuid4().hex[:12]
+
+
+def _pf_now():
+    return time.time()
+
+
+def _normalize_pf_name(raw):
+    """Strip, collapse internal whitespace, cap length.  Returns
+    (cleaned_name, error_or_None)."""
+    if not isinstance(raw, str):
+        return "", "name must be a string"
+    name = " ".join(raw.split())
+    if not name:
+        return "", "name is required"
+    if len(name) > MAX_PORTFOLIO_NAME_LEN:
+        return "", f"name must be ≤ {MAX_PORTFOLIO_NAME_LEN} chars"
+    return name, None
+
+
+def _pf_default_record(default_name=DEFAULT_PORTFOLIO_NAME, items=None, updated_at=None):
+    """Build a fresh v3 record with one portfolio.  Used for first-ever
+    reads and for wrapping legacy single-portfolio data on migration."""
+    pid = _pf_new_id()
+    ts  = updated_at if isinstance(updated_at, (int, float)) else _pf_now()
+    return {
+        "schema": PORTFOLIO_SCHEMA,
+        "default_pid": pid,
+        "portfolios": {
+            pid: {
+                "name":       default_name,
+                "items":      list(items or []),
+                "created_at": ts,
+                "updated_at": ts,
+            }
+        },
+    }
+
+
+def _migrate_v2_to_v3(legacy):
+    """v2 shape was {items: [...], updated_at: float}.  Wrap into one
+    default portfolio so the user's holdings carry forward intact."""
+    if not isinstance(legacy, dict):
+        return _pf_default_record()
+    items = legacy.get("items") or []
+    if not isinstance(items, list):
+        items = []
+    return _pf_default_record(items=items, updated_at=legacy.get("updated_at"))
+
+
+def _record_is_v3(data):
+    return (
+        isinstance(data, dict)
+        and data.get("schema") == PORTFOLIO_SCHEMA
+        and isinstance(data.get("portfolios"), dict)
+    )
+
+
+def _repair_record(record):
+    """Make sure default_pid points at a real portfolio and at least one
+    portfolio exists.  Returns True iff the record was mutated."""
+    portfolios = record.setdefault("portfolios", {})
+    mutated = False
+    if not portfolios:
+        seed = _pf_default_record()
+        record["default_pid"] = seed["default_pid"]
+        record["portfolios"]  = seed["portfolios"]
+        mutated = True
+    elif record.get("default_pid") not in portfolios:
+        # Pick the oldest (most-stable) portfolio as default.
+        ordered = sorted(portfolios.items(),
+                         key=lambda kv: (kv[1].get("created_at") or 0, kv[0]))
+        record["default_pid"] = ordered[0][0]
+        mutated = True
+    return mutated
+
+
+def _read_portfolio_record(user_sub):
+    """Return the full v3 record for this user, migrating legacy data
+    inline and persisting it back so subsequent reads are pure v3.
+    Raises KVUnavailable on KV read failure."""
     key = PORTFOLIO_KEY_FMT.format(sub=user_sub)
     if _kv:
         try:
@@ -8059,11 +8163,24 @@ def _read_user_portfolio(user_sub):
         if raw:
             try:
                 data = _json.loads(raw)
-                return {"items": data.get("items", []),
-                        "updated_at": data.get("updated_at")}
             except Exception:
-                return {"items": [], "updated_at": None}
-        # Per-user key miss — one-time migration from the legacy shared dict.
+                data = None
+            if _record_is_v3(data):
+                if _repair_record(data):
+                    try:
+                        _kv.set(key, _json.dumps(data))
+                    except Exception as e:
+                        raise KVUnavailable(f"kv_set({key}) repair failed: {e}")
+                return data
+            if isinstance(data, dict):
+                # v2 single-portfolio shape → migrate + persist.
+                record = _migrate_v2_to_v3(data)
+                try:
+                    _kv.set(key, _json.dumps(record))
+                except Exception as e:
+                    raise KVUnavailable(f"kv_set({key}) v2 migration failed: {e}")
+                return record
+        # Per-user key miss — try the very-old v1 shared dict.
         try:
             legacy_raw = _kv.get(PORTFOLIO_LEGACY_KEY)
         except Exception as e:
@@ -8071,73 +8188,152 @@ def _read_user_portfolio(user_sub):
         if legacy_raw:
             try:
                 legacy = _json.loads(legacy_raw)
-                items = legacy.get(user_sub, [])
-                ts    = legacy.get(f"{user_sub}__ts")
+                items  = legacy.get(user_sub, [])
+                ts     = legacy.get(f"{user_sub}__ts")
                 if items:
+                    record = _pf_default_record(items=items, updated_at=ts)
                     try:
-                        _kv.set(key, _json.dumps({"items": items, "updated_at": ts}))
+                        _kv.set(key, _json.dumps(record))
                     except Exception as e:
-                        raise KVUnavailable(f"kv_set({key}) during migration failed: {e}")
-                return {"items": items or [], "updated_at": ts}
+                        raise KVUnavailable(f"kv_set({key}) v1 migration failed: {e}")
+                    return record
             except KVUnavailable:
                 raise
             except Exception:
                 pass
-        return {"items": [], "updated_at": None}
-    # Local-dev path
-    store = _PORTFOLIOS_MEM
-    if not store and os.path.exists(PORTFOLIO_FILE):
+        # First-ever read for this user — seed an empty default so the rest
+        # of the code never has to handle a missing record.
+        record = _pf_default_record()
+        try:
+            _kv.set(key, _json.dumps(record))
+        except Exception as e:
+            raise KVUnavailable(f"kv_set({key}) seed failed: {e}")
+        return record
+    # Local-dev path (no KV) — same shape, mirrored to /tmp.
+    if not _PORTFOLIOS_MEM and os.path.exists(PORTFOLIO_FILE):
         try:
             with open(PORTFOLIO_FILE) as f:
-                store = _json.load(f)
+                _PORTFOLIOS_MEM.update(_json.load(f) or {})
         except Exception:
-            store = {}
-    return {"items": store.get(user_sub, []),
-            "updated_at": store.get(f"{user_sub}__ts")}
+            pass
+    raw = _PORTFOLIOS_MEM.get(user_sub)
+    if _record_is_v3(raw):
+        if _repair_record(raw):
+            _persist_local_mem()
+        return raw
+    # Legacy in-memory shape: either a list of items (v0/v1) or a v2 dict.
+    if isinstance(raw, dict):
+        record = _migrate_v2_to_v3(raw)
+    elif isinstance(raw, list):
+        ts = _PORTFOLIOS_MEM.get(f"{user_sub}__ts")
+        record = _pf_default_record(items=raw, updated_at=ts)
+    else:
+        record = _pf_default_record()
+    _PORTFOLIOS_MEM[user_sub] = record
+    _persist_local_mem()
+    return record
 
 
-def _write_user_portfolio(user_sub, items):
-    """Persists items for one user.  Raises KVUnavailable on KV write
-    failure when KV is configured."""
-    ts = time.time()
-    if _kv:
-        key = PORTFOLIO_KEY_FMT.format(sub=user_sub)
-        try:
-            _kv.set(key, _json.dumps({"items": items, "updated_at": ts}))
-        except Exception as e:
-            raise KVUnavailable(f"kv_set({key}) failed: {e}")
-        return
-    # Local-dev path
-    _PORTFOLIOS_MEM[user_sub] = items
-    _PORTFOLIOS_MEM[f"{user_sub}__ts"] = ts
+def _persist_local_mem():
+    """Best-effort dump of the local-dev mirror.  Failures are tolerated
+    (the in-memory copy is still authoritative for this process)."""
     try:
         with open(PORTFOLIO_FILE, "w") as f:
-            _json.dump(_PORTFOLIOS_MEM, f)
+            _json.dump(_PORTFOLIOS_MEM, f, default=str)
     except Exception:
         pass
 
 
+def _write_portfolio_record(user_sub, record):
+    """Persist the full v3 record.  Raises KVUnavailable on KV write
+    failure when KV is configured."""
+    record["schema"] = PORTFOLIO_SCHEMA
+    if _kv:
+        key = PORTFOLIO_KEY_FMT.format(sub=user_sub)
+        try:
+            _kv.set(key, _json.dumps(record))
+        except Exception as e:
+            raise KVUnavailable(f"kv_set({key}) failed: {e}")
+        return
+    _PORTFOLIOS_MEM[user_sub] = record
+    _persist_local_mem()
+
+
+def _resolve_pid(record, pid):
+    """Return a valid pid: the requested one if it exists in the record,
+    else default_pid, else any pid (defensive).  May return None only if
+    the record has zero portfolios — _repair_record prevents that."""
+    portfolios = record.get("portfolios") or {}
+    if pid and pid in portfolios:
+        return pid
+    default = record.get("default_pid")
+    if default in portfolios:
+        return default
+    keys = list(portfolios.keys())
+    return keys[0] if keys else None
+
+
+def _portfolio_cap_for(user):
+    """Max portfolios this user may own, or None for unlimited (VALUS+)."""
+    return None if is_valus_plus(user) else MAX_PORTFOLIOS_FREE
+
+
+# ── Back-compat shims (existing callers stay unchanged) ─────────────────
+# Old callers passed no pid and got the user's single portfolio.  With v3
+# the same call resolves to the user's default portfolio, so movers /
+# leaderboard / etc. keep working without surgery at every site.
+def _read_user_portfolio(user_sub, pid=None):
+    """{items, updated_at} for the resolved portfolio (default when pid is None)."""
+    record = _read_portfolio_record(user_sub)
+    target = _resolve_pid(record, pid)
+    p = (record.get("portfolios") or {}).get(target) or {}
+    return {"items": p.get("items") or [], "updated_at": p.get("updated_at")}
+
+
+def _write_user_portfolio(user_sub, items, pid=None):
+    """Write items into the resolved portfolio (default when pid is None)."""
+    record = _read_portfolio_record(user_sub)
+    target = _resolve_pid(record, pid)
+    portfolios = record.setdefault("portfolios", {})
+    p = portfolios.get(target) or {
+        "name":       DEFAULT_PORTFOLIO_NAME,
+        "items":      [],
+        "created_at": _pf_now(),
+    }
+    p["items"]      = items
+    p["updated_at"] = _pf_now()
+    portfolios[target] = p
+    _write_portfolio_record(user_sub, record)
+
+
 @app.route("/api/portfolio", methods=["GET"])
 def portfolio_get():
-    """Return the signed-in user's saved portfolio (list of ticker snapshots)."""
+    """Return one portfolio's items for the signed-in user.  ?pid=<id>
+    selects a specific portfolio; omitted means the user's default."""
     user, err = require_user()
     if err: return err
+    pid = (request.args.get("pid") or "").strip() or None
     try:
-        data = _read_user_portfolio(user["sub"])
+        data = _read_user_portfolio(user["sub"], pid=pid)
     except KVUnavailable as e:
         return jsonify({"error": "portfolio store unavailable", "detail": str(e)}), 503
-    return jsonify({"items": data["items"], "updated_at": data["updated_at"]})
+    return jsonify({
+        "items":      data["items"],
+        "updated_at": data["updated_at"],
+        "pid":        pid,
+    })
 
 
 @app.route("/api/portfolio", methods=["POST"])
 def portfolio_save():
-    """
-    Persist the user's portfolio server-side. Body: {items: [...]}.
+    """Persist items into one portfolio. Body: {items: [...]}.  ?pid=<id>
+    selects a specific portfolio; omitted writes to the user's default.
+
     Each item is a thin snapshot {ticker, name, sector, price, iv, mos, tier, addedAt}.
-    Server caps the list at 100 entries and trims fields to safe sizes.
-    """
+    Server caps the list at 100 entries and trims fields to safe sizes."""
     user, err = require_user()
     if err: return err
+    pid = (request.args.get("pid") or "").strip() or None
     body = request.get_json(silent=True) or {}
     raw = body.get("items") or []
     if not isinstance(raw, list):
@@ -8162,10 +8358,191 @@ def portfolio_save():
         })
 
     try:
-        _write_user_portfolio(user["sub"], cleaned)
+        _write_user_portfolio(user["sub"], cleaned, pid=pid)
     except KVUnavailable as e:
         return jsonify({"error": "portfolio store unavailable", "detail": str(e)}), 503
     return jsonify({"ok": True, "count": len(cleaned)})
+
+
+# ── Multi-portfolio CRUD ────────────────────────────────────────────────
+# These manage the *collection* of portfolios.  The existing /api/portfolio
+# endpoints above manage the *items* within one of them.
+
+@app.route("/api/portfolios", methods=["GET"])
+def portfolios_list():
+    """List every portfolio the signed-in user owns + the current default
+    and their plan's cap.  Cap is null when unlimited (VALUS+)."""
+    user, err = require_user()
+    if err: return err
+    try:
+        record = _read_portfolio_record(user["sub"])
+    except KVUnavailable as e:
+        return jsonify({"error": "portfolio store unavailable", "detail": str(e)}), 503
+    portfolios = record.get("portfolios") or {}
+    out = []
+    for pid, p in portfolios.items():
+        out.append({
+            "id":         pid,
+            "name":       p.get("name") or "(unnamed)",
+            "count":      len(p.get("items") or []),
+            "created_at": p.get("created_at"),
+            "updated_at": p.get("updated_at"),
+        })
+    # Stable order: oldest first, then id for tie-break.
+    out.sort(key=lambda x: (x.get("created_at") or 0, x.get("id") or ""))
+    return jsonify({
+        "portfolios":  out,
+        "default_pid": record.get("default_pid"),
+        "cap":         _portfolio_cap_for(user),
+        "is_plus":     is_valus_plus(user),
+    })
+
+
+@app.route("/api/portfolios", methods=["POST"])
+def portfolios_create():
+    """Create a new empty portfolio.  Free plan capped at
+    MAX_PORTFOLIOS_FREE; VALUS+ is unlimited."""
+    user, err = require_user()
+    if err: return err
+    body = request.get_json(silent=True) or {}
+    name, name_err = _normalize_pf_name(body.get("name") or "")
+    if name_err:
+        return jsonify({"error": name_err}), 400
+    try:
+        record = _read_portfolio_record(user["sub"])
+    except KVUnavailable as e:
+        return jsonify({"error": "portfolio store unavailable", "detail": str(e)}), 503
+    portfolios = record.setdefault("portfolios", {})
+    cap = _portfolio_cap_for(user)
+    if cap is not None and len(portfolios) >= cap:
+        return jsonify({
+            "error":       "portfolio_cap_exceeded",
+            "cap":         cap,
+            "is_plus":     is_valus_plus(user),
+            "upgrade_url": "/billing",
+            "message":     f"Free plan is limited to {cap} portfolios. "
+                           f"VALUS+ unlocks unlimited portfolios for $2/month.",
+        }), 402
+    # Reject duplicate names (case-insensitive) so the dropdown stays readable.
+    existing_names = {(p.get("name") or "").lower() for p in portfolios.values()}
+    if name.lower() in existing_names:
+        return jsonify({
+            "error":   "duplicate_name",
+            "message": "You already have a portfolio with that name.",
+        }), 409
+    pid = _pf_new_id()
+    while pid in portfolios:           # vanishingly rare; be deterministic about it
+        pid = _pf_new_id()
+    ts = _pf_now()
+    portfolios[pid] = {
+        "name":       name,
+        "items":      [],
+        "created_at": ts,
+        "updated_at": ts,
+    }
+    try:
+        _write_portfolio_record(user["sub"], record)
+    except KVUnavailable as e:
+        return jsonify({"error": "portfolio store unavailable", "detail": str(e)}), 503
+    return jsonify({
+        "id":         pid,
+        "name":       name,
+        "count":      0,
+        "created_at": ts,
+        "updated_at": ts,
+    }), 201
+
+
+@app.route("/api/portfolios/<pid>", methods=["PATCH"])
+def portfolios_rename(pid):
+    """Rename one portfolio.  Body: {name}."""
+    user, err = require_user()
+    if err: return err
+    if not _PF_ID_RE.match(pid or ""):
+        return jsonify({"error": "invalid portfolio id"}), 400
+    body = request.get_json(silent=True) or {}
+    new_name, name_err = _normalize_pf_name(body.get("name") or "")
+    if name_err:
+        return jsonify({"error": name_err}), 400
+    try:
+        record = _read_portfolio_record(user["sub"])
+    except KVUnavailable as e:
+        return jsonify({"error": "portfolio store unavailable", "detail": str(e)}), 503
+    portfolios = record.get("portfolios") or {}
+    if pid not in portfolios:
+        return jsonify({"error": "not_found"}), 404
+    for opid, p in portfolios.items():
+        if opid != pid and (p.get("name") or "").lower() == new_name.lower():
+            return jsonify({"error": "duplicate_name"}), 409
+    portfolios[pid]["name"]       = new_name
+    portfolios[pid]["updated_at"] = _pf_now()
+    try:
+        _write_portfolio_record(user["sub"], record)
+    except KVUnavailable as e:
+        return jsonify({"error": "portfolio store unavailable", "detail": str(e)}), 503
+    return jsonify({
+        "id":         pid,
+        "name":       new_name,
+        "updated_at": portfolios[pid]["updated_at"],
+    })
+
+
+@app.route("/api/portfolios/<pid>", methods=["DELETE"])
+def portfolios_delete(pid):
+    """Delete one portfolio.  Blocked when only one remains (the user
+    must always have at least one).  Reassigns the default if needed."""
+    user, err = require_user()
+    if err: return err
+    if not _PF_ID_RE.match(pid or ""):
+        return jsonify({"error": "invalid portfolio id"}), 400
+    try:
+        record = _read_portfolio_record(user["sub"])
+    except KVUnavailable as e:
+        return jsonify({"error": "portfolio store unavailable", "detail": str(e)}), 503
+    portfolios = record.get("portfolios") or {}
+    if pid not in portfolios:
+        return jsonify({"error": "not_found"}), 404
+    if len(portfolios) <= 1:
+        return jsonify({
+            "error":   "cannot_delete_last",
+            "message": "You must keep at least one portfolio.",
+        }), 409
+    del portfolios[pid]
+    if record.get("default_pid") == pid:
+        ordered = sorted(portfolios.items(),
+                         key=lambda kv: (kv[1].get("created_at") or 0, kv[0]))
+        record["default_pid"] = ordered[0][0]
+    try:
+        _write_portfolio_record(user["sub"], record)
+    except KVUnavailable as e:
+        return jsonify({"error": "portfolio store unavailable", "detail": str(e)}), 503
+    return jsonify({"ok": True, "default_pid": record["default_pid"]})
+
+
+@app.route("/api/portfolios/default", methods=["POST"])
+def portfolios_set_default():
+    """Change which portfolio is the user's default.  Body: {pid}.  The
+    client calls this when the user picks a different portfolio in the
+    dropdown so movers / other portfolio-aware endpoints pick it up."""
+    user, err = require_user()
+    if err: return err
+    body = request.get_json(silent=True) or {}
+    pid  = (body.get("pid") or "").strip()
+    if not _PF_ID_RE.match(pid):
+        return jsonify({"error": "invalid portfolio id"}), 400
+    try:
+        record = _read_portfolio_record(user["sub"])
+    except KVUnavailable as e:
+        return jsonify({"error": "portfolio store unavailable", "detail": str(e)}), 503
+    portfolios = record.get("portfolios") or {}
+    if pid not in portfolios:
+        return jsonify({"error": "not_found"}), 404
+    record["default_pid"] = pid
+    try:
+        _write_portfolio_record(user["sub"], record)
+    except KVUnavailable as e:
+        return jsonify({"error": "portfolio store unavailable", "detail": str(e)}), 503
+    return jsonify({"ok": True, "default_pid": pid})
 
 
 # ── Portfolio Templates: Strategies (client-side) + Investor 13F ──────────

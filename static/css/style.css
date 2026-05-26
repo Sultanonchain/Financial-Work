@@ -5079,3 +5079,166 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
   .sk-col--right { text-align: left; align-items: flex-start; }
   .sk-scenarios__row { grid-template-columns: 1fr; }
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+   Portfolio switcher (multi-portfolio dropdown in the header)
+   ════════════════════════════════════════════════════════════════════════
+   The switcher sits between #portfolioBtn and the disclaimer pill in the
+   header.  Visible only when the user is signed in and a server portfolio
+   record has loaded — anonymous users keep the legacy single-portfolio
+   path so the nav doesn't gain a dropdown they can't meaningfully use.
+
+   Styling mirrors .header-btn (pill, mono, uppercase) and .auth-menu
+   (popover panel, list items, separator). */
+
+.pf-switcher { position: relative; display: inline-flex; }
+.pf-switcher.hidden { display: none; }
+
+.pf-switcher__btn {
+  /* Inherits .header-btn pill styling.  Gap is tighter than the icon-led
+     buttons because there's only a name + caret. */
+  gap: 8px;
+  max-width: 200px;          /* keep the nav from sprawling on long names */
+}
+.pf-switcher__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  max-width: 150px;
+  /* Names are user-provided, so they're TitleCase, not uppercase like
+     other header labels.  Override to keep the casing the user typed. */
+  text-transform: none;
+  letter-spacing: 0.02em;
+  font-weight: 600;
+}
+.pf-switcher__caret {
+  color: var(--ink-muted);
+  font-size: 10px;
+  transition: transform 150ms var(--ease-out);
+}
+.pf-switcher__btn[aria-expanded="true"] .pf-switcher__caret {
+  transform: rotate(180deg);
+}
+
+.pf-switcher__menu {
+  position: absolute; top: calc(100% + 8px); right: 0;
+  background: var(--bg-elevated);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card-hover);
+  padding: var(--space-2);
+  min-width: 260px;
+  max-width: 320px;
+  z-index: 100;
+}
+.pf-switcher__menu.hidden { display: none; }
+
+.pf-switcher__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.pf-switcher__item {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--ink-secondary);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 100ms var(--ease-out);
+  min-width: 0;
+}
+.pf-switcher__item:hover {
+  background: var(--bg-elevated-2);
+  color: var(--ink-primary);
+}
+.pf-switcher__item[aria-current="true"] {
+  color: var(--ink-primary);
+}
+.pf-switcher__item[aria-current="true"] .pf-switcher__check {
+  color: var(--accent);
+}
+.pf-switcher__check {
+  font-size: 11px;
+  color: transparent;        /* reserved space; only the active item shows ✓ */
+  text-align: center;
+}
+.pf-switcher__item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.pf-switcher__item-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-muted);
+  letter-spacing: 0.06em;
+}
+
+.pf-switcher__sep {
+  height: 1px;
+  background: rgba(255,255,255,0.05);
+  margin: 4px 2px;
+}
+
+.pf-switcher__action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--ink-secondary);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 100ms var(--ease-out);
+}
+.pf-switcher__action:hover:not(:disabled) {
+  background: var(--bg-elevated-2);
+  color: var(--ink-primary);
+}
+.pf-switcher__action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.pf-switcher__action--danger:hover:not(:disabled) {
+  background: var(--negative-soft);
+  color: var(--negative);
+}
+.pf-switcher__action-icon {
+  font-size: 12px; opacity: 0.7; width: 14px; text-align: center;
+}
+.pf-switcher__action-label { flex: 1; }
+.pf-switcher__action-cap {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-strong);
+  border-radius: var(--radius-pill);
+}
+
+@media (max-width: 640px) {
+  /* Keep the active portfolio name on mobile (truncated) — a bare caret
+     is too ambiguous as a switcher affordance. */
+  .pf-switcher__btn  { padding: 7px 10px; max-width: 140px; gap: 6px; }
+  .pf-switcher__name { max-width: 88px; font-size: 11px; }
+  .pf-switcher__menu { right: -40px; min-width: 220px; max-width: calc(100vw - 24px); }
+}
