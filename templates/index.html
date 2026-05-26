@@ -40,10 +40,6 @@
       <span class="brand-tag">Educational Stock Valuation Tool</span>
     </div>
     <div class="header-actions">
-      <button class="header-btn" id="discoverBtn" type="button" aria-label="Discover undervalued stocks">
-        <span class="header-btn__icon">⌖</span>
-        <span class="header-btn__label">Discover</span>
-      </button>
       <!-- Watchlist — what you're WATCHING (no holdings).  Separate from
            portfolios; free for everyone.  Signed-out users keep using it
            via localStorage; sign-in pulls/merges. -->
@@ -256,6 +252,17 @@
       transparent breakdown of every assumption — institutional-grade rigor for
       learners and curious investors.
     </p>
+
+    <!-- Homepage Top Picks (replaces the former Discover heatmap).
+         Hidden until the /api/top_picks fetch returns enough A/B-grade
+         names; populated by loadHomepageTopPicks() on page boot. -->
+    <section class="home-toppicks hidden" id="homeTopPicks" aria-labelledby="homeTopPicksTitle">
+      <div class="home-toppicks__head">
+        <h2 class="home-toppicks__title" id="homeTopPicksTitle">Top Picks</h2>
+        <span class="home-toppicks__sub">VALUS thinks these are the most undervalued right now</span>
+      </div>
+      <div class="home-toppicks__row" id="homeTopPicksRow"></div>
+    </section>
 
     <div class="search-shell">
       <form class="search-bar" id="searchForm" autocomplete="off" role="search">
@@ -900,62 +907,6 @@
   </div>
 </main>
 
-<!-- ── DISCOVERY PAGE — Sector heatmap ────────────────────────────────── -->
-<main class="discover-page hidden" id="discoverPage">
-  <div class="container">
-    <div class="pf-page__head">
-      <button class="copy-btn" id="discBackBtn" type="button">← Back</button>
-      <div class="pf-page__title">
-        <h1>Discover</h1>
-        <p>Live VALUS verdict across 100+ names. Auto-refreshes every 30s; full model re-runs every hour.</p>
-        <div id="discFreshness" class="freshness-row" aria-live="polite"></div>
-      </div>
-      <button class="copy-btn" id="discRefreshBtn" type="button">↻ Refresh</button>
-    </div>
-
-    <!-- Filter bar -->
-    <div class="card disc-filters">
-      <div class="disc-filter-row">
-        <span class="disc-filter-label">Filter:</span>
-        <button class="disc-tier-pill active" data-disc-tier="all" type="button">All</button>
-        <button class="disc-tier-pill" data-disc-tier="undervalued" type="button">Undervalued</button>
-        <button class="disc-tier-pill" data-disc-tier="fair" type="button">Fair Value</button>
-        <button class="disc-tier-pill" data-disc-tier="overvalued" type="button">Overvalued</button>
-        <button class="disc-tier-pill" data-disc-tier="speculative" type="button">Speculative</button>
-      </div>
-      <div class="disc-filter-row">
-        <span class="disc-filter-label">Sort:</span>
-        <button class="disc-tier-pill active" data-disc-sort="opportunity" type="button" title="Margin of safety × DCF confidence">Best opportunity</button>
-        <button class="disc-tier-pill" data-disc-sort="undervalued" type="button" title="MOS descending — biggest discount to fair value first">Most undervalued</button>
-        <button class="disc-tier-pill" data-disc-sort="overvalued" type="button" title="MOS ascending — biggest premium to fair value first">Most overvalued</button>
-        <button class="disc-tier-pill" data-disc-sort="ticker" type="button">By Ticker</button>
-        <button class="disc-tier-pill" data-disc-sort="sector" type="button">By Sector</button>
-      </div>
-      <!-- Dynamic sector-filter row, populated from live data. -->
-      <div class="disc-filter-row" id="discSectorRow"></div>
-    </div>
-
-    <!-- Top Picks (Phase 6): the 5 most-undervalued names with the highest
-         VALUS letter grade, surfaced above the heatmap so the user has an
-         immediate "where do I look first" answer.  Hidden until live data
-         arrives and there are at least 3 candidates with positive MOS. -->
-    <section class="disc-toppicks card hidden" id="discTopPicks">
-      <div class="disc-toppicks__head">
-        <h2 class="disc-toppicks__title">Top Picks</h2>
-        <span class="disc-toppicks__sub">Most undervalued by VALUS grade</span>
-      </div>
-      <div class="disc-toppicks__row" id="discTopPicksRow"></div>
-    </section>
-
-    <div class="card">
-      <div class="disc-loading hidden" id="discLoading">
-        <div class="spinner"></div>
-        <span>Loading 50+ stocks…</span>
-      </div>
-      <div class="disc-grid" id="discGrid"></div>
-    </div>
-  </div>
-</main>
 
 <!-- ── BTC HODL HERO ─────────────────────────────────────────────────── -->
 <main class="btc-hero hidden" id="btcHero">

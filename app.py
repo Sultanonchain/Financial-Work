@@ -7837,19 +7837,35 @@ DISCOVERY_TICKERS = [
 ]
 DISCOVERY_TICKERS_SET = set(DISCOVERY_TICKERS)
 
-@app.route("/api/discover")
-@limiter.limit(limit_discover)
-def discover():
-    """
-    Returns a thin summary for every ticker in DISCOVERY_TICKERS using the
-    cached analyze pipeline.
+# ── Top Picks universe ────────────────────────────────────────────────
+# Small curated subset of DISCOVERY_TICKERS used by the homepage Top Picks
+# card row.  Kept short so the daily warm cron is cheap and Top Picks
+# loads instantly from cache for anonymous homepage visitors.
+#
+# Selection criteria: large/well-covered names where DCF inputs are most
+# reliable, mixed across sectors so the picks don't all come from one
+# industry on any given day.
+TOP_PICKS_UNIVERSE = [
+    # Tech mega-caps + AI
+    "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA",
+    # Financials
+    "JPM", "BRK-B", "V", "MA",
+    # Healthcare
+    "UNH", "LLY", "JNJ",
+    # Consumer / industrials / energy
+    "WMT", "COST", "HD", "XOM", "BA",
+]
 
-    Sign-in required: the Discover heatmap is a signed-in-only feature.
-    Internal callers (the hourly warm cron) bypass via X-Valus-Internal.
+
+@app.route("/api/top_picks")
+@limiter.limit(limit_discover)
+def top_picks():
+    """Thin summaries for every ticker in TOP_PICKS_UNIVERSE.
+
+    Anonymous-allowed — the homepage Top Picks card row needs this even
+    before sign-in.  Internal callers (the daily warm cron) bypass any
+    auth via X-Valus-Internal.
     """
-    if request.headers.get("X-Valus-Internal") != "1":
-        user, err = require_user()
-        if err: return err
     now = time.time()
     force_fresh = request.args.get("fresh", "").lower() in ("1", "true", "yes")
 
@@ -7911,34 +7927,30 @@ def discover():
             return None
 
     from concurrent.futures import ThreadPoolExecutor
-    # Bumped from 10 → 16 workers.  yfinance is I/O-bound (HTTP calls),
-    # not CPU-bound, so the GIL doesn't matter — more concurrency
-    # directly cuts cold-cache latency.  Yahoo's rate limits tolerate
-    # this fine for our single-burst workload.
-    with ThreadPoolExecutor(max_workers=16) as pool:
-        results = list(pool.map(_fetch_one, DISCOVERY_TICKERS))
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        results = list(pool.map(_fetch_one, TOP_PICKS_UNIVERSE))
 
     out = [r for r in results if r is not None]
     return jsonify({
         "items": out,
         "count": len(out),
-        "universe_size": len(DISCOVERY_TICKERS),
+        "universe_size": len(TOP_PICKS_UNIVERSE),
         "generated_at": int(now),
     })
 
 
-# ── Hourly cron: full DCF + news refresh of the discovery universe ─────────
-# Vercel Cron Job hits this every hour to keep _ANALYZE_CACHE warm with
-# fresh DCF + news + strategic-asset evaluation across all 100+ heatmap
-# tickers.  Without this, Vercel's stateless serverless instances would
-# always start cold; this endpoint IS the freshness guarantee for the
-# heatmap when no users are actively browsing.
+# ── Daily cron: keep the Top Picks universe warm ──────────────────────
+# Vercel Cron Job hits this once a day to refresh _ANALYZE_CACHE for
+# every ticker in TOP_PICKS_UNIVERSE.  Without it, Vercel's stateless
+# serverless instances would start cold and the homepage Top Picks card
+# row would block on ~20 cold yfinance fetches.  Was previously
+# refresh-heatmap covering ~100 names; trimmed alongside the Discover
+# UI removal so cron cost dropped ~5×.
 #
-# Auth: protected by CRON_SECRET env var.  Vercel injects the secret into
-# the cron request as `Authorization: Bearer <CRON_SECRET>`.  Returns 401
-# if missing — prevents random callers from triggering a 25s lambda.
-@app.route("/api/cron/refresh-heatmap")
-def cron_refresh_heatmap():
+# Auth: protected by CRON_SECRET env var.  Vercel injects the secret as
+# `Authorization: Bearer <CRON_SECRET>`.  Returns 401 if missing.
+@app.route("/api/cron/refresh-top-picks")
+def cron_refresh_top_picks():
     expected = os.environ.get("CRON_SECRET")
     # Fail closed: if the secret isn't configured, refuse to run.
     # Otherwise anyone could trigger a 25s lambda re-fetching 100+ tickers.
@@ -7977,8 +7989,8 @@ def cron_refresh_heatmap():
             return t, False
 
     from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=16) as pool:
-        results = list(pool.map(_force_refresh, DISCOVERY_TICKERS))
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        results = list(pool.map(_force_refresh, TOP_PICKS_UNIVERSE))
 
     for t, ok in results:
         if ok:
@@ -7988,12 +8000,12 @@ def cron_refresh_heatmap():
 
     duration_ms = int((time.time() - started) * 1000)
     app.logger.info(
-        "cron refresh-heatmap: %d/%d ok in %dms",
-        refreshed, len(DISCOVERY_TICKERS), duration_ms
+        "cron refresh-top-picks: %d/%d ok in %dms",
+        refreshed, len(TOP_PICKS_UNIVERSE), duration_ms
     )
     return jsonify({
         "refreshed":   refreshed,
-        "universe":    len(DISCOVERY_TICKERS),
+        "universe":    len(TOP_PICKS_UNIVERSE),
         "failed":      failed,
         "duration_ms": duration_ms,
     })
