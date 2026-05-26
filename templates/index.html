@@ -391,6 +391,35 @@
   </div>
 </div>
 
+<!-- ── VALUS GRADE EXPLAINER MODAL ─────────────────────────────────── -->
+<!-- Opens from any clickable .valus-grade badge OR the "How are grades
+     calculated?" link on the stock detail page.  Band thresholds mirror
+     app.py::VALUS_GRADE_BANDS — single source for the data lives in
+     setupGradeExplainer() in main.js so we can iterate the bands. -->
+<div class="modal hidden" id="gradeExplainerModal" role="dialog" aria-modal="true" aria-labelledby="gradeExplainerTitle">
+  <div class="modal__backdrop" data-modal-close></div>
+  <div class="modal__panel" style="max-width: 560px;">
+    <div class="modal__head">
+      <h2 class="modal__title" id="gradeExplainerTitle">How VALUS grades work</h2>
+      <button class="modal__close" data-modal-close aria-label="Close">✕</button>
+    </div>
+    <div class="modal__body">
+      <p class="signin-detail" style="margin-bottom: 14px;">
+        Every stock gets a single A-F letter that compares its <strong>current market price</strong> to <strong>VALUS fair value</strong>. The percent next to the letter is the <em>margin of safety</em> — how far below (positive) or above (negative) fair value the stock is trading.
+      </p>
+      <ul class="grade-explainer__list" id="gradeExplainerList">
+        <!-- Populated by setupGradeExplainer(); single data source. -->
+      </ul>
+      <p class="plus-fineprint" style="margin-top: 14px;">
+        The letter is derived purely from the DCF model + the current price.
+        It's <strong>not</strong> a buy/sell signal — read the full verdict
+        and the underlying methodology before acting on it.
+        <a href="/methodology" style="color: var(--accent);">Read the methodology →</a>
+      </p>
+    </div>
+  </div>
+</div>
+
 <!-- ── VALUS+ UPGRADE MODAL ─────────────────────────────────────────── -->
 <div class="modal hidden" id="plusModal" role="dialog" aria-modal="true" aria-labelledby="plusModalTitle">
   <div class="modal__backdrop" data-modal-close></div>
@@ -1049,6 +1078,10 @@
       <div class="valus-grade-row" id="vValusGradeRow" hidden>
         <span id="vValusGradeBadge"></span>
         <p class="valus-grade-explain" id="vValusGradeExplain"></p>
+        <button type="button" class="grade-explain-link" id="vValusGradeWhy">
+          <span aria-hidden="true">ⓘ</span>
+          <span>How are grades calculated?</span>
+        </button>
       </div>
 
       <!-- Strategic Asset banner — only shown when is_strategic=true.

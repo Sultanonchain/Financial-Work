@@ -83,10 +83,89 @@ function mosToGradeChip(mos) {
   const pct  = `${sign}${fmt(mos, 1)}%`;
   return `
     <span class="valus-grade" data-grade="${g}"
-          title="VALUS grade ${g} · ${pct}">
+          title="VALUS grade ${g} · ${pct} — click for definitions">
       <span class="valus-grade__letter">${g}</span>
       <span class="valus-grade__label">${pct}</span>
     </span>`;
+}
+
+// ── Grade explainer modal ────────────────────────────────────────────
+// Single source of truth for the band data on the frontend.  Mirrors
+// app.py::VALUS_GRADE_BANDS so the modal copy matches the server-side
+// classifier exactly.  If you adjust thresholds in compute_valus_grade,
+// adjust GRADE_BANDS here too.
+const GRADE_BANDS = [
+  { grade: "A", range: "MOS ≥ +30%",
+    label: "Deeply undervalued",
+    desc:  "Market price is well below VALUS fair value — a significant margin of safety. The kind of mispricing value investors look for." },
+  { grade: "B", range: "+15% to +30%",
+    label: "Moderately undervalued",
+    desc:  "Trading below VALUS fair value with a comfortable cushion. Less extreme than A but still attractive on the DCF view." },
+  { grade: "C", range: "−15% to +15%",
+    label: "Fairly priced",
+    desc:  "Market price tracks VALUS fair value — no obvious mispricing. The market and the model roughly agree on what this is worth." },
+  { grade: "D", range: "−30% to −15%",
+    label: "Moderately overvalued",
+    desc:  "Trading above VALUS fair value. Investors are paying for growth or quality that exceeds what the DCF baseline supports." },
+  { grade: "F", range: "MOS ≤ −30%",
+    label: "Severely overvalued",
+    desc:  "Market price is far above VALUS fair value — expectations look stretched. Either the model is missing something, or the price is." },
+];
+
+function renderGradeExplainerList() {
+  const list = document.getElementById("gradeExplainerList");
+  if (!list) return;
+  list.innerHTML = GRADE_BANDS.map(b => `
+    <li class="grade-explainer__item">
+      <span class="grade-explainer__badge" data-grade="${b.grade}">${b.grade}</span>
+      <div class="grade-explainer__text">
+        <div class="grade-explainer__label">
+          ${escHtml(b.label)}
+          <span class="grade-explainer__range">${escHtml(b.range)}</span>
+        </div>
+        <p class="grade-explainer__desc">${escHtml(b.desc)}</p>
+      </div>
+    </li>`).join("");
+}
+
+function openGradeExplainer() {
+  const m = document.getElementById("gradeExplainerModal");
+  if (!m) return;
+  renderGradeExplainerList();
+  m.classList.remove("hidden");
+}
+function closeGradeExplainer() {
+  document.getElementById("gradeExplainerModal")?.classList.add("hidden");
+}
+
+function setupGradeExplainer() {
+  // The dedicated "How?" link on the stock detail page.
+  const why = document.getElementById("vValusGradeWhy");
+  if (why) why.onclick = openGradeExplainer;
+
+  // Event-delegate: any .valus-grade chip (anywhere on the page, present
+  // or future) opens the modal when clicked.  Opt out per-element with
+  // .is-static when nesting inside another clickable row.
+  document.addEventListener("click", (e) => {
+    const chip = e.target.closest(".valus-grade");
+    if (!chip) return;
+    if (chip.classList.contains("is-static")) return;
+    // Skip if the chip lives inside another anchor/button that owns the
+    // click (e.g. a Top Picks card or a portfolio row).  The chip
+    // visually communicates "this is clickable for explanation"; in
+    // wrapped contexts we let the parent's click win to avoid surprise.
+    const wrapper = chip.closest("button, a, [data-pf-pick], [data-wl-open], [data-toppick]");
+    if (wrapper && wrapper !== chip && !wrapper.classList.contains("valus-grade")) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openGradeExplainer();
+  });
+
+  // Escape closes (the global modal-dismiss handler also covers backdrop
+  // clicks via data-modal-close, so we don't need to re-bind those).
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeGradeExplainer();
+  });
 }
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -6369,6 +6448,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupTemplatesTabs();
   setupTierGlossary();
   setupModalDismiss();
+  setupGradeExplainer();
   setupCustomDCFSliders();
   setupSharePortfolio();
   setupDiscover();
