@@ -248,7 +248,6 @@ async function analyze(ticker, params = {}) {
   $("btcHero").classList.add("hidden");
   $("etfHero")?.classList.add("hidden");
   $("portfolioPage")?.classList.add("hidden");
-  $("discoverPage")?.classList.add("hidden");
   $("leaderboardPage")?.classList.add("hidden");
   // Make sure hero search section is visible (in case we came from portfolio)
   document.querySelector(".hero")?.classList.remove("hidden");
@@ -3546,7 +3545,6 @@ async function openWatchlistPage() {
   $("results")?.classList.add("hidden");
   $("btcHero")?.classList.add("hidden");
   $("etfHero")?.classList.add("hidden");
-  $("discoverPage")?.classList.add("hidden");
   $("portfolioPage")?.classList.add("hidden");
   document.querySelector(".hero")?.classList.add("hidden");
   $("loading")?.classList.add("hidden");
@@ -3775,7 +3773,6 @@ async function openPortfolioPage() {
   $("results").classList.add("hidden");
   $("btcHero")?.classList.add("hidden");
   $("etfHero")?.classList.add("hidden");
-  $("discoverPage")?.classList.add("hidden");
   document.querySelector(".hero")?.classList.add("hidden");
   $("loading")?.classList.add("hidden");
   $("error")?.classList.add("hidden");
@@ -4869,10 +4866,10 @@ async function requireAuth(intent) {
 }
 
 const INTENT_COPY = {
-  portfolio: "Sign in to track your portfolio. Free account also unlocks unlimited searches and the Discover heatmap.",
-  discover:  "Sign in to view the Discover heatmap. Free account includes unlimited searches and portfolio tracking.",
+  portfolio: "Sign in to track your portfolio across devices. Free account also unlocks unlimited searches and watchlist sync.",
+  watchlist: "Sign in to sync your watchlist across devices. Free account also unlocks unlimited searches and portfolio tracking.",
   publish:   "Sign in to publish your portfolio to the public leaderboard.",
-  default:   "Sign in for unlimited searches, the Discover heatmap, and portfolio tracking.",
+  default:   "Sign in for unlimited searches, portfolio tracking, and watchlist sync.",
 };
 
 function showSignInModal(intent) {
@@ -5291,7 +5288,7 @@ function setupAuthControl() {
     if (!_AUTH_CONFIGURED) return;
     // Preserve the current URL — including the hash — so the user lands
     // back on the same page after the Google round-trip.  Without the
-    // hash, signing in from the Leaderboard or Discover page would dump
+    // hash, signing in from the Leaderboard or another non-search view would dump
     // the user on the search hero.
     const next = encodeURIComponent(
       window.location.pathname + window.location.search + window.location.hash
@@ -5671,231 +5668,43 @@ function setupLeaderboard() {
   });
 }
 
-// ── Discovery page ────────────────────────────────────────────────────
-let _DISC_DATA = [];
-let _DISC_TIER_FILTER = "all";
-let _DISC_SECTOR_FILTER = "all";
-let _DISC_SORT = "opportunity";   // new default — confidence-adjusted
-
-function tierBucket(tier) {
-  if (!tier) return "neutral";
-  if (["distress", "deep_discount", "discount", "strategic_discount"].includes(tier)) return "undervalued";
-  if (tier === "fair_value") return "fair";
-  if (["growth", "excellence"].includes(tier)) return "overvalued";
-  if (tier === "miracle") return "speculative";
-  return "neutral";
-}
-
-function tierColor(tier) {
-  const bucket = tierBucket(tier);
-  const map = {
-    undervalued: { accent: "#34d399", strong: "rgba(52,211,153,0.35)", glow: "rgba(52,211,153,0.30)" },
-    fair:        { accent: "#60a5fa", strong: "rgba(96,165,250,0.35)", glow: "rgba(96,165,250,0.25)" },
-    overvalued:  { accent: "#fbbf24", strong: "rgba(251,191,36,0.35)", glow: "rgba(251,191,36,0.25)" },
-    speculative: { accent: "#f87171", strong: "rgba(248,113,113,0.35)", glow: "rgba(248,113,113,0.30)" },
-    neutral:     { accent: "#6b7382", strong: "rgba(107,115,130,0.35)", glow: "rgba(107,115,130,0.20)" },
-  };
-  return map[bucket] || map.neutral;
-}
-
-// Live-refresh interval handles for the heatmap.  Set in openDiscoverPage,
-// cleared in closeDiscoverPage so polling stops when the user leaves.
-let _DISC_PRICE_TIMER = null;        // 30s fast-tier price ticks
-let _DISC_DEEP_TIMER  = null;        // 60min deep-tier full /api/discover refresh
-let _DISC_PRICES_LAST_UPDATE = 0;   // for the "Prices: Xs ago" badge
-
-// localStorage cache for the Discover heatmap snapshot.  Renders previous
-// snapshot instantly on repeat visits — bypasses the Vercel cold-lambda
-// problem where every fresh function instance starts with an empty
-// _ANALYZE_CACHE and has to refetch all 109 tickers from yfinance.
+// ── Homepage Top Picks (replaces the former Discover heatmap) ─────────
+// A compact card row above the search hero showing the 5 most-
+// undervalued names from a curated /api/top_picks universe.  Anon-
+// accessible so visitors get an "explore" entry point without sign-in.
 //
-// TTL is generous (6h) because: (a) backend stale-while-revalidate will
-// swap in fresh values within seconds of the page load anyway, and
-// (b) DCF outputs don't move much hour-to-hour — only price (which is
-// updated by the 30s /api/quote polling on top of this).
-const _DISC_LS_KEY = "valus.discover.snapshot.v1";
-const _DISC_LS_TTL_MS = 6 * 60 * 60 * 1000;
+// The fetch is cheap (one round-trip to a cached endpoint) and non-
+// blocking.  We render an optimistic local snapshot first if we have
+// one, then swap in fresh data.
 
-function loadDiscoverFromLocalStorage() {
+const _HOME_TP_LS_KEY    = "valus.top_picks.snapshot.v1";
+const _HOME_TP_LS_TTL_MS = 6 * 60 * 60 * 1000;
+
+function _saveHomeTopPicksLocal(items) {
   try {
-    const raw = localStorage.getItem(_DISC_LS_KEY);
+    localStorage.setItem(_HOME_TP_LS_KEY,
+      JSON.stringify({ ts: Date.now(), items }));
+  } catch {}
+}
+function _loadHomeTopPicksLocal() {
+  try {
+    const raw = localStorage.getItem(_HOME_TP_LS_KEY);
     if (!raw) return null;
     const obj = JSON.parse(raw);
     if (!obj || !obj.ts || !Array.isArray(obj.items)) return null;
-    if (Date.now() - obj.ts > _DISC_LS_TTL_MS) return null;
+    if (Date.now() - obj.ts > _HOME_TP_LS_TTL_MS) return null;
     return obj.items;
-  } catch (e) { return null; }
+  } catch { return null; }
 }
 
-function saveDiscoverToLocalStorage(items) {
-  try {
-    localStorage.setItem(_DISC_LS_KEY, JSON.stringify({ ts: Date.now(), items }));
-  } catch (e) { /* quota exceeded — non-fatal */ }
-}
-
-async function openDiscoverPage() {
-  // Sign-in gate — Discover heatmap is for authenticated users only
-  if (!_ME) {
-    const ok = await requireAuthWithRedirectIntent("discover");
-    if (!ok) return;
-  }
-  hideAllViews();
-  $("discoverPage").classList.remove("hidden");
-  setViewHash("discover");
-  window.scrollTo({ top: 0, behavior: "instant" });
-  // Try localStorage first — instant render of last snapshot if any.
-  // Subsequent loadDiscover() will swap in fresh data when it returns.
-  if (_DISC_DATA.length === 0) {
-    const cached = loadDiscoverFromLocalStorage();
-    if (cached && cached.length > 0) {
-      _DISC_DATA = cached;
-      renderDiscover();   // sub-50ms render, no skeleton flash
-    }
-    // Kick off the network fetch regardless — it'll repaint when fresh
-    // data arrives.  No await here so the UI doesn't block.
-    loadDiscover();
-  } else {
-    renderDiscover();
-  }
-  // Fast tier: poll /api/quote every 30s while the heatmap is open.
-  if (_DISC_PRICE_TIMER) clearInterval(_DISC_PRICE_TIMER);
-  _DISC_PRICE_TIMER = setInterval(refreshDiscoverPrices, 30000);
-  // Deep tier: full /api/discover re-fetch every hour to pick up the
-  // hourly cron's fresh DCF + news evaluation.
-  if (_DISC_DEEP_TIMER) clearInterval(_DISC_DEEP_TIMER);
-  _DISC_DEEP_TIMER = setInterval(loadDiscover, 60 * 60 * 1000);
-  // Update the freshness badge once a second so "Prices: Xs ago" ticks.
-  startFreshnessTicker();
-}
-
-function closeDiscoverPage() {
-  $("discoverPage").classList.add("hidden");
-  document.querySelector(".hero")?.classList.remove("hidden");
-  if (_DISC_PRICE_TIMER) { clearInterval(_DISC_PRICE_TIMER); _DISC_PRICE_TIMER = null; }
-  if (_DISC_DEEP_TIMER)  { clearInterval(_DISC_DEEP_TIMER);  _DISC_DEEP_TIMER  = null; }
-  if (_FRESHNESS_TICKER) { clearInterval(_FRESHNESS_TICKER); _FRESHNESS_TICKER = null; }
-  setViewHash("");
-}
-
-// Static mirror of DISCOVERY_TICKERS in app.py used to seed skeleton cells
-// while /api/discover is in flight.  Order roughly matches the backend list
-// so the skeleton layout matches the post-load layout closely enough that
-// cells don't visibly jump.  Out-of-sync drift is harmless — the swap is
-// based on per-cell ticker keys, not position.
-const _DISCOVERY_TICKERS_HINT = [
-  "AAPL","MSFT","GOOGL","GOOG","AMZN","META","NVDA","TSLA",
-  "ORCL","CRM","ADBE","AMD","INTC","AVGO","QCOM","TXN",
-  "MU","ARM","NOW","SNOW","PLTR","PANW","CRWD",
-  "ADI","MCHP","ON","AMAT","KLAC","LRCX",
-  "JPM","BAC","WFC","GS","MS","BRK-B","V","MA","AXP",
-  "SCHW","BLK","SPGI","COIN","HOOD",
-  "JNJ","UNH","LLY","PFE","ABBV","MRK","TMO","ABT","DHR",
-  "ISRG","VRTX","REGN",
-  "WMT","HD","MCD","NKE","KO","PEP","SBUX","COST","TGT",
-  "LULU","CMG","ABNB","BKNG",
-  "F","GM","UBER",
-  "XOM","CVX","COP","OXY","FCX","LIN",
-  "CAT","BA","GE","UNP","RTX","HON","LMT","DE",
-  "NOC","GD","LHX","HII",
-  "DIS","NFLX","CMCSA","T","VZ","TMUS","SPOT",
-  "AMT","PLD","EQIX","NEE","DUK","CEG","VST",
-  "MP","LEU","BWXT",
-  "JOBY","ACHR","RKLB",
-];
-
-// Renders ~109 placeholder skeleton cells the moment Discover opens, so the
-// user sees scaffolding instantly instead of a blank screen.  Cells fill
-// in as /api/discover returns; layout doesn't reflow because skeletons
-// share the same structure as real cells.
-function renderDiscoverSkeleton() {
-  const grid = $("discGrid");
-  if (!grid) return;
-  grid.classList.remove("disc-grid--treemap");
-  // Build minimum-viable cells that take the same shape as the real ones.
-  grid.innerHTML = _DISCOVERY_TICKERS_HINT.map(t => `
-    <div class="disc-cell disc-cell--skeleton" data-disc-ticker="${escHtml(t)}">
-      <span class="disc-cell__shimmer"></span>
-      <div class="disc-cell__head">
-        <span class="disc-cell__ticker">${escHtml(t)}</span>
-        <span class="disc-cell__mos">—</span>
-      </div>
-      <div class="disc-cell__name">&nbsp;</div>
-      <div class="disc-cell__tier">&nbsp;</div>
-      <div class="disc-cell__bar"><div class="disc-cell__bar-fill" style="width:0%"></div></div>
-    </div>
-  `).join("");
-}
-
-async function loadDiscover(opts = {}) {
-  const { fresh = false } = opts;
-  // Show skeleton scaffolding immediately if the grid is empty.  When the
-  // user reopens Discover with cached data, we skip skeleton and let the
-  // existing cells stay visible until the new fetch swaps in.
-  if (_DISC_DATA.length === 0) {
-    renderDiscoverSkeleton();
-  }
-  $("discLoading").classList.add("hidden");   // skeleton replaces the spinner
-
-  // Visible feedback on the refresh button so users don't think the click
-  // was lost. fresh=true requests can take 30–90s to revalidate the cache.
-  const refreshBtn = $("discRefreshBtn");
-  let prevLabel;
-  if (refreshBtn) {
-    prevLabel = refreshBtn.textContent;
-    refreshBtn.textContent = fresh ? "↻ Refreshing…" : "↻ Loading…";
-    refreshBtn.disabled = true;
-    refreshBtn.classList.add("is-loading");
-  }
-
-  let failed = false;
-  try {
-    const url = fresh ? "/api/discover?fresh=true" : "/api/discover";
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const data = await res.json();
-    _DISC_DATA = data.items || [];
-    // Persist the latest snapshot so the next page open renders instantly
-    // even if Vercel spins up a fresh cold lambda.
-    if (_DISC_DATA.length > 0) saveDiscoverToLocalStorage(_DISC_DATA);
-  } catch {
-    if (_DISC_DATA.length === 0) {
-      _DISC_DATA = [];
-    }
-    failed = true;
-  }
-  if (refreshBtn) {
-    refreshBtn.textContent = failed ? "↻ Retry" : (prevLabel || "↻ Refresh");
-    refreshBtn.disabled = false;
-    refreshBtn.classList.remove("is-loading");
-  }
-  renderDiscover(failed);
-}
-
-function renderDiscoverSectorChips() {
-  // Populate the sector-filter row from the unique sectors in the current
-  // data set. Called every time fresh data lands so chips reflect reality.
-  const row = document.getElementById("discSectorRow");
-  if (!row) return;
-  const sectors = Array.from(
-    new Set(_DISC_DATA.map(it => it.sector).filter(s => s && s.trim()))
-  ).sort();
-  const chips = [
-    `<button class="disc-tier-pill ${_DISC_SECTOR_FILTER === "all" ? "active" : ""}" data-disc-sector="all" type="button">All sectors</button>`,
-    ...sectors.map(s =>
-      `<button class="disc-tier-pill ${_DISC_SECTOR_FILTER === s ? "active" : ""}" data-disc-sector="${escHtml(s)}" type="button">${escHtml(s)}</button>`
-    ),
-  ];
-  row.innerHTML = `<span class="disc-filter-label">Sector:</span>${chips.join("")}`;
-}
-
-// Render the Top Picks card row above the heatmap.  Picks A/B-grade names
-// from the full discovery set sorted by MOS desc, capped at 5.  Hidden
-// when there's nothing meaningful to show (< 3 candidates).
-function renderTopPicks() {
-  const root = $("discTopPicks");
-  const row  = $("discTopPicksRow");
+function renderHomepageTopPicks(items) {
+  const root = document.getElementById("homeTopPicks");
+  const row  = document.getElementById("homeTopPicksRow");
   if (!root || !row) return;
-  const picks = (_DISC_DATA || [])
+  // A/B-grade names sorted by descending MOS, capped at 5.  Hidden when
+  // fewer than 3 — a 1-card row looks anemic and a 2-card row breaks
+  // the grid visually.
+  const picks = (items || [])
     .filter(it => !it.extreme && typeof it.mos === "number" && it.mos > 0)
     .filter(it => {
       const g = mosToGrade(it.mos);
@@ -5910,332 +5719,41 @@ function renderTopPicks() {
     const sign = it.mos >= 0 ? "+" : "";
     const pct  = `${sign}${fmt(it.mos, 1)}%`;
     return `
-      <button class="disc-toppick" type="button" data-toppick="${escHtml(it.ticker)}"
+      <button class="home-toppick" type="button" data-home-pick="${escHtml(it.ticker)}"
               title="VALUS grade ${g} · ${pct}">
-        <span class="valus-grade" data-grade="${g}">
+        <span class="valus-grade is-static" data-grade="${g}">
           <span class="valus-grade__letter">${g}</span>
           <span class="valus-grade__label">${pct}</span>
         </span>
-        <span class="disc-toppick__ticker">${escHtml(it.ticker)}</span>
-        <span class="disc-toppick__name">${escHtml(it.name || "")}</span>
+        <span class="home-toppick__ticker">${escHtml(it.ticker)}</span>
+        <span class="home-toppick__name">${escHtml(it.name || "")}</span>
       </button>`;
   }).join("");
-  // Wire click → analyze that ticker.
-  row.querySelectorAll("[data-toppick]").forEach(btn => {
+  row.querySelectorAll("[data-home-pick]").forEach(btn => {
     btn.onclick = () => {
-      const t = btn.getAttribute("data-toppick");
-      closeDiscoverPage();
-      $("tickerInput").value = t;
+      const t = btn.getAttribute("data-home-pick");
+      const input = $("tickerInput");
+      if (input) input.value = t;
       $("analyzeBtn")?.click();
     };
   });
 }
 
-function renderDiscover(failed = false) {
-  const grid = $("discGrid");
-  if (!grid) return;
-  renderDiscoverSectorChips();
-  renderTopPicks();
-  if (_DISC_DATA.length === 0) {
-    grid.innerHTML = `
-      <div class="disc-empty" style="grid-column:1/-1;text-align:center;padding:48px 16px;color:var(--text-muted,#888);">
-        <div style="font-size:32px;margin-bottom:12px;">${failed ? "⚠" : "✦"}</div>
-        <div style="font-weight:600;margin-bottom:6px;">
-          ${failed ? "Couldn't load Discover" : "No undervalued ideas surfaced"}
-        </div>
-        <div style="font-size:14px;">
-          ${failed ? "Try refresh in a moment — Yahoo may be rate-limiting." : "Check back after the next discovery sweep."}
-        </div>
-        ${failed ? '<button onclick="loadDiscover()" style="margin-top:16px;padding:8px 20px;border:1px solid currentColor;background:transparent;color:inherit;cursor:pointer;border-radius:6px;">Retry</button>' : ""}
-      </div>`;
-    return;
-  }
-  // Filter out extreme-MOS outliers from sorting comparisons (BRK-B share-class
-  // quirk gives +19,661% which would always dominate the top spot).  We still
-  // show them, just don't let them control the order.
-  let items = [..._DISC_DATA];
-  if (_DISC_TIER_FILTER !== "all") {
-    items = items.filter(it => tierBucket(it.tier) === _DISC_TIER_FILTER);
-  }
-  // Optional sector filter (independent of tier filter).
-  if (_DISC_SECTOR_FILTER && _DISC_SECTOR_FILTER !== "all") {
-    items = items.filter(it =>
-      (it.sector || "").toLowerCase() === _DISC_SECTOR_FILTER.toLowerCase());
-  }
-
-  function sortMos(it) {
-    if (it.extreme || it.mos == null) return -Infinity;
-    return it.mos;
-  }
-  // Confidence-adjusted opportunity = MOS × confidence weight.  Keeps the
-  // top picks honest — a +200% MOS on a low-confidence emergency-cascade
-  // payload shouldn't outrank a +30% MOS with high DCF confidence.
-  function sortOpportunity(it) {
-    if (it.extreme || it.mos == null) return -Infinity;
-    const conf = (it.iv_confidence || "").toLowerCase();
-    const w = conf === "high" ? 1.0 : conf === "moderate" ? 0.55 : 0.25;
-    return it.mos * w;
-  }
-  if (_DISC_SORT === "mos" || _DISC_SORT === "undervalued") {
-    // Highest positive MOS first (most undervalued).
-    items.sort((a, b) => sortMos(b) - sortMos(a));
-  } else if (_DISC_SORT === "overvalued") {
-    // Lowest (most negative) MOS first.  Push extreme-flag outliers to
-    // the bottom rather than the top so they don't dominate the head.
-    items.sort((a, b) => {
-      const va = (a.extreme || a.mos == null) ?  Infinity : a.mos;
-      const vb = (b.extreme || b.mos == null) ?  Infinity : b.mos;
-      return va - vb;
-    });
-  } else if (_DISC_SORT === "opportunity") {
-    items.sort((a, b) => sortOpportunity(b) - sortOpportunity(a));
-  } else if (_DISC_SORT === "ticker") {
-    items.sort((a, b) => (a.ticker || "").localeCompare(b.ticker || ""));
-  } else if (_DISC_SORT === "sector") {
-    items.sort((a, b) => (a.sector || "").localeCompare(b.sector || ""));
-  }
-
-  function ageTxt(ageS) {
-    if (ageS == null) return "";
-    if (ageS < 30) return "now";
-    if (ageS < 60) return `${Math.round(ageS)}s`;
-    if (ageS < 3600) return `${Math.round(ageS/60)}m ago`;
-    return `${Math.round(ageS/3600)}h ago`;
-  }
-
-  // Squarified treemap (Bruls/Huijsen 2000). Takes items with `value`
-  // (positive numeric) and a target rect, returns each item with x/y/w/h
-  // assigned. Aspect ratios stay close to 1 so cells remain readable.
-  function squarifyTreemap(items, x, y, w, h) {
-    if (!items.length || w <= 0 || h <= 0) return [];
-    const sumV = items.reduce((s, it) => s + (it.value || 0), 0);
-    if (sumV <= 0) return [];
-    const totalArea = w * h;
-    const norm = items.map(it => ({ ...it, _area: ((it.value || 0) / sumV) * totalArea }))
-                      .filter(it => it._area > 0)
-                      .sort((a, b) => b._area - a._area);
-    const out = [];
-    function worst(row, side) {
-      const sum = row.reduce((s, it) => s + it._area, 0);
-      let mx = 0, mn = Infinity;
-      for (const it of row) { if (it._area > mx) mx = it._area; if (it._area < mn) mn = it._area; }
-      if (!mn) return Infinity;
-      return Math.max((side * side * mx) / (sum * sum),
-                      (sum * sum) / (side * side * mn));
-    }
-    function layoutRow(row, rx, ry, rw, rh) {
-      const sum = row.reduce((s, it) => s + it._area, 0);
-      if (rw <= rh) {
-        const rowH = sum / rw;
-        let cx = rx;
-        for (const it of row) {
-          const cw = it._area / rowH;
-          out.push({ ...it, x: cx, y: ry, w: cw, h: rowH });
-          cx += cw;
-        }
-        return [rx, ry + rowH, rw, rh - rowH];
-      } else {
-        const rowW = sum / rh;
-        let cy = ry;
-        for (const it of row) {
-          const ch = it._area / rowW;
-          out.push({ ...it, x: rx, y: cy, w: rowW, h: ch });
-          cy += ch;
-        }
-        return [rx + rowW, ry, rw - rowW, rh];
-      }
-    }
-    let queue = norm.slice();
-    let cx = x, cy = y, cw = w, ch = h;
-    while (queue.length) {
-      const row = [queue.shift()];
-      const side = Math.min(cw, ch);
-      let bestR = worst(row, side);
-      while (queue.length) {
-        const test = [...row, queue[0]];
-        const r = worst(test, side);
-        if (r <= bestR) { row.push(queue.shift()); bestR = r; }
-        else break;
-      }
-      [cx, cy, cw, ch] = layoutRow(row, cx, cy, cw, ch);
-    }
-    return out;
-  }
-
-  // Renders a single ticker cell.  Reused by both the treemap and the
-  // mobile-grid fallback so the cell content + interactions are identical.
-  // In treemap mode, sizeBasis carries an {x,y,w,h} rect for absolute
-  // positioning relative to the parent sector rect.
-  function renderCell(it, sizeMode = "grid", sizeBasis = null, rect = null) {
-    const c = tierColor(it.tier);
-    const mos = it.mos != null ? fmtPct(it.mos) : "—";
-    const cap = it.mos != null ? Math.min(Math.abs(it.mos), 100) : 50;
-    const age = ageTxt(it.age_seconds);
-    const stratIcon  = it.is_strategic
-      ? `<span class="disc-cell__strategic" title="${escHtml(it.strategic_label || 'Strategic Asset')} — sovereign-capital backstop">⛨</span>`
-      : "";
-    const policyChip = it.policy_tailwind
-      ? `<span class="disc-cell__policy" title="Live policy tailwind in recent news">⬈ POLICY</span>`
-      : it.policy_headwind
-      ? `<span class="disc-cell__policy disc-cell__policy--down" title="Policy headwind in recent news">⬊ POLICY</span>`
-      : "";
-    // sizeMode === "treemap": cell flex-basis is proportional to sqrt(mcap)
-    // so a $3T name is ~4× the area of a $200B name; linear scaling crushes
-    // small caps to single pixels.  Min-width ensures readability at all sizes.
-    // Squarified-treemap mode: absolute positioning relative to the sector
-    // rect. The rect carries x/y/w/h in pixels (relative to the grid).
-    // Sector position is set on the parent .disc-sector; the cell offsets
-    // are converted to be relative to that sector via subtraction.
-    let sizeStyle = "";
-    if (sizeMode === "treemap" && rect) {
-      // rect is in grid coordinates; sector wrapper handles its own
-      // (rect-x, rect-y) — but our cell rect was computed in the same grid
-      // coordinate system, so re-anchor to the parent sector via inline
-      // style with negative-offset trick: parent has left:sec.x, top:sec.y;
-      // we use absolute pixels for the cell directly inside it. To keep
-      // things simple, we render the cell with absolute coords relative
-      // to the grid root and the sector wrapper is also positioned that
-      // way (no nested coordinate translation needed).
-      sizeStyle = `position:absolute;left:${rect.x}px;top:${rect.y}px;width:${rect.w}px;height:${rect.h}px;`;
-    } else if (sizeMode === "treemap" && sizeBasis != null) {
-      // Legacy flexbox path (kept as a defensive fallback).
-      sizeStyle = `flex:${sizeBasis} 1 ${Math.max(64, sizeBasis * 14)}px;min-width:64px;min-height:${Math.max(38, Math.min(96, 32 + sizeBasis * 4))}px;`;
-    }
-    // Tooltip carries the name+tier+mos that the dense Finviz tiles hide.
-    const tooltip = `${it.ticker} · ${it.name || ""} · ${it.label || ""} · MoS ${mos}`;
-    return `
-      <div class="disc-cell ${sizeMode === "treemap" ? "disc-cell--tm" : ""}" data-disc-ticker="${escHtml(it.ticker)}"
-           title="${escHtml(tooltip)}"
-           style="--tier-accent:${c.accent};--tier-strong:${c.strong};--tier-glow:${c.glow};${sizeStyle}">
-        ${stratIcon}
-        ${policyChip}
-        ${age ? `<span class="disc-cell__age" title="Cached snapshot">${escHtml(age)}</span>` : ""}
-        <div class="disc-cell__head">
-          <span class="disc-cell__ticker">${escHtml(it.ticker)}</span>
-          <span class="disc-cell__mos">${mos}</span>
-        </div>
-        <div class="disc-cell__name">${escHtml(it.name || "—")}</div>
-        <div class="disc-cell__tier">${escHtml(it.label || "—")}</div>
-        <div class="disc-cell__bar"><div class="disc-cell__bar-fill" style="width:${cap}%"></div></div>
-      </div>
-    `;
-  }
-
-  // Finviz-style 2D squarified treemap — sectors and tickers tile into a
-  // single fixed-height rect so the entire universe is visible at once.
-  // Falls back to the uniform grid only when market-cap data is missing.
-  const haveMcap = items.some(it => it.market_cap != null && it.market_cap > 0);
-  const useTreemap = haveMcap && _DISC_SORT !== "ticker";
-
-  if (useTreemap) {
-    grid.classList.add("disc-grid--treemap");
-
-    // Group items by sector, sort sectors and tickers by mcap desc.
-    const bySector = new Map();
-    for (const it of items) {
-      const sec = it.sector || "Other";
-      if (!bySector.has(sec)) bySector.set(sec, []);
-      bySector.get(sec).push(it);
-    }
-    const sectorEntries = [...bySector.entries()]
-      .map(([sec, arr]) => {
-        arr.sort((a, b) => (b.market_cap || 0) - (a.market_cap || 0));
-        return { name: sec, items: arr,
-                 value: arr.reduce((s, it) => s + (it.market_cap || 0), 0) };
-      })
-      .sort((a, b) => b.value - a.value);
-
-    // Measure container — if not yet in DOM, defer to next frame.
-    const W = grid.clientWidth || 1200;
-    const H = Math.max(420, Math.round(window.innerHeight - 200));
-    grid.style.height = `${H}px`;
-
-    const sectorRects = squarifyTreemap(sectorEntries, 0, 0, W, H);
-    const HEAD_H = 18;   // sector header strip height
-    const PAD    = 2;    // inner padding so sector borders are visible
-
-    grid.innerHTML = sectorRects.map(rect => {
-      const { x, y, w, h, items: arr, name } = rect;
-      // Squarify ticker rects in sector-LOCAL coords (origin 0,0) so each
-      // cell's absolute position is relative to its parent .disc-sector.
-      const innerY = HEAD_H;
-      const innerH = Math.max(0, h - HEAD_H - PAD);
-      const innerX = PAD;
-      const innerW = Math.max(0, w - PAD * 2);
-      const tickerEntries = arr.map(it => ({
-        ...it,
-        // sqrt scaling — keeps small caps visible without crushing big ones.
-        value: Math.sqrt(Math.max(it.market_cap || 1, 1)),
-      }));
-      const cells = squarifyTreemap(tickerEntries, innerX, innerY, innerW, innerH)
-        .map(r => renderCell(r, "treemap", null, r))
-        .join("");
-      return `
-        <div class="disc-sector" style="left:${x}px;top:${y}px;width:${w}px;height:${h}px;">
-          <div class="disc-sector__head" style="height:${HEAD_H}px;">
-            <span class="disc-sector__name">${escHtml(name)}</span>
-            <span class="disc-sector__count">${arr.length}</span>
-          </div>
-          ${cells}
-        </div>`;
-    }).join("");
-  } else {
-    grid.classList.remove("disc-grid--treemap");
-    grid.style.height = "";
-    grid.innerHTML = items.map(it => renderCell(it, "grid")).join("");
-  }
-
-  grid.querySelectorAll(".disc-cell").forEach(cell => {
-    cell.onclick = () => {
-      closeDiscoverPage();
-      const t = cell.dataset.discTicker;
-      $("tickerInput").value = t;
-      analyze(t);
-    };
-  });
-}
-
-// Fast-tier refresh: hits /api/quote, recomputes MOS client-side using the
-// stable IV from _DISC_DATA, patches each cell's price + MOS in place
-// without a relayout (treemap sizing stays anchored to mcap, not MOS).
-async function refreshDiscoverPrices() {
-  if (_DISC_DATA.length === 0) return;
-  const tickers = _DISC_DATA.map(it => it.ticker).filter(Boolean);
-  if (tickers.length === 0) return;
+async function loadHomepageTopPicks() {
+  const cached = _loadHomeTopPicksLocal();
+  if (cached) renderHomepageTopPicks(cached);   // optimistic instant paint
   try {
-    const res = await fetch(`/api/quote?tickers=${encodeURIComponent(tickers.join(","))}`);
-    if (!res.ok) return;
-    const data = await res.json();
-    const quotes = data.quotes || {};
-    let touched = 0;
-    for (const it of _DISC_DATA) {
-      const q = quotes[it.ticker];
-      if (!q || q.price == null) continue;
-      it.price = q.price;
-      it.daily_change_pct = q.daily_change_pct;
-      if (it.iv != null && q.price > 0) {
-        it.mos = Math.max(Math.min((it.iv - q.price) / q.price * 100, 200), -99);
-      }
-      touched++;
-      // Patch the visible cell in place — no full re-render.
-      const cell = document.querySelector(`.disc-cell[data-disc-ticker="${it.ticker}"]`);
-      if (cell) {
-        const mosEl = cell.querySelector(".disc-cell__mos");
-        if (mosEl && it.mos != null) mosEl.textContent = fmtPct(it.mos);
-        const fill = cell.querySelector(".disc-cell__bar-fill");
-        if (fill && it.mos != null) fill.style.width = `${Math.min(Math.abs(it.mos), 100)}%`;
-      }
+    const r = await fetch("/api/top_picks");
+    if (!r.ok) return;
+    const data = await r.json();
+    const items = data.items || [];
+    if (items.length) {
+      _saveHomeTopPicksLocal(items);
+      renderHomepageTopPicks(items);
     }
-    if (touched > 0) {
-      _DISC_PRICES_LAST_UPDATE = Date.now();
-      updateFreshnessBadge();
-    }
-  } catch { /* swallow — next tick will retry */ }
+  } catch { /* offline / transient — local snapshot already rendered */ }
 }
 
-// Live-tick on the analyze view.  Hits /api/quote for the single displayed
-// ticker, recomputes MOS using the cached IV, and patches the hero card
-// (price, MOS%, MOS bar) without re-running the full DCF.
 async function refreshAnalyzeTick(ticker) {
   if (!ticker || !_LAST_DATA) return;
   // ETF / BTC hero cards have a different rendering path and no IV;
@@ -6271,79 +5789,6 @@ async function refreshAnalyzeTick(ticker) {
       }
     }
   } catch { /* silent — next tick retries */ }
-}
-
-// Updates "Prices: Xs ago" + "Model: Xm ago" badge text.  Called by
-// startFreshnessTicker every second and after each quote refresh.
-function updateFreshnessBadge() {
-  const badge = document.getElementById("discFreshness");
-  if (!badge) return;
-  const priceAge = _DISC_PRICES_LAST_UPDATE
-    ? Math.round((Date.now() - _DISC_PRICES_LAST_UPDATE) / 1000)
-    : null;
-  const modelAgeS = _DISC_DATA.length
-    ? Math.min(...(_DISC_DATA.map(it => it.age_seconds).filter(a => a != null)))
-    : null;
-  const fmtAge = (s) => {
-    if (s == null || isNaN(s)) return "—";
-    if (s < 60) return `${s}s ago`;
-    if (s < 3600) return `${Math.round(s / 60)}m ago`;
-    return `${Math.round(s / 3600)}h ago`;
-  };
-  // Color the model freshness chip green/amber/red based on the cron health.
-  const modelCls = modelAgeS == null ? "freshness--unknown"
-                 : modelAgeS < 30 * 60 ? "freshness--good"
-                 : modelAgeS < 90 * 60 ? "freshness--warn"
-                 : "freshness--stale";
-  badge.innerHTML = `
-    <span class="freshness-chip">Prices: ${fmtAge(priceAge)}</span>
-    <span class="freshness-chip ${modelCls}">Model: ${fmtAge(modelAgeS)}</span>
-  `;
-}
-
-let _FRESHNESS_TICKER = null;
-function startFreshnessTicker() {
-  if (_FRESHNESS_TICKER) clearInterval(_FRESHNESS_TICKER);
-  _FRESHNESS_TICKER = setInterval(updateFreshnessBadge, 1000);
-  updateFreshnessBadge();
-}
-
-function setupDiscover() {
-  const btn = $("discoverBtn");
-  if (btn) btn.onclick = openDiscoverPage;
-  const back = $("discBackBtn");
-  if (back) back.onclick = closeDiscoverPage;
-  const refresh = $("discRefreshBtn");
-  if (refresh) refresh.onclick = () => loadDiscover({ fresh: true });
-  document.querySelectorAll("[data-disc-tier]").forEach(b => {
-    b.onclick = () => {
-      _DISC_TIER_FILTER = b.dataset.discTier;
-      document.querySelectorAll("[data-disc-tier]").forEach(x =>
-        x.classList.toggle("active", x === b));
-      renderDiscover();
-    };
-  });
-  // Sector-filter chips are rendered dynamically from the live data set
-  // each time the page opens; delegate the click handler at parent level.
-  const sectorRow = document.getElementById("discSectorRow");
-  if (sectorRow) {
-    sectorRow.addEventListener("click", (e) => {
-      const b = e.target.closest("[data-disc-sector]");
-      if (!b) return;
-      _DISC_SECTOR_FILTER = b.dataset.discSector;
-      sectorRow.querySelectorAll("[data-disc-sector]").forEach(x =>
-        x.classList.toggle("active", x === b));
-      renderDiscover();
-    });
-  }
-  document.querySelectorAll("[data-disc-sort]").forEach(b => {
-    b.onclick = () => {
-      _DISC_SORT = b.dataset.discSort;
-      document.querySelectorAll("[data-disc-sort]").forEach(x =>
-        x.classList.toggle("active", x === b));
-      renderDiscover();
-    };
-  });
 }
 
 // ── Shared portfolio (read-only via URL) ───────────────────────────────
@@ -6463,9 +5908,8 @@ function hideAllViews() {
   $("btcHero")?.classList.add("hidden");
   $("etfHero")?.classList.add("hidden");
   $("portfolioPage")?.classList.add("hidden");
-  $("discoverPage")?.classList.add("hidden");
   $("leaderboardPage")?.classList.add("hidden");   // was missing — caused
-                                                   // leaderboard + discover
+                                                   // leaderboard
                                                    // to stack visually
   $("loading")?.classList.add("hidden");
   // Stop any live polling tied to the analyze hero — it's no longer visible.
@@ -6483,14 +5927,14 @@ function hideAllViews() {
 //   /?p=AAPL,MSFT     → open shared (read-only) portfolio view
 function readURLParams() {
   const params = new URLSearchParams(window.location.search);
-  // Hash drives view routing (#discover, #portfolio, #leaderboard) so it
+  // Hash drives view routing (#portfolio, #watchlist, #leaderboard) so it
   // survives browser refresh without conflicting with the existing ?t=
   // and ?p= ticker/shared-portfolio query params.
   const hash = (window.location.hash || "").replace(/^#/, "").toLowerCase();
   return {
     ticker:    (params.get("t") || params.get("ticker") || "").trim().toUpperCase(),
     portfolio: (params.get("p") || params.get("portfolio") || "").trim().toUpperCase(),
-    view:      ["discover", "portfolio", "leaderboard"].includes(hash) ? hash : "",
+    view:      ["portfolio", "watchlist", "leaderboard"].includes(hash) ? hash : "",
   };
 }
 
@@ -6509,17 +5953,15 @@ async function bootFromURL() {
     return;
   }
   // No ticker / no shared portfolio — restore the hash-encoded view so
-  // browser refresh on Discover/Portfolio/Leaderboard stays put instead of
-  // bouncing back to the search hero.
-  if (view === "discover")        { openDiscoverPage();    return; }
+  // browser refresh on Portfolio / Watchlist / Leaderboard stays put
+  // instead of bouncing back to the search hero.
   if (view === "portfolio")       { openPortfolioPage();   return; }
   if (view === "watchlist")       { openWatchlistPage();   return; }
   if (view === "leaderboard")     { openLeaderboardPage(); return; }
 
-  // No active view, no ticker — pre-warm the Discover cache in the
-  // background so when the user clicks Discover, data is already there.
-  // Non-blocking; failures swallowed (the explicit click will retry).
-  setTimeout(() => { try { loadDiscover(); } catch (e) {} }, 800);
+  // Homepage Top Picks: fire-and-forget fetch so the card row populates
+  // for visitors who never navigate away from the hero.
+  setTimeout(() => { try { loadHomepageTopPicks(); } catch (e) {} }, 200);
 }
 
 // Hash-driven view routing.  Set when a non-search view opens, cleared on
@@ -6555,7 +5997,6 @@ document.addEventListener("DOMContentLoaded", () => {
   setupOnboardingCallout();
   setupCustomDCFSliders();
   setupSharePortfolio();
-  setupDiscover();
   setupLowConfExplainer();
   setupSubmitToLeaderboard();
   setupLeaderboard();
@@ -6580,12 +6021,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const { ticker, portfolio, view } = readURLParams();
     if (ticker || portfolio) { bootFromURL(); return; }
     // Hash-only navigation — close everything and re-route to the view.
-    closeDiscoverPage();
     closePortfolioPage();
     closeWatchlistPage();
     closeLeaderboardPage();
-    if (view === "discover")    openDiscoverPage();
-    else if (view === "portfolio")  openPortfolioPage();
+    if      (view === "portfolio")  openPortfolioPage();
     else if (view === "watchlist")  openWatchlistPage();
     else if (view === "leaderboard") openLeaderboardPage();
   });
