@@ -876,13 +876,26 @@
       <div class="disc-filter-row">
         <span class="disc-filter-label">Sort:</span>
         <button class="disc-tier-pill active" data-disc-sort="opportunity" type="button" title="Margin of safety × DCF confidence">Best opportunity</button>
-        <button class="disc-tier-pill" data-disc-sort="mos" type="button">By MOS</button>
+        <button class="disc-tier-pill" data-disc-sort="undervalued" type="button" title="MOS descending — biggest discount to fair value first">Most undervalued</button>
+        <button class="disc-tier-pill" data-disc-sort="overvalued" type="button" title="MOS ascending — biggest premium to fair value first">Most overvalued</button>
         <button class="disc-tier-pill" data-disc-sort="ticker" type="button">By Ticker</button>
         <button class="disc-tier-pill" data-disc-sort="sector" type="button">By Sector</button>
       </div>
       <!-- Dynamic sector-filter row, populated from live data. -->
       <div class="disc-filter-row" id="discSectorRow"></div>
     </div>
+
+    <!-- Top Picks (Phase 6): the 5 most-undervalued names with the highest
+         VALUS letter grade, surfaced above the heatmap so the user has an
+         immediate "where do I look first" answer.  Hidden until live data
+         arrives and there are at least 3 candidates with positive MOS. -->
+    <section class="disc-toppicks card hidden" id="discTopPicks">
+      <div class="disc-toppicks__head">
+        <h2 class="disc-toppicks__title">Top Picks</h2>
+        <span class="disc-toppicks__sub">Most undervalued by VALUS grade</span>
+      </div>
+      <div class="disc-toppicks__row" id="discTopPicksRow"></div>
+    </section>
 
     <div class="card">
       <div class="disc-loading hidden" id="discLoading">
