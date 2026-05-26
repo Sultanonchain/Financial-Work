@@ -3624,6 +3624,98 @@ function setupWatchlistPage() {
   if (navBtn) navBtn.onclick = openWatchlistPage;
   const back = $("wlBackBtn");
   if (back) back.onclick = closeWatchlistPage;
+  const csv = $("wlExportCsvBtn");
+  if (csv) csv.onclick = () => exportItemsToCsv(wlRead(), "valus-watchlist");
+}
+
+// ── CSV export (Phase 8a) ────────────────────────────────────────────
+// Shared by the portfolio + watchlist export buttons.  Builds a CSV
+// from the in-memory items array and triggers a browser download.  No
+// server round-trip — the data already lives in localStorage.
+//
+// Fields:   ticker, name, sector, price, fair_value, mos_pct, grade,
+//           verdict, added_at_iso
+function _csvEscape(v) {
+  if (v == null) return "";
+  const s = String(v);
+  // RFC 4180: wrap in quotes if it contains comma, quote, newline.
+  // Escape internal quotes by doubling.
+  if (/[,"\r\n]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+function _itemsToCsv(items) {
+  const header = ["ticker","name","sector","price","fair_value","mos_pct","grade","verdict","added_at_iso"];
+  const rows = (items || []).map(it => {
+    const grade = mosToGrade(it.mos) || "";
+    const added = (typeof it.addedAt === "number")
+      ? new Date(it.addedAt).toISOString()
+      : "";
+    return [
+      it.ticker || "",
+      it.name   || "",
+      it.sector || "",
+      (typeof it.price === "number") ? it.price.toFixed(2) : "",
+      (typeof it.iv    === "number") ? it.iv.toFixed(2)    : "",
+      (typeof it.mos   === "number") ? it.mos.toFixed(2)   : "",
+      grade,
+      it.tier   || "",
+      added,
+    ].map(_csvEscape).join(",");
+  });
+  return [header.join(","), ...rows].join("\r\n") + "\r\n";
+}
+
+function exportItemsToCsv(items, basename) {
+  if (!items || items.length === 0) {
+    alert("Nothing to export yet — add a stock first.");
+    return;
+  }
+  const csv = _itemsToCsv(items);
+  // Datestamp the filename so multiple exports don't clobber each other
+  // in Downloads/.  YYYY-MM-DD is unambiguous and sorts naturally.
+  const today = new Date().toISOString().slice(0, 10);
+  const filename = `${basename}-${today}.csv`;
+  // BOM prefix makes Excel pick up UTF-8 correctly when the file is
+  // double-clicked.  Standard practice for "export to CSV" features.
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // Free the blob URL on the next tick.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+// ── Onboarding callout (Phase 8d) ────────────────────────────────────
+// First-visit explainer above the hero.  Shown only when the user has
+// never dismissed it; after dismissal the localStorage flag persists
+// so it never returns.
+const ONBOARD_KEY = "valus.onboarded.v1";
+
+function setupOnboardingCallout() {
+  const el    = document.getElementById("onboardingCallout");
+  const close = document.getElementById("onboardingCalloutClose");
+  if (!el) return;
+  let seen = false;
+  try { seen = !!localStorage.getItem(ONBOARD_KEY); } catch {}
+  if (seen) {
+    // Stay hidden — already dismissed on a previous visit.
+    el.classList.add("hidden");
+    return;
+  }
+  el.classList.remove("hidden");
+  if (close) {
+    close.onclick = () => {
+      el.classList.add("hidden");
+      try { localStorage.setItem(ONBOARD_KEY, "1"); } catch {}
+    };
+  }
 }
 
 function setupAddPortfolioButton() {
@@ -3867,6 +3959,17 @@ function setupPortfolioPage() {
 
   const tpl = $("pfTemplatesBtn");
   if (tpl) tpl.onclick = openTemplatesModal;
+
+  // CSV export — pull the active portfolio's items + a slug-safe filename
+  // segment based on its name (e.g. "Long Term" → "long-term") so a user
+  // with multiple portfolios doesn't clobber yesterday's export.
+  const csv = $("pfExportCsvBtn");
+  if (csv) csv.onclick = () => {
+    const a = pfActive();
+    const slug = (a.name || "portfolio").toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "portfolio";
+    exportItemsToCsv(pfRead(), `valus-${slug}`);
+  };
 
   const start = $("pfStartBtn");
   if (start) start.onclick = () => {
@@ -6449,6 +6552,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupTierGlossary();
   setupModalDismiss();
   setupGradeExplainer();
+  setupOnboardingCallout();
   setupCustomDCFSliders();
   setupSharePortfolio();
   setupDiscover();

@@ -141,6 +141,7 @@
         <button class="copy-btn starred" id="pfPublishBtn" type="button">🏆 Publish</button>
         <button class="copy-btn" id="pfShareBtn" type="button">↗ Share</button>
         <button class="copy-btn" id="pfRefreshBtn" type="button">↻ Refresh</button>
+        <button class="copy-btn" id="pfExportCsvBtn" type="button" title="Download this portfolio as CSV">⤓ Export CSV</button>
         <button class="copy-btn" id="pfViewLeaderboardBtn" type="button" title="See top portfolios from other users">🏆 Leaderboard →</button>
       </div>
     </div>
@@ -209,7 +210,9 @@
         <p>Stocks you're tracking — price vs VALUS fair value at a glance.
            <span id="watchlistCountInline">0</span> tracked.</p>
       </div>
-      <div class="pf-page__actions"></div>
+      <div class="pf-page__actions">
+        <button class="copy-btn" id="wlExportCsvBtn" type="button" title="Download this watchlist as CSV">⤓ Export CSV</button>
+      </div>
     </div>
 
     <div class="card">
@@ -226,6 +229,24 @@
 <!-- ── HERO SEARCH ────────────────────────────────────────────────────── -->
 <section class="hero">
   <div class="container">
+    <!-- First-visit onboarding callout (Phase 8d).  Hidden by default;
+         shown once via JS when valus.onboarded.v1 isn't in localStorage.
+         Dismissing sets the flag so it never returns. -->
+    <aside class="onboarding-callout hidden" id="onboardingCallout" role="note" aria-labelledby="onboardingCalloutTitle">
+      <span class="onboarding-callout__icon" aria-hidden="true">✦</span>
+      <div class="onboarding-callout__body">
+        <h3 class="onboarding-callout__title" id="onboardingCalloutTitle">First time here? Read this in 20 seconds.</h3>
+        <p class="onboarding-callout__text">
+          VALUS estimates each stock's <strong>fair value</strong> with a 10-year
+          <strong>discounted cash flow (DCF)</strong> model — projecting future cash
+          back to today and dividing by share count. Compare that to the market price
+          and you get a <strong>margin of safety</strong> (MOS). The bigger the
+          discount, the better the <strong>A-F grade</strong>.
+        </p>
+      </div>
+      <button class="onboarding-callout__close" id="onboardingCalloutClose" type="button" aria-label="Dismiss">Got it ✓</button>
+    </aside>
+
     <h1 class="hero__title">
       Search any stock.<br/>
       Understand its valuation instantly.
