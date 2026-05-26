@@ -5434,3 +5434,74 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+   Universal card hardening (Phase 7)
+   ════════════════════════════════════════════════════════════════════════
+   Defensive rules applied to .card and its descendants so any future card
+   variant inherits overflow protection automatically.  The verdict-grid
+   bug shipped earlier today surfaced because grid items default to
+   min-width:auto, which lets a long unbreakable token push the card
+   past its grid track.  These rules harden every card on the site
+   against that class of bug without touching individual component
+   stylesheets. */
+
+/* The card box itself never exceeds its allocated width.  box-sizing is
+   set globally on `*` but reasserting here makes the contract explicit. */
+.card {
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+/* Text content inside cards: long URLs, ticker strings, or company
+   names with no spaces can't escape the card boundary.  Scoped to the
+   text-bearing tags so we don't break inline-flex pills (pills set
+   their own white-space). */
+.card p,
+.card h1, .card h2, .card h3, .card h4, .card h5, .card h6,
+.card li,
+.card dt, .card dd {
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  min-width: 0;
+}
+
+/* Tables inside cards stay inside the card and scroll horizontally if
+   they exceed it (rather than blowing out the card width).  Applies to
+   the compare modal and any future tabular cards. */
+.card table { max-width: 100%; }
+/* Per-table responsive treatment is a component decision — the existing
+   .dt, .pf-tpl__hold-table, .cmp-table classes already handle their own
+   layout, so we don't override display: here. */
+
+/* Consistent hover transition on every clickable affordance that doesn't
+   set its own.  Buttons + role=button + clickable list items get a
+   uniform 150ms ease-out so the site reads as one design system. */
+button:not(.no-default-transition),
+[role="button"]:not(.no-default-transition) {
+  transition: background-color 150ms var(--ease-out),
+              border-color     150ms var(--ease-out),
+              color            150ms var(--ease-out),
+              transform        150ms var(--ease-out),
+              box-shadow       150ms var(--ease-out);
+}
+
+/* Disable pointer-events on disabled buttons site-wide (cursor still
+   shows the not-allowed icon via the existing `:disabled` rules). */
+button:disabled { cursor: not-allowed; }
+
+/* Force long ticker/identifier strings to ellipsize rather than overflow
+   inside any narrow card cell — opt-in via a class on the cell. */
+.card .truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* Mobile safety: very narrow viewports get tighter horizontal padding so
+   cards don't push the viewport into horizontal scrolling. */
+@media (max-width: 400px) {
+  .container { padding-left: 12px; padding-right: 12px; }
+  .card      { padding: var(--space-4); }
+}
