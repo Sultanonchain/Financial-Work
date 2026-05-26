@@ -3488,6 +3488,71 @@ def _compute_strategic_iv_floor(ticker, info, dcf_iv, base_fcf, fx_rate,
     }
 
 
+# ── VALUS A-F grade (Phase 5) ───────────────────────────────────────────
+# Derives a simple letter grade from the margin-of-safety (% gap between
+# VALUS fair value and current price).  Surfaces alongside the existing
+# `priced_for` tier — both quantify the same underlying signal but the
+# letter grade is the scannable, prominent version we put on stock cards
+# and detail headers; the tier is the longer-form label users see in the
+# verdict copy.
+#
+# Thresholds (margin_of_safety as a percent, where +% means undervalued):
+#   A  : MOS ≥ +30     — deeply undervalued
+#   B  : +15 ≤ MOS <  +30  — moderately undervalued
+#   C  : -15 <  MOS <  +15  — fairly priced
+#   D  : -30 < MOS ≤ -15  — moderately overvalued
+#   F  : MOS ≤ -30     — severely overvalued
+# These match the ±15% / ±30% breakpoints the existing tier system uses;
+# A/B map to Discount/Fair-Value, D/F map to Growth/Excellence/Miracle.
+
+_VALUS_GRADE_BANDS = {
+    "A": "Deeply undervalued",
+    "B": "Moderately undervalued",
+    "C": "Fairly priced",
+    "D": "Moderately overvalued",
+    "F": "Severely overvalued",
+}
+_VALUS_GRADE_EXPLANATIONS = {
+    "A": "Market price is well below VALUS fair value — significant margin of safety.",
+    "B": "Trading below VALUS fair value with a comfortable margin of safety.",
+    "C": "Market price tracks VALUS fair value — no obvious mispricing.",
+    "D": "Trading above VALUS fair value — investors are paying for above-trend growth.",
+    "F": "Market price is far above VALUS fair value — expectations look stretched.",
+}
+
+
+def compute_valus_grade(margin_of_safety_pct):
+    """Map margin-of-safety percent → letter grade + label + explanation.
+
+    margin_of_safety_pct: a percent (e.g. 25.0 means price is 25% below fair value).
+    Returns None for non-numeric / missing input so callers can hide the
+    badge cleanly rather than show "?".
+
+    Boundaries land on the worse side (A captures exactly +30, F captures
+    exactly -30) — matches user intuition that "30% below fair value =
+    deeply undervalued" rather than nudging into the next band.
+    """
+    if margin_of_safety_pct is None:
+        return None
+    try:
+        m = float(margin_of_safety_pct)
+    except (TypeError, ValueError):
+        return None
+    if m != m:                          # NaN guard
+        return None
+    if   m >=  30:   grade = "A"
+    elif m >=  15:   grade = "B"
+    elif m >  -15:   grade = "C"
+    elif m >  -30:   grade = "D"
+    else:            grade = "F"
+    return {
+        "grade":       grade,
+        "label":       _VALUS_GRADE_BANDS[grade],
+        "explanation": _VALUS_GRADE_EXPLANATIONS[grade],
+        "mos":         round(m, 1),
+    }
+
+
 # ── "Priced For" Verdict ────────────────────────────────────────────────────
 
 def _priced_for_verdict(implied_g, sector_ceiling, price, iv, margin_of_safety=None):
@@ -7551,6 +7616,7 @@ def api_compare():
             "mos":             d.get("margin_of_safety"),
             "tier":            (d.get("priced_for") or {}).get("tier"),
             "tier_label":      (d.get("priced_for") or {}).get("label"),
+            "valus_grade":     d.get("valus_grade"),
             "market_cap":      d.get("market_cap"),
             "analyst_target":  d.get("analyst_target"),
             "pe":              d.get("pe_ratio"),
@@ -11185,6 +11251,8 @@ def analyze():
                                   and abs(margin_of_safety) > 100),
             # ── "Priced For" Verdict + Verdict Summary ────────────────────
             "priced_for":              priced_for,
+            # ── VALUS A-F letter grade (derived from MOS) ─────────────────
+            "valus_grade":             compute_valus_grade(margin_of_safety),
             "verdict_summary":         verdict_summary,
             "sector_growth_ceiling_pct": round(_ceiling * 100, 1) if _ceiling else None,
             "sector_growth_ceiling_label": _ceiling_label,
