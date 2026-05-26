@@ -7517,20 +7517,26 @@ def _read_recent_tickers(user_sub: str) -> list:
 @app.route("/api/compare")
 @limiter.limit(limit_medium)
 def api_compare():
-    """Side-by-side analysis of two tickers.
+    """Side-by-side analysis of 2-3 tickers.
 
     Reuses the analyze pipeline via internal request dispatch so the cache,
     rate limiting, and gating logic stay consistent.  Returns:
-      {tickers: ["AAPL", "MSFT"], analyses: {AAPL: {...}, MSFT: {...}},
-       fields: [...meta...]}
+      {tickers: [...], analyses: {TICKER: {...}, ...}}
 
-    `fields` is a curated list of comparison rows (label + per-ticker value)
-    so the frontend can render a stable table.
+    Phase 4 widened from exactly-two to 2-3 tickers; `analyst_target` is
+    surfaced in the thinned payload alongside the already-present
+    market_cap so the frontend can show both columns.
     """
     raw = request.args.get("tickers") or ""
     tickers = [t.strip().upper() for t in raw.split(",") if t.strip()]
-    if len(tickers) != 2:
-        return jsonify({"error": "Pass exactly two tickers, e.g. ?tickers=AAPL,MSFT"}), 400
+    # Dedupe while preserving order so callers can't pad to bypass the cap.
+    seen = set(); unique = []
+    for t in tickers:
+        if t not in seen:
+            seen.add(t); unique.append(t)
+    tickers = unique
+    if len(tickers) < 2 or len(tickers) > 3:
+        return jsonify({"error": "Pass 2 or 3 tickers, e.g. ?tickers=AAPL,MSFT,GOOG"}), 400
 
     def _thin(d):
         if not d or d.get("error"):
@@ -7546,6 +7552,7 @@ def api_compare():
             "tier":            (d.get("priced_for") or {}).get("tier"),
             "tier_label":      (d.get("priced_for") or {}).get("label"),
             "market_cap":      d.get("market_cap"),
+            "analyst_target":  d.get("analyst_target"),
             "pe":              d.get("pe_ratio"),
             "forward_pe":      d.get("forward_pe"),
             "peg":             d.get("peg_ratio"),
