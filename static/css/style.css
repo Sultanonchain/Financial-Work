@@ -5617,3 +5617,103 @@ button:disabled { cursor: not-allowed; }
   color: var(--ink-secondary);
   margin: 0;
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+   Phase 8 — Polish
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ── (b) Smooth page-view transitions ────────────────────────────────
+   Adds an enter animation on the main page containers when they become
+   visible.  Exit stays instant (display:none) to keep navigation snappy
+   — the asymmetric feel reads as "the new page arrived" without lingering. */
+@keyframes pageEnter {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.results:not(.hidden),
+.portfolio-page:not(.hidden),
+.discover-page:not(.hidden),
+.btc-hero:not(.hidden),
+.etf-hero:not(.hidden) {
+  animation: pageEnter 180ms var(--ease-out);
+}
+/* Respect users who've asked the OS for reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  .results:not(.hidden),
+  .portfolio-page:not(.hidden),
+  .discover-page:not(.hidden),
+  .btc-hero:not(.hidden),
+  .etf-hero:not(.hidden) { animation: none; }
+}
+
+/* ── (d) First-visit onboarding callout ──────────────────────────────
+   Sits above the hero title on first load; dismissable; never returns
+   once dismissed (localStorage: valus.onboarded.v1). */
+.onboarding-callout {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 16px;
+  padding: 16px 20px;
+  margin: 0 auto var(--space-5);
+  max-width: 720px;
+  background: linear-gradient(135deg,
+    rgba(94,234,212,0.08) 0%,
+    rgba(94,234,212,0.03) 100%);
+  border: 1px solid rgba(94,234,212,0.28);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 28px rgba(0,0,0,0.30);
+  animation: pageEnter 240ms var(--ease-out);
+}
+.onboarding-callout.hidden { display: none; }
+.onboarding-callout__icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: rgba(94,234,212,0.18);
+  color: var(--accent);
+  font-size: 16px;
+  flex-shrink: 0;
+}
+.onboarding-callout__body { min-width: 0; }
+.onboarding-callout__title {
+  margin: 0 0 6px;
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink-primary);
+  letter-spacing: 0.01em;
+}
+.onboarding-callout__text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-secondary);
+}
+.onboarding-callout__text strong { color: var(--ink-primary); font-weight: 600; }
+.onboarding-callout__close {
+  align-self: start;
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid rgba(94,234,212,0.40);
+  color: var(--accent);
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.onboarding-callout__close:hover {
+  background: rgba(94,234,212,0.14);
+}
+@media (max-width: 640px) {
+  /* On phones the dismiss button moves below the body so the layout
+     doesn't squeeze the title. */
+  .onboarding-callout { grid-template-columns: auto 1fr; gap: 12px; padding: 14px 16px; }
+  .onboarding-callout__close { grid-column: 1 / -1; justify-self: start; }
+  .onboarding-callout__title { font-size: 13px; }
+  .onboarding-callout__text  { font-size: 12px; }
+}
