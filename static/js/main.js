@@ -89,6 +89,28 @@ function mosToGradeChip(mos) {
     </span>`;
 }
 
+// Render a chip for a stored portfolio / watchlist item.  Prefers the
+// SNAPSHOTTED grade (which captures any backend tier-override like
+// Strategic Discount → B) over re-deriving from raw MOS.  Falls back to
+// mosToGradeChip when the item predates the snapshot field.
+function itemGradeChip(it) {
+  if (!it) return mosToGradeChip(null);
+  const stored = it.grade;
+  // No snapshot — derive from MOS like before (back-compat for items
+  // added pre-reconciliation shipping).
+  if (!stored) return mosToGradeChip(it.mos);
+  const mos = it.mos;
+  const mosTxt = (typeof mos === "number")
+    ? `${mos >= 0 ? "+" : ""}${fmt(mos, 1)}%`
+    : "—";
+  return `
+    <span class="valus-grade" data-grade="${escHtml(stored)}"
+          title="VALUS grade ${escHtml(stored)} · ${mosTxt} — click for definitions">
+      <span class="valus-grade__letter">${escHtml(stored)}</span>
+      <span class="valus-grade__label">${mosTxt}</span>
+    </span>`;
+}
+
 // ── Grade explainer modal ────────────────────────────────────────────
 // Single source of truth for the band data on the frontend.  Mirrors
 // app.py::VALUS_GRADE_BANDS so the modal copy matches the server-side
@@ -3512,6 +3534,8 @@ function setupAddWatchlistButton() {
       iv:     _LAST_DATA.intrinsic_value,
       mos:    _LAST_DATA.margin_of_safety,
       tier:   _LAST_DATA.priced_for?.label || "",
+      // Snapshot reconciled grade — see pfAdd for rationale.
+      grade:  _LAST_DATA.valus_grade?.grade || null,
     });
     btn.classList.add("starred");
     txt.textContent = "👁 In Watchlist";
@@ -3589,7 +3613,7 @@ function renderWatchlistPage() {
         <span class="pf-item__name">${escHtml(it.name || "")}</span>
         <span class="pf-item__price">${priceTxt}</span>
         <span class="pf-item__price">${ivTxt}</span>
-        <span class="pf-item__grade-cell">${mosToGradeChip(mos)}</span>
+        <span class="pf-item__grade-cell">${itemGradeChip(it)}</span>
         <button class="pf-item__remove" data-wl-remove="${escHtml(it.ticker)}"
                 type="button" aria-label="Remove ${escHtml(it.ticker)}">×</button>
       </div>`;
@@ -3740,6 +3764,11 @@ function setupAddPortfolioButton() {
       iv: _LAST_DATA.intrinsic_value,
       mos: _LAST_DATA.margin_of_safety,
       tier: _LAST_DATA.priced_for?.label || "",
+      // Snapshot the server-reconciled letter grade so the portfolio row
+      // shows the same grade the user saw on the detail page — important
+      // when a tier override (e.g. Strategic Discount) bumped the grade
+      // away from what raw MOS-math would derive.
+      grade: _LAST_DATA.valus_grade?.grade || null,
     });
     btn.classList.add("starred");
     txt.textContent = "★ In Portfolio";
@@ -3855,7 +3884,7 @@ function renderPortfolioPage() {
         <span class="pf-item__ticker">${escHtml(it.ticker)}</span>
         <span class="pf-item__name">${escHtml(it.name || "")}</span>
         <span class="pf-item__price">${it.price != null ? fmtPrice(it.price) : "—"}</span>
-        <span class="pf-item__grade-cell">${mosToGradeChip(it.mos)}</span>
+        <span class="pf-item__grade-cell">${itemGradeChip(it)}</span>
         <button class="pf-item__remove" data-pf-remove="${escHtml(it.ticker)}" aria-label="Remove">✕</button>
       </div>
     `;
@@ -3933,6 +3962,9 @@ async function refreshPortfolioPrices() {
         iv: d.intrinsic_value,
         mos: d.margin_of_safety,
         tier: d.priced_for?.label || it.tier,
+        // Pick up any tier-reconciled grade on refresh so a Strategic
+        // Discount override propagates into the stored snapshot.
+        grade: d.valus_grade?.grade || it.grade || null,
         sector: d.sector || it.sector,
         name: d.company_name || it.name,
       };
@@ -4288,6 +4320,7 @@ async function addTickersToPortfolio(tickers, btn, restoreLabel) {
         iv:     d.intrinsic_value ?? null,
         mos:    d.margin_of_safety ?? null,
         tier:   d.priced_for?.label || (d.is_etf ? "ETF" : ""),
+        grade:  d.valus_grade?.grade || null,
       });
     } catch {
       // keep going — partial success is better than aborting
@@ -5823,6 +5856,7 @@ async function openSharedPortfolio(tickers) {
         iv:     d.intrinsic_value,
         mos:    d.margin_of_safety,
         tier:   d.priced_for?.label || "",
+        grade:  d.valus_grade?.grade || null,
       };
     } catch { return null; }
   }));

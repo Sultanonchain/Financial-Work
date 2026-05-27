@@ -3521,6 +3521,45 @@ _VALUS_GRADE_EXPLANATIONS = {
 }
 
 
+def _reconcile_grade_with_tier(grade, priced_for):
+    """Override the MOS-derived grade when the priced_for tier carries a
+    stronger editorial signal than raw DCF can express.
+
+    Currently handles one case: ``strategic_discount``.  The strategic-
+    asset framework lifts the IV floor for CHIPS Act / sovereign-backstopped
+    names; if despite that lift the price is still above the floor (negative
+    MOS), the existing code further promotes the tier to "Strategic
+    Discount" based on a low forward P/E heuristic — the editorial call
+    is "DCF underestimates this; the market is discounting a sovereign-
+    moated franchise."
+
+    Without reconciliation the user sees a green "Strategic Discount" tier
+    pill next to a "D — Moderately Overvalued" letter grade.  Both views
+    derive from the same fair-value number; they shouldn't disagree on
+    direction.  When the tier override fires, lift the grade to B with
+    matching label + explanation so the badge, pill, and copy all align.
+    """
+    if not grade or not priced_for:
+        return grade
+    tier = (priced_for or {}).get("tier")
+    if tier == "strategic_discount" and grade.get("grade") in ("D", "F"):
+        return {
+            "grade":       "B",
+            "label":       "Strategic discount",
+            "explanation": (
+                "Pure DCF prices this above fair value, but VALUS's "
+                "strategic-asset framework adjusts for the franchise's "
+                "sovereign backstop (e.g. CHIPS Act, defense prime, sole-"
+                "US producer status).  The market is paying a lower-than-"
+                "warranted multiple — treat as opportunity, not a value trap."
+            ),
+            "mos":         grade.get("mos"),
+            "overridden":  True,    # flag for the explainer modal / debug
+            "raw_grade":   grade.get("grade"),
+        }
+    return grade
+
+
 def compute_valus_grade(margin_of_safety_pct):
     """Map margin-of-safety percent → letter grade + label + explanation.
 
@@ -11263,8 +11302,14 @@ def analyze():
                                   and abs(margin_of_safety) > 100),
             # ── "Priced For" Verdict + Verdict Summary ────────────────────
             "priced_for":              priced_for,
-            # ── VALUS A-F letter grade (derived from MOS) ─────────────────
-            "valus_grade":             compute_valus_grade(margin_of_safety),
+            # ── VALUS A-F letter grade (derived from MOS, then reconciled
+            #    with the priced_for tier so a "Strategic Discount" pill
+            #    can't end up paired with a "D" badge — see
+            #    _reconcile_grade_with_tier for the full rationale) ─────
+            "valus_grade":             _reconcile_grade_with_tier(
+                                           compute_valus_grade(margin_of_safety),
+                                           priced_for,
+                                       ),
             "verdict_summary":         verdict_summary,
             "sector_growth_ceiling_pct": round(_ceiling * 100, 1) if _ceiling else None,
             "sector_growth_ceiling_label": _ceiling_label,
