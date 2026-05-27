@@ -93,7 +93,8 @@ fake = {
 src = open("app.py").read()
 check('app.py exposes "valus_grade" in compare _thin',
       '"valus_grade":     d.get("valus_grade")' in src)
-check('analyze response sets valus_grade', '"valus_grade":             compute_valus_grade(' in src)
+check('analyze response sets valus_grade', '"valus_grade":' in src and 'compute_valus_grade(margin_of_safety)' in src)
+check('analyze grade goes through tier reconciler', '_reconcile_grade_with_tier(' in src)
 
 # ── Summary ──────────────────────────────────────────────────────────
 print()
