@@ -6583,6 +6583,14 @@ def api_me():
             None if plus
             else (SIGNED_IN_SEARCH_LIMIT if user else ANON_SEARCH_LIMIT)
         ),
+        # True when Vercel KV / Upstash is connected — portfolios written
+        # by /api/portfolio actually persist across cold starts and across
+        # devices for the same Google account.  When False, writes hit
+        # ephemeral memory only and signing in on another device will see
+        # an empty collection.  The frontend reads this and (a) refuses to
+        # let an empty server response overwrite local items, (b) shows a
+        # banner explaining cross-device sync isn't wired up.
+        "storage_durable":  bool(_kv),
     }
     if user and plus:
         rec = _read_subscription(user.get("sub"))

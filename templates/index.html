@@ -44,7 +44,7 @@
            portfolios; free for everyone.  Signed-out users keep using it
            via localStorage; sign-in pulls/merges. -->
       <button class="header-btn" id="watchlistBtn" type="button" aria-label="Open watchlist">
-        <span class="header-btn__icon">👁</span>
+        <span class="header-btn__icon">≡</span>
         <span class="header-btn__label">Watchlist</span>
         <span class="header-btn__count" id="watchlistCount" hidden>0</span>
       </button>
@@ -144,6 +144,18 @@
     <div class="pf-shared-banner hidden" id="pfSharedBanner">
       ★ <strong>Shared portfolio</strong> — read-only view. Found something interesting? <a href="/" id="pfSharedHome">Build your own.</a>
     </div>
+    <!-- Shown when the deploy has no durable storage (no Vercel KV).  Portfolios
+         live only in this browser; signing in on another device won't surface
+         them.  Dismissable; remembered in localStorage so we don't nag. -->
+    <div class="pf-storage-warn hidden" id="pfStorageWarn">
+      <span class="pf-storage-warn__icon" aria-hidden="true">⚠</span>
+      <div class="pf-storage-warn__body">
+        <strong>Cross-device sync isn't enabled on this deploy.</strong>
+        Your portfolios are saved in this browser only — signing in on another device won't show them.
+        Set up <a href="https://vercel.com/docs/storage/vercel-kv" target="_blank" rel="noopener">Vercel KV</a> (free tier works) and redeploy to sync them to your Google account.
+      </div>
+      <button class="pf-storage-warn__dismiss" id="pfStorageWarnDismiss" type="button" aria-label="Dismiss">✕</button>
+    </div>
 
     <!-- Summary cards (4 metrics) -->
     <div class="pf-summary-grid" id="pfSummaryGrid">
@@ -218,7 +230,7 @@
 
     <div class="card">
       <div class="portfolio-empty" id="watchlistEmpty">
-        <div class="portfolio-empty__icon">👁</div>
+        <div class="portfolio-empty__icon">≡</div>
         <div class="portfolio-empty__title">No stocks in your watchlist yet</div>
         <div class="portfolio-empty__sub">Search any ticker and tap "Add to Watchlist" to start tracking it.</div>
       </div>
@@ -1005,7 +1017,7 @@
             <span id="addPortfolioTxt">★ Add to Portfolio</span>
           </button>
           <button class="copy-btn" id="addWatchlistBtn" type="button" aria-label="Add to watchlist">
-            <span id="addWatchlistTxt">👁 Add to Watchlist</span>
+            <span id="addWatchlistTxt">Add to Watchlist</span>
           </button>
           <button class="copy-btn" id="copyBtn" type="button">
             <span id="copyBtnTxt">Copy summary</span>

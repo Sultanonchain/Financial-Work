@@ -3205,6 +3205,26 @@ async function pfPullFromServer() {
       }
     }
 
+    // Data-loss guard for deploys without durable storage (Vercel KV
+    // unset).  On every cold Lambda the server returns an EMPTY default
+    // portfolio.  If we naively replaced local state with that, every
+    // sign-in would silently nuke the user's holdings — exactly the
+    // "portfolios don't actually save" complaint.  When storage is not
+    // durable AND the server has zero items across every portfolio,
+    // keep the local copy and skip the canonical-replace.
+    const serverHasAnyItems = Object.values(serverPortfolios)
+      .some(p => Array.isArray(p.items) && p.items.length > 0);
+    const localHasAnyItems  = Object.values(localState.portfolios || {})
+      .some(p => Array.isArray(p.items) && p.items.length > 0);
+    if (!_STORAGE_DURABLE && !serverHasAnyItems && localHasAnyItems) {
+      console.warn(
+        "[valus] Server returned empty portfolios but storage_durable=false " +
+        "and local has items — keeping local copy to avoid cold-start data loss. " +
+        "Configure Vercel KV to enable durable cross-device sync."
+      );
+      return;
+    }
+
     // Replace local state with server state — server is canonical now.
     pfWriteState({ schema: 2, active_pid: defaultPid, portfolios: serverPortfolios });
 
@@ -3619,7 +3639,7 @@ function setupAddWatchlistButton() {
     if (wlHas(t)) {
       wlRemove(t);
       btn.classList.remove("starred");
-      txt.textContent = "👁 Add to Watchlist";
+      txt.textContent = "Add to Watchlist";
       return;
     }
     if (!(await requireAuthWithRedirectIntent("watchlist"))) return;
@@ -3635,7 +3655,7 @@ function setupAddWatchlistButton() {
       grade:  _LAST_DATA.valus_grade?.grade || null,
     });
     btn.classList.add("starred");
-    txt.textContent = "👁 In Watchlist";
+    txt.textContent = "In Watchlist";
   };
 }
 
@@ -3645,10 +3665,10 @@ function syncAddWatchlistButtonForCurrent() {
   if (!btn || !_LAST_DATA) return;
   if (wlHas(_LAST_DATA.ticker)) {
     btn.classList.add("starred");
-    txt.textContent = "👁 In Watchlist";
+    txt.textContent = "In Watchlist";
   } else {
     btn.classList.remove("starred");
-    txt.textContent = "👁 Add to Watchlist";
+    txt.textContent = "Add to Watchlist";
   }
 }
 
@@ -3907,6 +3927,7 @@ async function openPortfolioPage() {
   // showing a shared view from a /?p=... deep link)
   _IS_SHARED_VIEW = false;
   $("pfSharedBanner")?.classList.add("hidden");
+  syncStorageWarnVisibility();
   $("pfPageTitle").textContent = pfActive().name || "My Portfolio";
   $("pfPageTagline").textContent = "Real-time DCF tracking across your watchlist.";
   $("pfRefreshBtn").style.display = "";
@@ -4884,6 +4905,13 @@ let _AUTH_CONFIGURED = false;
 let _STRIPE_CONFIGURED = false;
 let _IS_PLUS = false;          // VALUS+ subscriber flag, refreshed from /api/me
 let _PLUS_RENEWS_AT = null;    // unix-seconds when current period ends (if plus)
+// True only when the deployment has a working KV/Redis connection — i.e.
+// portfolio writes actually persist across cold starts AND across devices
+// for the same Google account.  When false, signing in elsewhere won't
+// surface this device's portfolios.  Treated defensively by pfPullFromServer
+// (won't overwrite local with an empty server response) and by the
+// portfolio page (shows a one-time banner so the deploy owner notices).
+let _STORAGE_DURABLE = true;   // optimistic default — refreshMe overrides
 let _PENDING_INTENT = null;   // string set when an action prompted sign-in;
                               // re-fired on auth_ok=1 redirect.
 
@@ -4922,18 +4950,25 @@ async function refreshMe() {
     _STRIPE_CONFIGURED = !!data.stripe_configured;
     _IS_PLUS = !!data.is_plus;
     _PLUS_RENEWS_AT = data.plus_renews_at || null;
+    // Server-side default is true; treat a missing field as durable so
+    // older clients/responses don't trigger the warning erroneously.
+    _STORAGE_DURABLE = data.storage_durable !== false;
   } catch {
     _ME = null;
     _AUTH_CONFIGURED = false;
     _STRIPE_CONFIGURED = false;
     _IS_PLUS = false;
     _PLUS_RENEWS_AT = null;
+    _STORAGE_DURABLE = true;
   }
   updateAuthControl();
   // Show/hide the portfolio switcher to match the current auth state.
   // (pfPullFromServer below will also refresh it once the server data
   // arrives — this call covers the visibility flip ahead of that.)
   pfUpdateSwitcher();
+  // Pick up storage_durable change — banner appears immediately if needed
+  // even when the portfolio page is already open.
+  syncStorageWarnVisibility();
   // First-time sign-in: claim any legacy soft-token entries
   if (_ME && !sessionStorage.getItem("valus.claimed")) {
     const legacy = getValusUser();
@@ -6204,6 +6239,28 @@ function setupBrandHome() {
   if (btn) btn.addEventListener("click", goHome);
 }
 
+// Show/hide the "cross-device sync isn't enabled" banner on the portfolio
+// page.  Triggered every time we open the page; reads _STORAGE_DURABLE
+// (refreshed by /api/me) and a localStorage dismissal flag so we don't
+// nag the user after they've acknowledged it once.
+const PF_STORAGE_WARN_DISMISSED_KEY = "valus.storageWarn.dismissed.v1";
+function syncStorageWarnVisibility() {
+  const el = $("pfStorageWarn");
+  if (!el) return;
+  let dismissed = false;
+  try { dismissed = !!localStorage.getItem(PF_STORAGE_WARN_DISMISSED_KEY); } catch {}
+  // Only nag signed-in users — guests are already localStorage-only by design.
+  const shouldShow = !!_ME && !_STORAGE_DURABLE && !dismissed;
+  el.classList.toggle("hidden", !shouldShow);
+}
+function setupStorageWarnBanner() {
+  const btn = $("pfStorageWarnDismiss");
+  if (btn) btn.addEventListener("click", () => {
+    try { localStorage.setItem(PF_STORAGE_WARN_DISMISSED_KEY, "1"); } catch {}
+    syncStorageWarnVisibility();
+  });
+}
+
 function hideAllViews() {
   $("results")?.classList.add("hidden");
   $("btcHero")?.classList.add("hidden");
@@ -6285,6 +6342,7 @@ function pushTickerToURL(ticker) {
 
 document.addEventListener("DOMContentLoaded", () => {
   setupBrandHome();
+  setupStorageWarnBanner();
   setupSearch();
   setupAdvancedToggle();
   setupCopyButton();
