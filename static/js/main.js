@@ -4592,39 +4592,12 @@ function setupModalDismiss() {
    Boot
    ════════════════════════════════════════════════════════════════════════ */
 
-// ── Custom DCF — live recompute from user-controlled sliders ──────────
-function recomputeCustomIV(d, s1Pct, s2Pct, waccPct, tgPct) {
-  const baseFcf = d.base_fcf || 0;
-  if (!baseFcf) return null;
-  const yrs = d.projection_years || 10;
-  const stage1Years = Math.ceil(yrs / 2);
-
-  const s1   = s1Pct  / 100;
-  const s2   = s2Pct  / 100;
-  const wacc = waccPct / 100;
-  const tg   = tgPct  / 100;
-
-  // Guard: WACC must exceed terminal growth for Gordon Growth stability
-  if (wacc <= tg) return null;
-
-  let totalPv = 0;
-  let fcf = baseFcf;
-  for (let y = 1; y <= yrs; y++) {
-    const g = y <= stage1Years ? s1 : s2;
-    fcf = fcf * (1 + g);
-    totalPv += fcf / Math.pow(1 + wacc, y);
-  }
-  // Gordon Growth terminal value
-  const terminalFcf = fcf * (1 + tg);
-  const tv = terminalFcf / (wacc - tg);
-  const tvPv = tv / Math.pow(1 + wacc, yrs);
-
-  const enterprise = totalPv + tvPv;
-  const netDebt    = d.net_debt || 0;
-  const equity     = enterprise - netDebt;
-  const shares     = d.shares_outstanding || 1;
-  return equity / shares;
-}
+// ── Custom DCF — live recompute via the server's actual DCF model ─────
+// Slider input is debounced into a POST to /api/dcf/recompute, which
+// runs the same run_dcf_single() that produced the displayed base case.
+// Replaces an in-JS simplified DCF that couldn't replicate the server's
+// normalized FCF base / sector overlays, so moving any slider used to
+// snap "Your IV" to a wildly different number.
 
 function updateSliderFill(slider) {
   const min = parseFloat(slider.min);
@@ -4634,28 +4607,74 @@ function updateSliderFill(slider) {
   slider.style.setProperty("--slider-pct", `${pct}%`);
 }
 
+// Token-guarded async recompute — if the user wiggles a slider faster
+// than the server responds, we throw away any reply that isn't from the
+// latest request so a slow earlier response can't overwrite a newer one.
+async function _cdServerRecompute(basis, override, price, token, applyResult) {
+  try {
+    const r = await fetch("/api/dcf/recompute", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ basis, override, price }),
+    });
+    const data = await r.json().catch(() => ({}));
+    applyResult(token, r.ok ? data : { error: data.error || "recompute_failed" });
+  } catch (e) {
+    applyResult(token, { error: "network" });
+  }
+}
+
 function setupCustomDCFSliders() {
   const ids = ["cdS1", "cdS2", "cdWacc", "cdTg"];
   const sliders = ids.map($).filter(Boolean);
   if (sliders.length !== 4) return;
 
-  // While true, the sliders haven't been moved since the last reset/render —
-  // we mirror the model's actual base IV instead of running our simplified
-  // recompute (which can't replicate sector TV caps, normalized FCF base,
-  // mid-year discount, etc., so it diverges from the displayed Base case).
+  // While true, the sliders haven't been moved since the last reset.
+  // Pristine state shows the basis.base_iv (the SAME pure-DCF number the
+  // recompute endpoint will return at base assumptions), so the first
+  // slider tick moves from a coherent starting point.
   let pristine = true;
+  let reqToken = 0;            // increments per slider tick
+  let debounceTimer = null;
 
   const reset = () => {
     if (!_LAST_DATA) return;
     const d = _LAST_DATA;
+    const basis = d.dcf_recompute_basis || null;
     const base = (d.scenarios && d.scenarios.base) || {};
-    $("cdS1").value   = base.s1   ?? d.stage1_growth   ?? 10;
-    $("cdS2").value   = d.stage2_growth   ?? 6;
-    $("cdWacc").value = base.wacc ?? d.wacc            ?? 9;
-    $("cdTg").value   = d.terminal_growth ?? 2.5;
+    // Prefer the basis values (raw decimals stored as percent) so reset
+    // lands on the same assumptions the recompute endpoint will use.
+    $("cdS1").value   = basis?.base_s1   ?? base.s1   ?? d.stage1_growth   ?? 10;
+    $("cdS2").value   = basis?.base_s2   ?? d.stage2_growth   ?? 6;
+    $("cdWacc").value = basis?.base_wacc ?? base.wacc ?? d.wacc            ?? 9;
+    $("cdTg").value   = basis?.base_tg   ?? d.terminal_growth ?? 2.5;
     sliders.forEach(updateSliderFill);
     pristine = true;
+    reqToken += 1;             // invalidate any in-flight server reply
     update();
+  };
+
+  const applyResult = (token, data) => {
+    if (token !== reqToken) return;          // stale response — discard
+    const yourEl  = $("cdYourIV");
+    const deltaEl = $("cdYourDelta");
+    if (!yourEl || !deltaEl) return;
+    if (data.error || data.iv == null || !isFinite(data.iv) || data.iv <= 0) {
+      yourEl.textContent = "—";
+      deltaEl.textContent = data.error === "network" ? "Offline" : "";
+      deltaEl.classList.remove("positive", "negative");
+      return;
+    }
+    yourEl.textContent = fmtPrice(data.iv);
+    if (data.mos != null && isFinite(data.mos)) {
+      deltaEl.textContent = `${fmtPct(data.mos)} vs current price`;
+      deltaEl.classList.toggle("positive", data.mos > 0);
+      deltaEl.classList.toggle("negative", data.mos < 0);
+    } else {
+      deltaEl.textContent = "";
+      deltaEl.classList.remove("positive", "negative");
+    }
   };
 
   const update = () => {
@@ -4674,28 +4693,59 @@ function setupCustomDCFSliders() {
     const valusIv = d.intrinsic_value;
     $("cdValusIV").textContent = valusIv != null ? fmtPrice(valusIv) : "—";
 
-    // Pristine state: mirror the model's base IV so the user starts from the
-    // same number shown in the Base scenario card.
-    const baseIv = (d.scenarios && d.scenarios.base && d.scenarios.base.value) ?? valusIv;
-    const yourIv = pristine
-      ? baseIv
-      : recomputeCustomIV(d, s1, s2, wacc, tg);
+    const basis = d.dcf_recompute_basis;
+    const yourEl  = $("cdYourIV");
+    const deltaEl = $("cdYourDelta");
 
-    if (yourIv != null && isFinite(yourIv) && yourIv > 0) {
-      $("cdYourIV").textContent = fmtPrice(yourIv);
-      const deltaEl = $("cdYourDelta");
-      if (d.current_price && d.current_price > 0) {
-        const newMos = (yourIv - d.current_price) / d.current_price * 100;
-        deltaEl.textContent = `${fmtPct(newMos)} vs current price`;
-        deltaEl.classList.toggle("positive", newMos > 0);
-        deltaEl.classList.toggle("negative", newMos < 0);
+    // No DCF basis means this ticker uses a non-DCF model (banking, biotech,
+    // FCF-negative) — the slider can't produce a comparable number.
+    if (!basis) {
+      yourEl.textContent = "—";
+      deltaEl.textContent = "DCF not available for this ticker";
+      deltaEl.classList.remove("positive", "negative");
+      return;
+    }
+
+    // Pristine: pin to the basis.base_iv (the pure-DCF number the server
+    // will return when called with base assumptions).  No network hop.
+    if (pristine) {
+      reqToken += 1;
+      const iv = basis.base_iv;
+      if (iv != null && isFinite(iv) && iv > 0) {
+        yourEl.textContent = fmtPrice(iv);
+        if (d.current_price && d.current_price > 0) {
+          const mos = (iv - d.current_price) / d.current_price * 100;
+          deltaEl.textContent = `${fmtPct(mos)} vs current price`;
+          deltaEl.classList.toggle("positive", mos > 0);
+          deltaEl.classList.toggle("negative", mos < 0);
+        } else {
+          deltaEl.textContent = "";
+        }
       } else {
+        yourEl.textContent = "—";
         deltaEl.textContent = "";
       }
-    } else {
-      $("cdYourIV").textContent = "—";
-      $("cdYourDelta").textContent = "";
+      return;
     }
+
+    // Slider moved — debounce ~120ms so dragging doesn't fire a request
+    // per pointer event, then hit the server.  Token guards against
+    // out-of-order replies.
+    reqToken += 1;
+    const token = reqToken;
+    yourEl.textContent = "…";
+    deltaEl.textContent = "";
+    deltaEl.classList.remove("positive", "negative");
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      _cdServerRecompute(
+        basis,
+        { s1, s2, wacc, tg },
+        d.current_price,
+        token,
+        applyResult,
+      );
+    }, 120);
   };
 
   sliders.forEach(s => {
