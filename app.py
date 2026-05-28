@@ -61,24 +61,48 @@ app.config.update(
 )
 CORS(app, supports_credentials=True)
 
-# ── Vercel KV (Redis) adapter — durable storage when KV_URL is set ────
+# ── Vercel KV (Redis) adapter — durable storage when a Redis URL is set ─
 # Falls back silently to a process-level dict + /tmp file when env is
 # missing (local dev with no KV provisioned still works exactly like
 # before).
 _kv = None
-# Vercel/Upstash integrations vary the env var name depending on which
-# template / integration version was used.  Try every commonly-used name
-# in order — first one that pings successfully wins.  If none are set,
-# we fall back to in-memory (fine for local dev; lossy on serverless).
-_KV_ENV_CANDIDATES = (
-    "KV_URL",                # Vercel KV (Upstash) default
-    "REDIS_URL",             # Standard Redis convention
-    "UPSTASH_REDIS_URL",     # Upstash standalone
-    "STORAGE_REDIS_URL",     # Some Vercel templates
-    "KV_REDIS_URL",          # Older Vercel KV
-)
-_kv_url = next((os.environ[k] for k in _KV_ENV_CANDIDATES if os.environ.get(k)), None)
-_kv_source = next((k for k in _KV_ENV_CANDIDATES if os.environ.get(k)), None)
+
+# Vercel + Upstash inject the connection URL under wildly different env
+# var names depending on which integration version / template / project
+# prefix was used: KV_URL, REDIS_URL, UPSTASH_REDIS_URL,
+# STORAGE_REDIS_URL, Storage_KV_URL (mixed-case from the new Upstash
+# integration), MY_PREFIX_REDIS_URL when the user picked a custom
+# prefix, etc.  Rather than chase every variant by name, scan the
+# entire environment for anything that *looks like* a Redis URL (starts
+# with redis:// or rediss://) and try them in priority order: explicit
+# canonical names first, then any prefixed variant.
+def _discover_kv_url():
+    canonical = (
+        "KV_URL", "REDIS_URL", "UPSTASH_REDIS_URL",
+        "STORAGE_REDIS_URL", "KV_REDIS_URL", "STORAGE_KV_URL",
+    )
+    # Canonical-name pass — case-insensitive (Vercel sometimes preserves
+    # the casing the user typed into the integration's prefix field,
+    # which then fails the case-sensitive `os.environ.get` lookup on
+    # Linux).
+    env_ci = {k.upper(): (k, v) for k, v in os.environ.items()}
+    for name in canonical:
+        hit = env_ci.get(name)
+        if hit and hit[1]:
+            return hit[1], hit[0]
+    # Fallback pass — anything that smells like a Redis URL.  Skips
+    # REST-API token URLs (those are HTTPS and need the @upstash/redis
+    # client, not redis-py); keeps to redis:// / rediss:// only.
+    for k, v in os.environ.items():
+        if not v: continue
+        if not (v.startswith("redis://") or v.startswith("rediss://")): continue
+        # Skip obvious non-storage Redis URLs (e.g. RATE_LIMIT_REDIS_URL
+        # for a separate rate-limit store, if a deploy ever splits them).
+        if "RATE" in k.upper(): continue
+        return v, k
+    return None, None
+
+_kv_url, _kv_source = _discover_kv_url()
 if _kv_url:
     try:
         import redis as _redis
@@ -92,7 +116,15 @@ if _kv_url:
         print(f"[valus] KV connection via {_kv_source} failed, falling back: {_e}")
         _kv = None
 else:
-    print("[valus] No KV env var set — search-limit + analytics use ephemeral in-memory")
+    # Surface which env vars we actually saw so a misconfigured deploy
+    # is debuggable from the log — helps the owner spot a typo'd prefix
+    # like "Storage_RDIS_URL" without having to grep production.
+    _candidates_seen = [k for k in os.environ
+                        if any(t in k.upper() for t in ("KV_URL", "REDIS"))]
+    if _candidates_seen:
+        print(f"[valus] No usable Redis URL found. Env vars matching KV/REDIS: {_candidates_seen}")
+    else:
+        print("[valus] No KV/Redis env var set — search-limit + analytics use ephemeral in-memory")
 
 def kv_get(key):
     if _kv:
@@ -140,7 +172,7 @@ def limit_medium():
 def limit_light():
     return "120 per minute; 2000 per day" if _is_signed_in() else "30 per minute; 300 per day"
 
-_limiter_storage = os.environ.get("KV_URL") if _kv else None
+_limiter_storage = _kv_url if _kv else None
 limiter = Limiter(
     key_func=_rate_limit_key,
     app=app,
