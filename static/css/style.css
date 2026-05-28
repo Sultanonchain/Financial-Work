@@ -3396,7 +3396,7 @@ a:focus-visible {
 .vh-legend__hint { color: #6b7382; font-style: italic; }
 .vh-dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
 .vh-dot--price { background: #60a5fa; }
-.vh-dot--iv    { background: transparent; border-top: 1.5px dashed rgba(148,163,184,0.85); height: 0; width: 16px; border-radius: 0; }
+.vh-dot--iv    { background: transparent; border-top: 2.5px solid #5eead4; height: 0; width: 16px; border-radius: 0; box-shadow: 0 0 6px rgba(94,234,212,0.45); }
 .vh-empty {
   margin-top: 12px; padding: 12px; border-radius: 8px;
   background: rgba(255,255,255,0.02); color: #8892a3;
