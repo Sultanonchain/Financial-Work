@@ -197,6 +197,26 @@ button { font-family: inherit; cursor: pointer; }
 .brand {
   display: flex; align-items: center; gap: var(--space-3);
   color: var(--ink-primary);
+  /* The brand element is rendered as a <button> so it routes to the
+     home view on click. Reset the user-agent button styles, keep the
+     text appearance identical to the old <div> version, and surface a
+     subtle hover so it reads as clickable. */
+  appearance: none;
+  -webkit-appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: opacity 150ms var(--ease-out);
+}
+.brand:hover { opacity: 0.85; }
+.brand:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: var(--radius-sm);
 }
 .brand-mark {
   width: 32px; height: 32px;
@@ -2991,6 +3011,20 @@ table.dt tfoot td { font-weight: 600; color: var(--ink-primary); border-top: 1px
   color: var(--ink-primary);
   font-feature-settings: "tnum" 1;
 }
+.etf-cta-row {
+  margin-top: var(--space-4);
+  display: flex; gap: var(--space-3); justify-content: center;
+  flex-wrap: wrap;
+}
+.etf-cta-row .copy-btn.starred {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent-strong);
+}
+@media (max-width: 768px) {
+  .etf-cta-row { flex-direction: column; align-items: stretch; }
+}
+
 .etf-message {
   margin-top: var(--space-4);
   padding: var(--space-4) var(--space-5);

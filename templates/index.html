@@ -33,12 +33,12 @@
 <!-- ── HEADER ─────────────────────────────────────────────────────────── -->
 <header class="site-header">
   <div class="container site-header__inner">
-    <div class="brand">
+    <button class="brand" id="brandHomeBtn" type="button" aria-label="VALUS — go to home">
       <div class="brand-mark" aria-hidden="true">V</div>
       <span class="brand-name">VALUS</span>
       <span class="brand-divider"></span>
       <span class="brand-tag">Educational Stock Valuation Tool</span>
-    </div>
+    </button>
     <div class="header-actions">
       <!-- Watchlist — what you're WATCHING (no holdings).  Separate from
            portfolios; free for everyone.  Signed-out users keep using it
@@ -789,6 +789,11 @@
       </div>
       <div class="chart-wrap"><canvas id="etfChart"></canvas></div>
       <div class="etf-message" id="etfMessage"></div>
+
+      <div class="etf-cta-row">
+        <button class="copy-btn" id="etfAddPortfolio" type="button">★ Add to Portfolio</button>
+        <button class="copy-btn" id="etfBack" type="button">← Back to search</button>
+      </div>
     </section>
   </div>
 </main>
