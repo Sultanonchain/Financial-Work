@@ -1441,32 +1441,75 @@ button { font-family: inherit; cursor: pointer; }
 
 /* Sector allocation bar */
 .pf-allocation { padding: var(--space-5) var(--space-6); }
-.pf-allocation__bar {
-  display: flex; height: 28px;
-  border-radius: var(--radius-pill);
-  overflow: hidden;
-  background: var(--bg-elevated-2);
-  margin-bottom: var(--space-4);
+.pf-allocation__body {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: var(--space-5);
+  align-items: center;
 }
-.pf-alloc-segment {
-  height: 100%;
-  transition: opacity 200ms var(--ease-out);
+@media (max-width: 640px) {
+  .pf-allocation__body {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    gap: var(--space-4);
+  }
+}
+.pf-allocation__pie-wrap {
   position: relative;
-  cursor: pointer;
+  width: 180px; height: 180px;
 }
-.pf-alloc-segment:hover { opacity: 0.85; }
-.pf-allocation__legend {
-  display: flex; flex-wrap: wrap; gap: var(--space-3);
+.pf-allocation__pie-wrap canvas {
+  width: 180px !important; height: 180px !important;
+}
+.pf-allocation__pie-total {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  pointer-events: none;
+  text-align: center;
+}
+.pf-alloc-total__num {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 28px; font-weight: 700;
+  color: var(--ink-primary);
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+.pf-alloc-total__lbl {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-secondary);
+  margin-top: 4px;
+}
+.pf-allocation__legend {
+  display: flex; flex-direction: column;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  min-width: 0;
 }
 .pf-legend-item {
-  display: inline-flex; align-items: center; gap: 6px;
+  display: grid;
+  grid-template-columns: 12px 1fr auto;
+  align-items: center;
+  gap: 8px;
   color: var(--ink-secondary);
+  min-width: 0;
 }
 .pf-legend-dot {
-  width: 8px; height: 8px;
+  width: 10px; height: 10px;
   border-radius: 50%;
+}
+.pf-legend-name {
+  color: var(--ink-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pf-legend-meta {
+  color: var(--ink-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
 .pf-sort-toggle {

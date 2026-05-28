@@ -3975,26 +3975,93 @@ function renderPortfolioPage() {
   const best = items.filter(it => it.mos != null).sort((a, b) => b.mos - a.mos)[0];
   $("pfBest").textContent = best ? `${best.ticker} ${fmtPct(best.mos)}` : "—";
 
-  // Sector allocation
+  // Sector allocation — doughnut + side legend.  Same aggregation as
+  // before; just a clearer read than a horizontal stacked bar at 12
+  // holdings spread across 6+ sectors.
   const bySector = {};
   items.forEach(it => {
     const s = it.sector || "Other";
     bySector[s] = (bySector[s] || 0) + 1;
   });
-  const sectors = Object.entries(bySector);
-  const total = items.length;
-  const bar = $("pfAllocationBar");
-  const legend = $("pfAllocationLegend");
-  bar.innerHTML = sectors.map(([s, n], idx) => {
-    const pct = (n / total) * 100;
-    const color = getSectorColor(idx);
-    return `<div class="pf-alloc-segment" style="width:${pct}%; background:${color};" title="${escHtml(s)}: ${n}"></div>`;
-  }).join("");
+  // Sort largest-first so colors line up between pie wedges (which
+  // Chart.js paints clockwise from the top) and the legend list.
+  const sectors = Object.entries(bySector).sort((a, b) => b[1] - a[1]);
+  const total   = items.length;
+  const card    = $("pfAllocationCard");
+  const legend  = $("pfAllocationLegend");
+  const canvas  = $("pfAllocationPie");
+  const totalEl = $("pfAllocationTotal");
+
+  if (!total || !sectors.length) {
+    if (card) card.classList.add("hidden");
+    destroyAllocationPie();
+    return;
+  }
+  if (card) card.classList.remove("hidden");
+
+  const colors = sectors.map((_, idx) => getSectorColor(idx));
+  if (totalEl) totalEl.innerHTML =
+    `<div class="pf-alloc-total__num">${total}</div>` +
+    `<div class="pf-alloc-total__lbl">holding${total === 1 ? "" : "s"}</div>`;
+
   legend.innerHTML = sectors.map(([s, n], idx) => {
-    const color = getSectorColor(idx);
     const pct = (n / total) * 100;
-    return `<span class="pf-legend-item"><span class="pf-legend-dot" style="background:${color};"></span>${escHtml(s)} · ${n} (${pct.toFixed(0)}%)</span>`;
+    return `<span class="pf-legend-item">` +
+           `<span class="pf-legend-dot" style="background:${colors[idx]};"></span>` +
+           `<span class="pf-legend-name">${escHtml(s)}</span>` +
+           `<span class="pf-legend-meta">${n} (${pct.toFixed(0)}%)</span>` +
+           `</span>`;
   }).join("");
+
+  if (canvas && typeof Chart !== "undefined") {
+    destroyAllocationPie();
+    _pfAllocPieInstance = new Chart(canvas.getContext("2d"), {
+      type: "doughnut",
+      data: {
+        labels: sectors.map(([s]) => s),
+        datasets: [{
+          data:            sectors.map(([, n]) => n),
+          backgroundColor: colors,
+          borderColor:     "#0e131c",
+          borderWidth:     2,
+          hoverOffset:     6,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: "62%",
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: "#11151d",
+            borderColor: "rgba(255,255,255,0.08)",
+            borderWidth: 1,
+            titleColor: "#f5f7fa",
+            bodyColor:  "#b6bdcb",
+            callbacks: {
+              label: (c) => {
+                const n   = c.parsed;
+                const pct = total ? (n / total * 100).toFixed(0) : "0";
+                return `${c.label}: ${n} (${pct}%)`;
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+}
+
+// Single instance — destroy on re-render to avoid the Chart.js
+// "Canvas is already in use" warning when the portfolio page is
+// re-entered.
+let _pfAllocPieInstance = null;
+function destroyAllocationPie() {
+  if (_pfAllocPieInstance) {
+    try { _pfAllocPieInstance.destroy(); } catch {}
+    _pfAllocPieInstance = null;
+  }
 }
 
 async function refreshPortfolioPrices() {

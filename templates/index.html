@@ -168,8 +168,13 @@
     <!-- Sector allocation visualization -->
     <div class="card pf-allocation" id="pfAllocationCard">
       <div class="section-title">Sector allocation</div>
-      <div class="pf-allocation__bar" id="pfAllocationBar"></div>
-      <div class="pf-allocation__legend" id="pfAllocationLegend"></div>
+      <div class="pf-allocation__body">
+        <div class="pf-allocation__pie-wrap">
+          <canvas id="pfAllocationPie" aria-label="Sector allocation pie chart"></canvas>
+          <div class="pf-allocation__pie-total" id="pfAllocationTotal"></div>
+        </div>
+        <div class="pf-allocation__legend" id="pfAllocationLegend"></div>
+      </div>
     </div>
 
     <!-- Sortable holdings table -->
