@@ -551,6 +551,51 @@ function renderETFHero(d) {
       }
     });
   }
+  // ── Add to Portfolio ─────────────────────────────────────────────────
+  // ETFs don't have an intrinsic value (DCF doesn't apply to baskets), but
+  // users still want to track them alongside equities — sector defaults to
+  // "ETF" so the pie/legend on the portfolio page groups them cleanly.
+  const etfAdd = $("etfAddPortfolio");
+  if (etfAdd) {
+    const tkr  = (d.ticker || "").toUpperCase();
+    const sync = () => {
+      if (pfHas(tkr)) {
+        etfAdd.classList.add("starred");
+        etfAdd.textContent = "★ In Portfolio";
+      } else {
+        etfAdd.classList.remove("starred");
+        etfAdd.textContent = "★ Add to Portfolio";
+      }
+    };
+    etfAdd.onclick = () => {
+      if (!tkr) return;
+      if (pfHas(tkr)) {
+        pfRemove(tkr);
+      } else {
+        pfAdd({
+          ticker: tkr,
+          name:   d.company_name || tkr,
+          sector: d.sector || "ETF",
+          price:  d.current_price ?? null,
+          iv:     null,
+          mos:    null,
+          tier:   d.asset_class || "ETF",
+          grade:  null,
+        });
+      }
+      sync();
+    };
+    sync();
+  }
+
+  // ── Back to search ───────────────────────────────────────────────────
+  const etfBack = $("etfBack");
+  if (etfBack) etfBack.onclick = () => {
+    $("etfHero").classList.add("hidden");
+    $("tickerInput")?.focus();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   $("etfHero").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -6113,6 +6158,24 @@ function setupSharePortfolio() {
 
 // Helper to hide every top-level view at once.  Each top-level <main>
 // must be listed here or the app will end up showing two pages stacked.
+// Reset the app to its landing state: every overlay/result view collapses,
+// the hero (search + recent tickers) re-appears, the hash clears.  Used by
+// the VALUS logo in the header so users always have an obvious escape hatch
+// back to home from anywhere in the SPA.
+function goHome() {
+  hideAllViews();
+  document.querySelector(".hero")?.classList.remove("hidden");
+  setViewHash("");
+  // Best-effort: pulling the input back to the top so the user can search
+  // again right away.  Smooth scroll keeps it from feeling jarring.
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function setupBrandHome() {
+  const btn = $("brandHomeBtn");
+  if (btn) btn.addEventListener("click", goHome);
+}
+
 function hideAllViews() {
   $("results")?.classList.add("hidden");
   $("btcHero")?.classList.add("hidden");
@@ -6193,6 +6256,7 @@ function pushTickerToURL(ticker) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  setupBrandHome();
   setupSearch();
   setupAdvancedToggle();
   setupCopyButton();
