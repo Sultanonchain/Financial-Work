@@ -14,6 +14,7 @@ import traceback
 import time
 import re
 import os
+import math
 import json as _json_top
 import xml.etree.ElementTree as ET
 from datetime import datetime, date, timedelta
@@ -4704,13 +4705,17 @@ def run_banking_fcfe(info, fx_rate, ke, tg, yrs=10, growth=None):
 # ── Single DCF run ─────────────────────────────────────────────────────────────
 
 def run_dcf_single(base_fcf, s1, s2, tg, wacc, yrs, info, fx_rate,
-                   net_debt_override=None, stage1_years=None):
+                   net_debt_override=None, stage1_years=None,
+                   shares_override=None):
     """
     Run one DCF scenario. base_fcf must already be in trading currency.
     net_debt_override: pass pre-computed net debt (e.g. from quarterly balance sheet)
     to bypass the info-dict lookup — important for mega-caps where cash is material.
     stage1_years: how many years to use s1 growth (default: yrs // 2).
       Pass yrs to keep Stage 1 growth for the full projection horizon (Backbone moat).
+    shares_override: skip info-dict lookup for shares outstanding.  Used by the
+      /api/dcf/recompute endpoint so it doesn't need the full yfinance info dict
+      to replay the math with user-overridden assumptions.
     Returns (intrinsic_value, projected_rows, enterprise_value, equity_value, pv_terminal).
     """
     if wacc <= tg:
@@ -4738,8 +4743,11 @@ def run_dcf_single(base_fcf, s1, s2, tg, wacc, yrs, info, fx_rate,
         net_debt = debt - cash
     eq_val = ev - net_debt
 
-    shares = safe(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"), 0) or 0
-    iv     = (eq_val / shares) if shares > 0 else None
+    if shares_override is not None:
+        shares = shares_override
+    else:
+        shares = safe(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"), 0) or 0
+    iv     = (eq_val / shares) if shares and shares > 0 else None
     return iv, projected, ev, eq_val, pv_terminal
 
 
@@ -9279,6 +9287,84 @@ def leaderboard():
     return jsonify({"items": enriched[:50], "total": len(enriched)})
 
 
+@app.route("/api/dcf/recompute", methods=["POST"])
+@limiter.limit("120 per minute")
+def dcf_recompute():
+    """
+    Replay the pure DCF (the same `run_dcf_single` that /api/analyze runs)
+    with user-overridden assumptions, so the "Try your own assumptions"
+    slider produces numbers that line up with the displayed base case
+    instead of a divergent simplified model.
+
+    Body:
+      {
+        basis:    { base_fcf, net_debt, shares, yrs, stage1_years,
+                    base_s1, base_s2, base_wacc, base_tg, base_iv },
+        override: { s1, s2, wacc, tg },   # each in percent (e.g. 9.5 not 0.095)
+        price:    <current price, optional — used to compute MOS>
+      }
+    Returns: { iv, mos, base_iv }
+
+    The basis is the `dcf_recompute_basis` object returned by /api/analyze.
+    Sending it back lets us recompute without re-fetching yfinance data on
+    every slider tick.
+    """
+    body = request.get_json(silent=True) or {}
+    basis = body.get("basis") or {}
+    ovr   = body.get("override") or {}
+    price = body.get("price")
+
+    def _num(v, lo=None, hi=None):
+        try:
+            x = float(v)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(x):
+            return None
+        if lo is not None and x < lo: return None
+        if hi is not None and x > hi: return None
+        return x
+
+    base_fcf     = _num(basis.get("base_fcf"))
+    shares       = _num(basis.get("shares"), lo=0)
+    net_debt     = _num(basis.get("net_debt")) or 0.0
+    yrs          = _num(basis.get("yrs"), lo=1, hi=30)
+    stage1_years = _num(basis.get("stage1_years"), lo=0, hi=30)
+    if base_fcf is None or shares is None or yrs is None:
+        return jsonify({"error": "invalid basis"}), 400
+    yrs = int(yrs)
+    stage1_years = int(stage1_years) if stage1_years is not None else None
+
+    # Slider inputs arrive in percent (matches the slider min/max in the UI).
+    s1   = _num(ovr.get("s1"),   lo=-50, hi=100)
+    s2   = _num(ovr.get("s2"),   lo=-50, hi=100)
+    wacc = _num(ovr.get("wacc"), lo=0.1, hi=50)
+    tg   = _num(ovr.get("tg"),   lo=-5,  hi=20)
+    if any(v is None for v in (s1, s2, wacc, tg)):
+        return jsonify({"error": "invalid override"}), 400
+
+    try:
+        iv, *_ = run_dcf_single(
+            base_fcf, s1 / 100, s2 / 100, tg / 100, wacc / 100, yrs,
+            info=None, fx_rate=1.0,
+            net_debt_override=net_debt,
+            stage1_years=stage1_years,
+            shares_override=shares,
+        )
+    except Exception as e:
+        return jsonify({"error": "dcf_failed", "detail": str(e)}), 500
+
+    if iv is None or not math.isfinite(iv):
+        return jsonify({"iv": None, "mos": None, "base_iv": basis.get("base_iv")})
+
+    iv_r = round(float(iv), 2)
+    mos  = None
+    px   = _num(price, lo=0.0001)
+    if px:
+        mos = round((iv_r - px) / px * 100, 2)
+    return jsonify({"iv": iv_r, "mos": mos, "base_iv": basis.get("base_iv")})
+
+
 @app.route("/api/analyze")
 @limiter.limit(limit_analyze)
 def analyze():
@@ -9675,6 +9761,11 @@ def analyze():
         ind_params = INDUSTRY_PARAMS[ind_class]
         user_tg_override = request.args.get("terminal") is not None
 
+        # Default — populated inside the `else` branch when a DCF actually runs.
+        # Surfaced in the response so /api/dcf/recompute can replay the formula
+        # with user-overridden assumptions; null when DCF isn't applicable.
+        dcf_recompute_basis = None
+
         if not dcf_available:
             # Banking warning already set above; set generic message for all other cases
             if valuation_method != "banking":
@@ -9922,6 +10013,29 @@ def analyze():
             total_pv_fcf     = sum(p["pv"] for p in projected)
             net_debt         = ((safe(info.get("totalDebt"), 0) or 0) - (safe(info.get("totalCash"), 0) or 0)) * fx_rate
             margin_of_safety = ((intrinsic_value - price) / price * 100) if intrinsic_value and price else None
+
+            # Snapshot the pure DCF output + every input needed to replay it.
+            # The `/api/dcf/recompute` endpoint uses this so user-moved sliders
+            # produce numbers from the SAME formula that generated the base
+            # case — no drift between pristine and the first slider tick.
+            # Captured here, BEFORE bull/bear blending, sector overlays
+            # (biotech/banking) and consensus anchoring mutate intrinsic_value.
+            _pure_dcf_iv = round(intrinsic_value, 2) if intrinsic_value else None
+            _pure_dcf_shares = safe(
+                info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"), 0
+            ) or 0
+            dcf_recompute_basis = {
+                "base_fcf":     float(fwd_base_fcf) if fwd_base_fcf else None,
+                "net_debt":     float(net_debt) if net_debt is not None else 0.0,
+                "shares":       float(_pure_dcf_shares) if _pure_dcf_shares else None,
+                "yrs":          int(yrs),
+                "stage1_years": int(backbone_stage1_years) if backbone_stage1_years else None,
+                "base_s1":      round(s1 * 100, 4) if s1 is not None else None,
+                "base_s2":      round(s2 * 100, 4) if s2 is not None else None,
+                "base_wacc":    round(wacc * 100, 4) if wacc is not None else None,
+                "base_tg":      round(tg * 100, 4) if tg is not None else None,
+                "base_iv":      _pure_dcf_iv,
+            }
 
             fcf_chart = {
                 "projected": {
@@ -11244,6 +11358,10 @@ def analyze():
                 "weighted_base_fcf":  comparables_model.get("weighted_base_fcf"),
             } if 'comparables_model' in dir() and comparables_model else None),
             "projection_years": yrs,
+            # Inputs the /api/dcf/recompute endpoint needs to replay the DCF
+            # with user-overridden assumptions.  null when DCF isn't applicable
+            # (banking, biotech, FCF-negative).  Slider UI hides itself in that case.
+            "dcf_recompute_basis": dcf_recompute_basis,
             "base_fcf":       base_fcf,
             "historical_fcf": fcf_series[:5],
             "projected_fcf":  projected,
