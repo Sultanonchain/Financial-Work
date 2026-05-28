@@ -2156,28 +2156,80 @@ function renderValuationHistoryChart(payload) {
                    : "rgba(96,165,250,0.08)";
 
   const ctx = canvas.getContext("2d");
+
+  // End-of-line label plugin: paints a small "IV $X.XX" pill at the right
+  // edge of the chart so the intrinsic value is the most obvious thing on
+  // the canvas — not just one of two indistinct lines.
+  const ivEndLabelPlugin = {
+    id: "ivEndLabel",
+    afterDatasetsDraw(chart) {
+      const ds = chart.data.datasets[0];               // IV is dataset 0
+      if (!ds || !Array.isArray(ds.data)) return;
+      let lastIdx = -1, lastVal = null;
+      for (let i = ds.data.length - 1; i >= 0; i--) {
+        if (ds.data[i] != null) { lastIdx = i; lastVal = ds.data[i]; break; }
+      }
+      if (lastIdx < 0 || lastVal == null) return;
+      const meta = chart.getDatasetMeta(0);
+      const point = meta?.data?.[lastIdx];
+      if (!point) return;
+      const c = chart.ctx;
+      const text = `IV $${fmt(lastVal, 2)}`;
+      c.save();
+      c.font = "600 11px ui-sans-serif, system-ui, sans-serif";
+      const padX = 7, padY = 3;
+      const tw = c.measureText(text).width;
+      const w = tw + padX * 2;
+      const h = 18;
+      // Clamp so the pill never paints past the right edge.
+      const x = Math.min(point.x + 8, chart.chartArea.right - w);
+      const y = Math.max(point.y - h / 2, chart.chartArea.top + 2);
+      c.fillStyle = "rgba(94, 234, 212, 0.18)";
+      c.strokeStyle = "rgba(94, 234, 212, 0.95)";
+      c.lineWidth = 1;
+      const r = 5;
+      c.beginPath();
+      c.moveTo(x + r, y);
+      c.lineTo(x + w - r, y);
+      c.quadraticCurveTo(x + w, y, x + w, y + r);
+      c.lineTo(x + w, y + h - r);
+      c.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      c.lineTo(x + r, y + h);
+      c.quadraticCurveTo(x, y + h, x, y + h - r);
+      c.lineTo(x, y + r);
+      c.quadraticCurveTo(x, y, x + r, y);
+      c.closePath();
+      c.fill();
+      c.stroke();
+      c.fillStyle = "#5eead4";
+      c.textBaseline = "middle";
+      c.fillText(text, x + padX, y + h / 2 + 0.5);
+      c.restore();
+    },
+  };
+
   valuationHistoryChartInstance = new Chart(ctx, {
     type: "line",
+    plugins: [ivEndLabelPlugin],
     data: {
       labels,
       datasets: [
-        // IV — clean dashed gray line, no fill. Acts as the reference
-        // baseline beneath the price.
+        // IV — solid mint line, the primary signal of the chart. Sits on
+        // top of the price band so the model's number is unmissable.
         {
-          label: "Intrinsic Value",
+          label: "Intrinsic Value (VALUS)",
           data: ivSmooth,
-          borderColor: "rgba(148,163,184,0.85)",
+          borderColor: "#5eead4",
           backgroundColor: "rgba(0,0,0,0)",
-          borderWidth: 1.5,
-          borderDash: [6, 4],
+          borderWidth: 2.5,
           fill: false,
           tension: 0.3,
           pointRadius: 0,
-          pointHoverRadius: 4,
-          order: 2,
+          pointHoverRadius: 5,
+          order: 0,
         },
-        // Price — prominent line with subtle fill toward zero. Color
-        // signals current valuation state.
+        // Price — tinted band beneath the IV line. Color signals the
+        // current valuation state (red = overvalued, green = undervalued).
         {
           label: "Price",
           data: priceSeries,
