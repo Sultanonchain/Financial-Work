@@ -8098,13 +8098,27 @@ def _write_leaderboard(entries):
         pass
 
 
+# Max simultaneous leaderboard entries a single user can keep alive.
+# Once they hit this, publishing a new portfolio displaces their oldest
+# entry instead of being rejected — power users still get a smooth UX,
+# but nobody hogs the global cap.
+MAX_LB_ENTRIES_PER_USER = 10
+
+
 @app.route("/api/leaderboard/submit", methods=["POST"])
 def leaderboard_submit():
     """
     Submit a portfolio to the public leaderboard.  Requires sign-in.
-    Body: { name: str (optional override), tickers: [str], note: str }
-    Entries are keyed to the OAuth `sub` so re-publishing replaces the
-    user's previous entry.
+    Body: { name, tickers: [str], note?, pid?, portfolio_name?,
+            legacy_user_token? }
+
+    Each distinct (user_sub, pid) gets its own row, so a user can publish
+    every portfolio they own (e.g. "Telecom Infrastructure thesis" and
+    "Energy ideas" coexist as separate rows under the same email).
+    Re-publishing the same (user_sub, pid) replaces the prior row for
+    that portfolio.  Legacy entries without `pid` (from before this
+    change) are dropped on a user's first per-portfolio publish so they
+    don't end up with stale duplicates.
     """
     user, err = require_user()
     if err: return err
@@ -8114,47 +8128,95 @@ def leaderboard_submit():
             or (user.get("name") or "").strip()
             or (user.get("email") or "").split("@")[0])[:40]
     tickers = body.get("tickers") or []
-    note = (body.get("note") or "").strip()[:200]
+    note    = (body.get("note") or "").strip()[:200]
+    pid     = (body.get("pid")  or "").strip()
+    portfolio_name = (body.get("portfolio_name") or "").strip()[:MAX_PORTFOLIO_NAME_LEN]
 
     tickers = [str(t).strip().upper() for t in tickers if str(t).strip()][:50]
     if not tickers:
         return jsonify({"error": "At least one ticker required"}), 400
     if not name:
         return jsonify({"error": "Display name is required"}), 400
+    if pid and not _PF_ID_RE.match(pid):
+        return jsonify({"error": "invalid portfolio id"}), 400
 
     entries = _read_leaderboard()
-    # Replace prior submission keyed to this user (Google `sub`).
-    # Also drop legacy entries that match the soft user_token from the
-    # claim flow if it was provided, so a user upgrading from soft-auth
-    # doesn't end up with two entries.
     legacy_token = (body.get("legacy_user_token") or "").strip()[:64]
-    entries = [
-        e for e in entries
-        if e.get("user_sub") != user["sub"]
-        and (not legacy_token or e.get("user_token") != legacy_token)
-    ]
-    entries.append({
-        "id":           uuid.uuid4().hex[:10],
-        "name":         name,
-        "user_sub":     user["sub"],
-        "user_picture": user.get("picture"),
-        "tickers":      tickers,
-        "note":         note,
-        "submitted_at": time.time(),
-    })
+
+    # Drop (a) this user's prior entry for the SAME portfolio (pid match),
+    # (b) any of this user's legacy entries that lacked a pid (one-time
+    # migration so users upgrading don't end up with a stale row), and
+    # (c) any soft-auth entry that matches the claim-flow legacy token.
+    def _keep(e):
+        is_mine = e.get("user_sub") == user["sub"]
+        if is_mine:
+            if pid and e.get("pid") == pid:           return False  # same portfolio re-publish
+            if pid and not e.get("pid"):              return False  # legacy migration
+            if not pid and not e.get("pid"):          return False  # both lack pid → same slot
+        if legacy_token and e.get("user_token") == legacy_token:
+            return False
+        return True
+
+    entries = [e for e in entries if _keep(e)]
+
+    new_entry = {
+        "id":             uuid.uuid4().hex[:10],
+        "name":           name,
+        "user_sub":       user["sub"],
+        "user_email":     user.get("email"),      # attached so every published portfolio is owner-traceable
+        "user_picture":   user.get("picture"),
+        "pid":            pid or None,
+        "portfolio_name": portfolio_name or None,
+        "tickers":        tickers,
+        "note":           note,
+        "submitted_at":   time.time(),
+    }
+    entries.append(new_entry)
+
+    # Enforce per-user cap: if this user now owns more than the cap,
+    # drop their oldest entries until they're at the limit.  Keeps the
+    # leaderboard from getting flooded by a single power user with many
+    # portfolios while still letting normal users publish all of theirs.
+    mine = [e for e in entries if e.get("user_sub") == user["sub"]]
+    if len(mine) > MAX_LB_ENTRIES_PER_USER:
+        mine_sorted = sorted(mine, key=lambda e: e.get("submitted_at", 0))
+        drop_n = len(mine) - MAX_LB_ENTRIES_PER_USER
+        drop_ids = {e["id"] for e in mine_sorted[:drop_n]}
+        entries = [e for e in entries if e["id"] not in drop_ids]
+
     entries = sorted(entries, key=lambda e: -e.get("submitted_at", 0))[:200]
     _write_leaderboard(entries)
-    return jsonify({"ok": True, "count": len(entries)})
+    return jsonify({"ok": True, "count": len(entries), "entry_id": new_entry["id"]})
 
 
 @app.route("/api/leaderboard/delete", methods=["POST"])
 def leaderboard_delete():
+    """
+    Delete leaderboard entries for the signed-in user.
+    Body: { pid?, entry_id? }
+      - entry_id → delete only that one entry (preferred, unambiguous)
+      - pid      → delete the user's entry for that portfolio
+      - neither  → delete ALL of the user's entries (backcompat)
+    """
     user, err = require_user()
     if err: return err
+    body = request.get_json(silent=True) or {}
+    pid      = (body.get("pid") or "").strip()
+    entry_id = (body.get("entry_id") or "").strip()
     entries = _read_leaderboard()
-    entries = [e for e in entries if e.get("user_sub") != user["sub"]]
+    before = len(entries)
+
+    if entry_id:
+        entries = [e for e in entries
+                   if not (e.get("id") == entry_id and e.get("user_sub") == user["sub"])]
+    elif pid:
+        entries = [e for e in entries
+                   if not (e.get("user_sub") == user["sub"] and e.get("pid") == pid)]
+    else:
+        entries = [e for e in entries if e.get("user_sub") != user["sub"]]
+
     _write_leaderboard(entries)
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "removed": before - len(entries)})
 
 
 # ── Portfolio storage (schema v3 — multi-named portfolios) ──────────────
@@ -9269,6 +9331,8 @@ def leaderboard():
             "name":            entry["name"],
             "user_sub":        entry.get("user_sub"),       # for "MINE" detection
             "user_picture":    entry.get("user_picture"),   # avatar in row
+            "pid":             entry.get("pid"),            # null on legacy rows
+            "portfolio_name":  entry.get("portfolio_name"), # chip on the row
             "tickers":         entry["tickers"],
             "note":            entry.get("note", ""),
             "submitted_at":    entry["submitted_at"],

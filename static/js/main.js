@@ -5648,6 +5648,10 @@ function setupSubmitToLeaderboard() {
     const items = pfRead();
     const tickers = items.map(it => it.ticker);
     const note = noteEl.value.trim();
+    // Pass pid + portfolio_name so this publish is keyed to the SPECIFIC
+    // portfolio (each one gets its own leaderboard row instead of
+    // overwriting earlier publishes).
+    const active = pfActive();
     // Pass the legacy soft-token so the backend can dedupe a user who
     // had a pre-auth submission under that token.
     const legacy = getValusUser();
@@ -5661,6 +5665,8 @@ function setupSubmitToLeaderboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name, tickers, note,
+          pid:            active?.pid  || null,
+          portfolio_name: active?.name || null,
           legacy_user_token: legacy?.token || null,
         }),
       });
@@ -5791,13 +5797,14 @@ function renderLeaderboard(items) {
     const isMine = (mySub && entry.user_sub === mySub) ||
                    (myName && entry.name && entry.name.trim().toLowerCase() === myName);
     const isFresh = !isFirstRender && newIds.has(entry.id);
+    const pfName = (entry.portfolio_name || "").trim();
     return `
       <div class="lb-row ${isMine ? 'is-mine' : ''} ${isFresh ? 'is-fresh' : ''}"
            data-lb-id="${escHtml(entry.id)}"
            data-lb-tickers="${escHtml((entry.tickers || []).join(','))}">
         <span class="lb-rank">${idx + 1}</span>
         <div class="lb-info">
-          <div class="lb-name">${escHtml(entry.name)}${isMine ? '<span class="lb-name__mine">MINE</span>' : ''}</div>
+          <div class="lb-name">${escHtml(entry.name)}${isMine ? '<span class="lb-name__mine">MINE</span>' : ''}${pfName ? `<span class="lb-name__pf">${escHtml(pfName)}</span>` : ""}</div>
           <div class="lb-tickers">${escHtml(tickersStr)}</div>
           ${entry.note ? `<div class="lb-note">"${escHtml(entry.note)}"</div>` : ""}
         </div>
