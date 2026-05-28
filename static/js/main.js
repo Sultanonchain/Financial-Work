@@ -4676,9 +4676,11 @@ function setupCustomDCFSliders() {
   if (sliders.length !== 4) return;
 
   // While true, the sliders haven't been moved since the last reset.
-  // Pristine state shows the basis.base_iv (the SAME pure-DCF number the
-  // recompute endpoint will return at base assumptions), so the first
-  // slider tick moves from a coherent starting point.
+  // Pristine state mirrors VALUS's headline IV exactly (with the
+  // assumptions VALUS actually used pre-filled on the sliders).  When
+  // the user moves a slider, applyResult() scales the pure-DCF recompute
+  // by (valus_iv / base_iv) so movements perturb that headline anchor
+  // proportionally instead of jumping to a different baseline.
   let pristine = true;
   let reqToken = 0;            // increments per slider tick
   let debounceTimer = null;
@@ -4711,11 +4713,28 @@ function setupCustomDCFSliders() {
       deltaEl.classList.remove("positive", "negative");
       return;
     }
-    yourEl.textContent = fmtPrice(data.iv);
-    if (data.mos != null && isFinite(data.mos)) {
-      deltaEl.textContent = `${fmtPct(data.mos)} vs current price`;
-      deltaEl.classList.toggle("positive", data.mos > 0);
-      deltaEl.classList.toggle("negative", data.mos < 0);
+    // Scale the pure-DCF result so its baseline matches VALUS's headline
+    // fair value.  The headline includes scenario weighting, sector
+    // overlays, and the consensus anchor — none of which the pure-DCF
+    // recompute can replicate.  Without this scale, the very first
+    // slider tick would jump from VALUS's displayed IV to a different
+    // pure-DCF number, which is exactly the discontinuity users
+    // complained about.  With the scale: at base assumptions the
+    // displayed value equals VALUS, and any slider movement perturbs
+    // that anchor proportionally.
+    const d       = _LAST_DATA || {};
+    const valusIv = d.intrinsic_value;
+    const baseIv  = d.dcf_recompute_basis?.base_iv;
+    const scale   = (valusIv && baseIv && baseIv > 0) ? (valusIv / baseIv) : 1;
+    const scaledIv = data.iv * scale;
+    yourEl.textContent = fmtPrice(scaledIv);
+    // Recompute MOS against the scaled IV — the server-returned `data.mos`
+    // is based on the raw pure-DCF iv, so it'd skew the delta.
+    if (d.current_price && d.current_price > 0) {
+      const mos = (scaledIv - d.current_price) / d.current_price * 100;
+      deltaEl.textContent = `${fmtPct(mos)} vs current price`;
+      deltaEl.classList.toggle("positive", mos > 0);
+      deltaEl.classList.toggle("negative", mos < 0);
     } else {
       deltaEl.textContent = "";
       deltaEl.classList.remove("positive", "negative");
@@ -4751,18 +4770,27 @@ function setupCustomDCFSliders() {
       return;
     }
 
-    // Pristine: pin to the basis.base_iv (the pure-DCF number the server
-    // will return when called with base assumptions).  No network hop.
+    // Pristine: mirror VALUS's headline fair value exactly — same number,
+    // same MOS — so the user sees "I'm starting from what VALUS thinks,
+    // with the assumptions VALUS used" before they touch anything.  Any
+    // slider tick triggers a server recompute that scales relative to
+    // this anchor (see applyResult), so first movement is smooth, not
+    // a jump.  No network hop in pristine state.
     if (pristine) {
       reqToken += 1;
-      const iv = basis.base_iv;
+      const iv = valusIv;
       if (iv != null && isFinite(iv) && iv > 0) {
         yourEl.textContent = fmtPrice(iv);
-        if (d.current_price && d.current_price > 0) {
-          const mos = (iv - d.current_price) / d.current_price * 100;
+        const mos = d.margin_of_safety;
+        if (mos != null && isFinite(mos)) {
           deltaEl.textContent = `${fmtPct(mos)} vs current price`;
           deltaEl.classList.toggle("positive", mos > 0);
           deltaEl.classList.toggle("negative", mos < 0);
+        } else if (d.current_price && d.current_price > 0) {
+          const m = (iv - d.current_price) / d.current_price * 100;
+          deltaEl.textContent = `${fmtPct(m)} vs current price`;
+          deltaEl.classList.toggle("positive", m > 0);
+          deltaEl.classList.toggle("negative", m < 0);
         } else {
           deltaEl.textContent = "";
         }
