@@ -1175,6 +1175,38 @@ button { font-family: inherit; cursor: pointer; }
 .pf-shared-banner.hidden { display: none; }
 .pf-shared-banner strong { color: var(--accent); }
 
+/* Storage-not-durable warning — same visual weight as the shared
+   banner, amber theme instead of mint so it reads as a heads-up.
+   Dismissable via the ✕ on the right; remembered in localStorage. */
+.pf-storage-warn {
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--warning-soft);
+  border: 1px solid var(--warning-glow);
+  border-radius: var(--radius);
+  font-size: 12.5px;
+  color: var(--ink-secondary);
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  gap: var(--space-3);
+  align-items: start;
+  line-height: 1.45;
+}
+.pf-storage-warn.hidden { display: none; }
+.pf-storage-warn__icon { color: var(--warning); font-size: 14px; line-height: 1.2; }
+.pf-storage-warn__body strong { color: var(--warning); display: block; margin-bottom: 2px; }
+.pf-storage-warn__body a { color: var(--warning); text-decoration: underline; text-underline-offset: 2px; }
+.pf-storage-warn__dismiss {
+  background: transparent; border: 0; cursor: pointer;
+  color: var(--ink-muted); font-size: 14px; padding: 2px 6px;
+  line-height: 1; border-radius: var(--radius-sm);
+  transition: color 150ms var(--ease-out), background 150ms var(--ease-out);
+}
+.pf-storage-warn__dismiss:hover {
+  color: var(--ink-primary);
+  background: rgba(255,255,255,0.04);
+}
+
 /* ── Discovery page (sector heatmap) ─────────────────────────────────── */
 /* ── Treemap mode (desktop only) ─────────────────────────────────────────
    Cells sized by sqrt(market_cap) within each sector.  Visually shows
