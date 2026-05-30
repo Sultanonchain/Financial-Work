@@ -862,6 +862,7 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
     Per-ticker Lynch-flavored verdict via Claude Haiku.
     Returns dict or None on failure / no API key.
     """
+    global _ANTHROPIC_COOLDOWN_UNTIL
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key or not ticker:
         if not api_key:
@@ -1065,7 +1066,6 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         # short backoff, and if it still fails set a global cooldown so we
         # stop hammering Anthropic (and stop adding latency to every analyze)
         # for a few minutes — the card just shows the DCF fallback meanwhile.
-        global _ANTHROPIC_COOLDOWN_UNTIL
         resp = None
         for _attempt in range(2):
             resp = requests.post(
