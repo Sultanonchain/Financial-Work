@@ -859,6 +859,9 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
     """
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key or not ticker:
+        if not api_key:
+            print("[valus] lynch: ANTHROPIC_API_KEY not set in this runtime — "
+                  "using DCF fallback verdict")
         return None
 
     # Cache bucket — re-key only at the next market open (9:30 ET) or close
@@ -869,11 +872,11 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
     # Cache namespace is versioned (…:v2:…) so the neutral-label rollout
     # supersedes any entries cached under the old action-word vocabulary
     # rather than serving stale "Buy"/"Avoid" verdicts for up to 5 days.
-    bucket = (ticker.upper(), epoch, "v2")
+    bucket = (ticker.upper(), epoch, "v3")
     cached = _LYNCH_CACHE.get(bucket)
     if cached and (time.time() - cached[0]) < _LYNCH_CACHE_TTL:
         return cached[1]
-    redis_key = f"valus:lynch:v2:{bucket[0]}:{epoch}"
+    redis_key = f"valus:lynch:v3:{bucket[0]}:{epoch}"
     if _kv:
         try:
             raw = _kv.get(redis_key)
@@ -1060,15 +1063,19 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
             json=body, timeout=10,
         )
         if resp.status_code != 200:
+            print(f"[valus] lynch {ticker}: Anthropic HTTP {resp.status_code} — "
+                  f"{resp.text[:300]}")
             return None
         data = resp.json()
         txt = ""
         for block in data.get("content", []):
             if block.get("type") == "text":
                 txt += block.get("text", "")
-        # Match the outermost JSON object — Haiku occasionally wraps in prose
+        # Match the outermost JSON object — the model occasionally wraps in prose
         m = re.search(r"\{.*\}", txt, re.DOTALL)
         if not m:
+            print(f"[valus] lynch {ticker}: no JSON object in model reply — "
+                  f"{txt[:200]!r}")
             return None
         import json as _json_loads
         parsed = _json_loads.loads(m.group(0))
@@ -1171,7 +1178,12 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
             except Exception:
                 pass
         return result
-    except Exception:
+    except Exception as e:
+        # Most often a 10s requests timeout on a cold lambda, or a JSON
+        # decode error. Logged so the cause is visible in the Vercel logs
+        # instead of silently dropping to the DCF fallback.
+        print(f"[valus] lynch {ticker}: verdict generation failed — "
+              f"{type(e).__name__}: {str(e)[:200]}")
         return None
 
 
@@ -8003,7 +8015,7 @@ def _analyze_cache_key(ticker, args):
     # Namespace bumped to v2 so cached analyze payloads carrying the old
     # action-word Lynch verdict ("Buy"/"Avoid") are not served after the
     # neutral-label rollout.
-    return f"valus:analyze:v2:{ticker}|{relevant}"
+    return f"valus:analyze:v3:{ticker}|{relevant}"
 
 def _analyze_cache_get(key):
     # 1. Check Redis first (shared across all Vercel instances)
