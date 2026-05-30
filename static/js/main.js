@@ -1684,14 +1684,16 @@ function renderHaikuVerdict(d) {
     assetPlay:   "Asset Play",
   }[lv.category] || (lv.category || "Lynch");
 
-  // Map verdict to existing tier-color CSS so it matches the hero theme.
+  // Map the internal valuation token to existing tier-color CSS so it
+  // matches the hero theme.  `verdict_key` is the raw token (kept only for
+  // coloring); `verdict` is the neutral label we actually display.
   const verdictClass = ({
     Buy:        "tier-positive",
     Accumulate: "tier-positive",
     Hold:       "tier-info",
     Watch:      "tier-warning",
     Avoid:      "tier-negative",
-  })[lv.verdict] || "tier-info";
+  })[lv.verdict_key || lv.verdict] || "tier-info";
 
   const cat  = document.getElementById("lynchCategory");
   const verd = document.getElementById("lynchVerdict");
@@ -1707,7 +1709,7 @@ function renderHaikuVerdict(d) {
   }
   if (cat)  cat.textContent  = catLabel;
   if (verd) {
-    verd.textContent = lv.verdict || "Hold";
+    verd.textContent = lv.verdict || "Fairly Valued";
     verd.className   = "lynch-verdict " + verdictClass;
   }
   if (thes) thes.textContent = lv.thesis || "";
@@ -5670,6 +5672,39 @@ function setupAuthControl() {
       try { renderWatchlistPage(); } catch {}
     }
     updateAuthControl();
+  };
+
+  // Delete account — permanent erasure of all server-side data for the user.
+  const deleteBtn = $("authDeleteBtn");
+  if (deleteBtn) deleteBtn.onclick = async () => {
+    const ok = window.confirm(
+      "Delete your account?\n\n" +
+      "This permanently removes your portfolios, watchlist, recent activity, " +
+      "and any leaderboard entries from our servers, and cancels any active " +
+      "VALUS+ subscription so billing stops. This cannot be undone."
+    );
+    if (!ok) return;
+    try {
+      const r = await fetch("/api/account/delete", {
+        method: "POST", credentials: "same-origin",
+      });
+      if (!r.ok) {
+        alert("Could not delete your account right now. Please try again or email contact@valusfinancial.com.");
+        return;
+      }
+    } catch {
+      alert("Could not delete your account right now. Please try again or email contact@valusfinancial.com.");
+      return;
+    }
+    // Mirror the sign-out cleanup, then reload into a clean signed-out state.
+    sessionStorage.removeItem("valus.claimed");
+    _ME = null;
+    try { localStorage.removeItem(PF_KEY_V2); } catch {}
+    try { localStorage.removeItem(PF_KEY_V1); } catch {}
+    try { localStorage.removeItem(PF_ACTIVE_KEY); } catch {}
+    try { localStorage.removeItem(WL_KEY); } catch {}
+    alert("Your account and data have been deleted.");
+    window.location.href = "/";
   };
 
   // After OAuth roundtrip, URL has ?auth_ok=1 — replay any pending intent

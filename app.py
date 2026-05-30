@@ -14,6 +14,7 @@ import traceback
 import time
 import re
 import os
+import hmac
 import math
 import json as _json_top
 import xml.etree.ElementTree as ET
@@ -59,7 +60,23 @@ app.config.update(
     # which is the "I have to sign in every time I open the site" symptom.
     PERMANENT_SESSION_LIFETIME=timedelta(days=30),
 )
-CORS(app, supports_credentials=True)
+# CORS — credentialed requests are restricted to an explicit allow-list.
+# A wildcard origin with supports_credentials=True would let any website
+# make authenticated (cookie-bearing) cross-origin calls to our API.  The
+# frontend is served same-origin, so the only legitimate cross-origin
+# callers are our own domains + local dev.  Override with ALLOWED_ORIGINS
+# (comma-separated) if a separate frontend host is ever added.
+_cors_env = os.environ.get("ALLOWED_ORIGINS", "").strip()
+if _cors_env:
+    _cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
+else:
+    _cors_origins = [
+        "https://valusfinancial.com",
+        "https://www.valusfinancial.com",
+        "http://127.0.0.1:5050",
+        "http://localhost:5050",
+    ]
+CORS(app, supports_credentials=True, origins=_cors_origins)
 
 # ── Vercel KV (Redis) adapter — durable storage when a Redis URL is set ─
 # Falls back silently to a process-level dict + /tmp file when env is
@@ -805,6 +822,30 @@ def _market_epoch_label(epoch):
 _LYNCH_CACHE = {}
 _LYNCH_CACHE_TTL = 5 * 24 * 3600   # 5 days — must cover weekend (Fri-close → Mon-open ~ 66h)
 
+# ── Verdict vocabulary ───────────────────────────────────────────────────
+# The internal scoring logic reasons in action-style tokens (Buy / Hold /
+# Avoid …) because the Peter-Lynch heuristics are framed that way.  But
+# VALUS is an EDUCATIONAL tool and is NOT a registered investment adviser:
+# shipping an explicit buy/sell call on a named security reads as a
+# personalized recommendation and is the single biggest legal-exposure item
+# for the product.  So we translate every internal token to a neutral
+# *valuation assessment* before it ever leaves the server or hits the cache.
+# The raw token is preserved as `verdict_key` purely so the frontend can pick
+# a matching color — it is never shown to the user as a label.
+_VERDICT_DISPLAY = {
+    "Buy":        "Undervalued",
+    "Accumulate": "Modestly Undervalued",
+    "Hold":       "Fairly Valued",
+    "Watch":      "Slightly Overvalued",
+    "Avoid":      "Overvalued",
+}
+
+
+def _verdict_label(token):
+    """Map an internal action token to the neutral valuation label shown to
+    users.  Unknown tokens fall back to the neutral middle."""
+    return _VERDICT_DISPLAY.get(token, "Fairly Valued")
+
 
 def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
                           implied_growth_pct, model_growth_pct,
@@ -825,11 +866,14 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
     # Within an epoch, the verdict is frozen so live-price ticks don't burn
     # API credits or cause the Lynch card to flap.
     epoch = _market_epoch()
-    bucket = (ticker.upper(), epoch)
+    # Cache namespace is versioned (…:v2:…) so the neutral-label rollout
+    # supersedes any entries cached under the old action-word vocabulary
+    # rather than serving stale "Buy"/"Avoid" verdicts for up to 5 days.
+    bucket = (ticker.upper(), epoch, "v2")
     cached = _LYNCH_CACHE.get(bucket)
     if cached and (time.time() - cached[0]) < _LYNCH_CACHE_TTL:
         return cached[1]
-    redis_key = f"valus:lynch:{bucket[0]}:{epoch}"
+    redis_key = f"valus:lynch:v2:{bucket[0]}:{epoch}"
     if _kv:
         try:
             raw = _kv.get(redis_key)
@@ -973,7 +1017,10 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
             "Return ONLY a single-line JSON object with these keys (no prose):\n"
             "  category: one of slowGrower|stalwart|fastGrower|cyclical|turnaround|assetPlay\n"
             "  verdict:  one of Buy|Accumulate|Hold|Watch|Avoid\n"
-            "  thesis:   <= 240 chars, plain English, Lynch-flavored\n"
+            "  thesis:   <= 240 chars, plain English, Lynch-flavored.  DESCRIBE\n"
+            "            the valuation and the business — do NOT issue direct\n"
+            "            commands to buy, sell, or hold.  This is educational\n"
+            "            analysis, not investment advice.\n"
             "  bull_points: array of 2-3 strings (each <= 70 chars)\n"
             "  bear_points: array of 2-3 strings (each <= 70 chars)\n"
             "  sovereign_backstop: short string if a strategic backstop applies, else null\n"
@@ -1105,7 +1152,8 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
 
         result = {
             "category":           cat if cat in _VALID_CATS else None,
-            "verdict":            verdict_final,
+            "verdict":            _verdict_label(verdict_final),
+            "verdict_key":        verdict_final,   # internal token → frontend color only
             "thesis":             str(parsed.get("thesis", ""))[:260],
             "bull_points":        bull_points,
             "bear_points":        _coerce_str_list(parsed.get("bear_points")),
@@ -1179,7 +1227,8 @@ def _lynch_fallback_verdict(ticker, sector, mos, strategic_info,
     epoch = _market_epoch()
     return {
         "category":           None,
-        "verdict":            verdict,
+        "verdict":            _verdict_label(verdict),
+        "verdict_key":        verdict,   # internal token → frontend color only
         "thesis":             thesis,
         "bull_points":        bull_points[:3],
         "bear_points":        bear_points[:3],
@@ -6387,6 +6436,11 @@ def privacy():
     return render_template("privacy.html")
 
 
+@app.route("/terms")
+def terms():
+    return render_template("terms.html")
+
+
 @app.route("/methodology")
 def methodology():
     return render_template("methodology.html")
@@ -6579,12 +6633,22 @@ def require_user():
 
 @app.route("/api/_diag/kv")
 def diag_kv():
-    """Quick sanity check: is KV connected and writeable?  Public, no PII."""
+    """Ops sanity check: is KV connected and writeable?  Gated behind
+    CRON_SECRET so it doesn't expose infra config (env var names, raw
+    connection errors) to the public internet."""
+    expected = os.environ.get("CRON_SECRET")
+    if not expected:
+        return jsonify({"error": "diagnostics disabled (CRON_SECRET not set)"}), 503
+    auth = request.headers.get("Authorization", "")
+    secret_arg = request.args.get("secret", "") or ""
+    if not (hmac.compare_digest(auth, f"Bearer {expected}") or
+            hmac.compare_digest(secret_arg, expected)):
+        return jsonify({"error": "unauthorized"}), 401
+
     info = {"connected": False, "source": None, "ping": False, "rw": False}
-    info["source"] = next(
-        (k for k in _KV_ENV_CANDIDATES if os.environ.get(k)),
-        None,
-    )
+    # _kv_source is the env var name that actually resolved at startup
+    # (set by _discover_kv_url); None when no Redis URL was found.
+    info["source"] = _kv_source
     if _kv:
         info["connected"] = True
         try:
@@ -6716,6 +6780,85 @@ def auth_logout():
     return jsonify({"ok": True})
 
 
+@app.route("/api/account/delete", methods=["POST"])
+def account_delete():
+    """Right to erasure (GDPR Art. 17 / CCPA): permanently delete every
+    piece of data we hold for the signed-in user — portfolios, watchlist,
+    recent tickers, subscription record, and any public leaderboard rows —
+    cancel any active Stripe subscription so billing stops, then clear the
+    session.
+    """
+    user, err = require_user()
+    if err: return err
+    sub = user.get("sub")
+    if not sub:
+        return jsonify({"error": "no user id"}), 400
+
+    removed = {"kv_keys": 0, "leaderboard_rows": 0, "subscription_cancelled": False}
+
+    # 1. Cancel the Stripe subscription IMMEDIATELY (the account is being
+    #    erased, so there's no period-end grace to honor).  Best-effort: a
+    #    Stripe failure must not block the data deletion the user requested,
+    #    but we surface it so they can follow up if billing somehow persists.
+    if _STRIPE_CONFIGURED and _stripe:
+        try:
+            rec = _read_subscription(sub)
+            sub_id = rec.get("subscription_id")
+            if sub_id:
+                try:
+                    _stripe.Subscription.delete(sub_id)
+                    removed["subscription_cancelled"] = True
+                except Exception as e:
+                    print(f"[valus] account_delete stripe cancel failed for {sub_id}: {e}")
+                    removed["subscription_error"] = str(e)[:200]
+        except Exception as e:
+            print(f"[valus] account_delete subscription read failed: {e}")
+
+    # 2. Per-user KV documents.
+    if _kv:
+        for key in (
+            PORTFOLIO_KEY_FMT.format(sub=sub),
+            WATCHLIST_KEY_FMT.format(sub=sub),
+            RECENT_KEY_FMT.format(sub=sub),
+            SUBSCRIPTION_KEY_FMT.format(sub=sub),
+        ):
+            try:
+                removed["kv_keys"] += int(_kv.delete(key) or 0)
+            except Exception as e:
+                print(f"[valus] account_delete kv.delete({key}) failed: {e}")
+
+    # 3. In-memory / local-dev mirrors (no-op in KV-backed prod, but keeps
+    #    the dev path consistent and avoids resurrecting data on next read).
+    _PORTFOLIOS_MEM.pop(sub, None)
+    _PORTFOLIOS_MEM.pop(f"{sub}__ts", None)
+    _WATCHLISTS_MEM.pop(sub, None)
+    _SUBSCRIPTION_MEM.pop(sub, None)
+    for _f, _mem in ((PORTFOLIO_FILE, _PORTFOLIOS_MEM),
+                     (WATCHLIST_FILE, _WATCHLISTS_MEM)):
+        try:
+            if os.path.exists(_f):
+                with open(_f, "w") as fh:
+                    _json.dump(_mem, fh)
+        except Exception:
+            pass
+
+    # 4. Public leaderboard rows authored by this user.
+    try:
+        entries = _read_leaderboard()
+        kept = [e for e in entries if e.get("user_sub") != sub]
+        removed["leaderboard_rows"] = len(entries) - len(kept)
+        if removed["leaderboard_rows"]:
+            _write_leaderboard(kept)
+    except Exception as e:
+        print(f"[valus] account_delete leaderboard purge failed: {e}")
+
+    # 5. End the session — the account is gone.
+    session.pop("user", None)
+    session.pop("auth_next", None)
+
+    return jsonify({"ok": True, "deleted": removed})
+
+
 # ════════════════════════════════════════════════════════════════════════
 # Stripe — VALUS+ $2/month subscription
 # ════════════════════════════════════════════════════════════════════════
@@ -6818,12 +6961,25 @@ def stripe_webhook():
     payload = request.get_data(as_text=False)
     sig_header = request.headers.get("Stripe-Signature", "")
 
+    # Fail CLOSED: a webhook with no verified signature can forge a
+    # `checkout.session.completed` and grant itself VALUS+ for free.  We
+    # only ever skip verification when a developer explicitly opts in on a
+    # non-production box (STRIPE_WEBHOOK_ALLOW_UNSIGNED=1 and not on Vercel).
+    # In every other case a missing secret is a hard 503, never a free pass.
+    _allow_unsigned = (
+        not os.environ.get("VERCEL")
+        and os.environ.get("STRIPE_WEBHOOK_ALLOW_UNSIGNED", "").lower() in ("1", "true", "yes")
+    )
+    if not webhook_secret and not _allow_unsigned:
+        print("[valus] stripe webhook rejected: STRIPE_WEBHOOK_SECRET not configured")
+        return jsonify({"error": "webhook signature verification not configured"}), 503
+
     try:
         if webhook_secret:
             event = _stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
         else:
-            # Dev fallback: parse without signature verification. NEVER
-            # leave STRIPE_WEBHOOK_SECRET unset in production.
+            # Local-dev-only path, explicitly opted into above. Never reached
+            # in production (VERCEL gate + missing-secret 503 block it).
             event = _json_top.loads(payload)
     except Exception as e:
         print(f"[valus] stripe webhook signature failed: {e}")
@@ -6972,9 +7128,14 @@ def search():
     if not q:
         return jsonify([])
     try:
-        url = (f"https://query2.finance.yahoo.com/v1/finance/search"
-               f"?q={q}&quotesCount=7&newsCount=0&listsCount=0")
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+        # Pass the query via params= so requests URL-encodes it. Interpolating
+        # raw user input into the query string would let a crafted `q` inject
+        # extra Yahoo API parameters.
+        r = requests.get(
+            "https://query2.finance.yahoo.com/v1/finance/search",
+            params={"q": q, "quotesCount": 7, "newsCount": 0, "listsCount": 0},
+            headers={"User-Agent": "Mozilla/5.0"}, timeout=5,
+        )
         results = []
         for item in r.json().get("quotes", []):
             if item.get("quoteType", "") not in ("EQUITY", "ETF"):
@@ -7839,7 +8000,10 @@ def _ttl_for_ticker(ticker):
 
 def _analyze_cache_key(ticker, args):
     relevant = sorted((k, v) for k, v in args.items() if k != "ticker")
-    return f"valus:analyze:{ticker}|{relevant}"
+    # Namespace bumped to v2 so cached analyze payloads carrying the old
+    # action-word Lynch verdict ("Buy"/"Avoid") are not served after the
+    # neutral-label rollout.
+    return f"valus:analyze:v2:{ticker}|{relevant}"
 
 def _analyze_cache_get(key):
     # 1. Check Redis first (shared across all Vercel instances)
@@ -8044,8 +8208,10 @@ def cron_refresh_top_picks():
     if not expected:
         return jsonify({"error": "CRON_SECRET not configured on server"}), 500
     auth = request.headers.get("Authorization", "")
-    if not (auth == f"Bearer {expected}" or
-            request.args.get("secret") == expected):
+    secret_arg = request.args.get("secret", "") or ""
+    # Constant-time comparison so the secret can't be recovered by timing.
+    if not (hmac.compare_digest(auth, f"Bearer {expected}") or
+            hmac.compare_digest(secret_arg, expected)):
         return jsonify({"error": "unauthorized"}), 401
 
     started = time.time()
@@ -11694,4 +11860,8 @@ def _warm_discovery_cache():
 if __name__ == "__main__":
     # Kick off background warmup once
     _warm_discovery_cache()
-    app.run(debug=True, port=int(os.environ.get("PORT", 5050)))
+    # debug must be opt-in: the Werkzeug debugger allows arbitrary code
+    # execution via its PIN-protected console, so it must never default on.
+    # Production runs under gunicorn/Vercel and never reaches this block.
+    _debug = os.environ.get("FLASK_DEBUG", "").lower() in ("1", "true", "yes")
+    app.run(debug=_debug, port=int(os.environ.get("PORT", 5050)))

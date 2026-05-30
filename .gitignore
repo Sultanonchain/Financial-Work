@@ -13,3 +13,6 @@ build/
 .vscode/
 .valus_leaderboard.json
 .claude/worktrees/
+# Editor/Finder "Keep both" duplicate copies (e.g. "app 2.py", "main 3.js")
+* [0-9].py
+* [0-9].js

@@ -112,10 +112,18 @@
             <span class="auth-menu__icon">🛡</span>
             <span class="auth-menu__label">Privacy Policy</span>
           </button>
+          <a class="auth-menu__btn auth-menu__btn--neutral" href="/terms">
+            <span class="auth-menu__icon">📄</span>
+            <span class="auth-menu__label">Terms of Service</span>
+          </a>
           <div class="auth-menu__sep"></div>
           <button class="auth-menu__btn" id="authSignOutBtn" type="button">
             <span class="auth-menu__icon">⏻</span>
             <span class="auth-menu__label">Sign out</span>
+          </button>
+          <button class="auth-menu__btn auth-menu__btn--danger" id="authDeleteBtn" type="button">
+            <span class="auth-menu__icon">🗑</span>
+            <span class="auth-menu__label">Delete account</span>
           </button>
         </div>
       </div>
@@ -1048,7 +1056,7 @@
       <div class="iv-floor-breakdown hidden" id="vIvFloorBreakdown"></div>
 
       <!-- AI-adjusted IV breakdown — the "VALUS" number rendered alongside
-           the deterministic DCF.  Shown only when Haiku returned bounded
+           the deterministic DCF.  Shown only when the AI model returned bounded
            DCF tweaks that lifted IV. Format: DCF: $X · VALUS: $Y (+Z%) -->
       <div class="iv-floor-breakdown ai-iv-breakdown hidden" id="vAiIvBreakdown"></div>
 
@@ -1254,11 +1262,11 @@
       </div>
     </section>
 
-    <!-- LYNCH LENS: per-ticker Haiku verdict (full-width, hero-adjacent) -->
+    <!-- LYNCH LENS: per-ticker AI valuation read (full-width, hero-adjacent) -->
     <section class="lynch-card card hidden" id="lynchCard">
       <div class="lynch-head">
         <div class="lynch-title">
-          Lynch Lens <span class="lynch-badge">Haiku</span>
+          Lynch Lens <span class="lynch-badge">AI</span>
           <span class="lynch-asof" id="lynchAsOf"></span>
         </div>
         <div class="lynch-pill-row">
@@ -1612,7 +1620,7 @@
 <!-- ── FOOTER ─────────────────────────────────────────────────────────── -->
 <footer class="site-footer">
   <div class="container">
-    <span>VALUS · Educational research tool · Data via Yahoo Finance · Not investment advice · <a href="/how-it-works" style="color: inherit; text-decoration: underline; opacity: 0.8;">How it works</a> · <a href="/methodology" style="color: inherit; text-decoration: underline; opacity: 0.8;">Methodology</a></span>
+    <span>VALUS · Educational research tool · Data via Yahoo Finance · Not investment advice · <a href="/how-it-works" style="color: inherit; text-decoration: underline; opacity: 0.8;">How it works</a> · <a href="/methodology" style="color: inherit; text-decoration: underline; opacity: 0.8;">Methodology</a> · <a href="/terms" style="color: inherit; text-decoration: underline; opacity: 0.8;">Terms</a> · <a href="/privacy" style="color: inherit; text-decoration: underline; opacity: 0.8;">Privacy</a></span>
   </div>
 </footer>
 
