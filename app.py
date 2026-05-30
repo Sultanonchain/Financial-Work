@@ -822,6 +822,11 @@ def _market_epoch_label(epoch):
 _LYNCH_CACHE = {}
 _LYNCH_CACHE_TTL = 5 * 24 * 3600   # 5 days — must cover weekend (Fri-close → Mon-open ~ 66h)
 
+# When Anthropic returns 429/529, we set this to a future timestamp and skip
+# the API entirely until then — the verdict falls back to DCF facts so the
+# page stays fast and we don't burn the rate limit retrying every request.
+_ANTHROPIC_COOLDOWN_UNTIL = 0.0
+
 # ── Verdict vocabulary ───────────────────────────────────────────────────
 # The internal scoring logic reasons in action-style tokens (Buy / Hold /
 # Avoid …) because the Peter-Lynch heuristics are framed that way.  But
@@ -862,6 +867,9 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         if not api_key:
             print("[valus] lynch: ANTHROPIC_API_KEY not set in this runtime — "
                   "using DCF fallback verdict")
+        return None
+    # Respect an active cooldown after a recent 429/529 — skip the call.
+    if time.time() < _ANTHROPIC_COOLDOWN_UNTIL:
         return None
 
     # Cache bucket — re-key only at the next market open (9:30 ET) or close
@@ -1053,15 +1061,31 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
             "max_tokens": 700,
             "messages":   [{"role": "user", "content": full_prompt}],
         }
-        resp = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key":         api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type":      "application/json",
-            },
-            json=body, timeout=10,
-        )
+        # 429 (rate limit) / 529 (overloaded) resilience: retry once after a
+        # short backoff, and if it still fails set a global cooldown so we
+        # stop hammering Anthropic (and stop adding latency to every analyze)
+        # for a few minutes — the card just shows the DCF fallback meanwhile.
+        global _ANTHROPIC_COOLDOWN_UNTIL
+        resp = None
+        for _attempt in range(2):
+            resp = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key":         api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type":      "application/json",
+                },
+                json=body, timeout=10,
+            )
+            if resp.status_code not in (429, 529):
+                break
+            if _attempt == 0:
+                time.sleep(1.0)   # brief backoff, then one retry
+        if resp.status_code in (429, 529):
+            _ANTHROPIC_COOLDOWN_UNTIL = time.time() + 300   # 5-min cooldown
+            print(f"[valus] lynch {ticker}: Anthropic HTTP {resp.status_code} "
+                  f"(rate-limit/overloaded) — backing off 5 min. {resp.text[:200]}")
+            return None
         if resp.status_code != 200:
             print(f"[valus] lynch {ticker}: Anthropic HTTP {resp.status_code} — "
                   f"{resp.text[:300]}")
