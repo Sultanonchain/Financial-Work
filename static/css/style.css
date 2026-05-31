@@ -5544,3 +5544,17 @@ button:disabled { cursor: not-allowed; }
   }
   .home-toppick { padding: 10px 12px; }
 }
+
+/* ── Results-page "not financial advice" disclaimer ─────────────────────── */
+.results-disclaimer {
+  display: flex; align-items: flex-start; gap: 10px;
+  margin: 0 0 18px; padding: 11px 14px;
+  background: rgba(239, 68, 68, 0.07);
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  border-radius: var(--radius-md, 10px);
+  font-size: 12.5px; line-height: 1.5;
+  color: var(--ink-secondary, #cfcfcf);
+}
+.results-disclaimer__icon { color: #fca5a5; flex-shrink: 0; font-size: 14px; }
+.results-disclaimer strong { color: #fca5a5; }
+.results-disclaimer a { color: var(--accent, #5eead4); text-decoration: underline; }
