@@ -344,6 +344,23 @@ def is_valus_plus(user_or_dict):
     return False
 
 
+def _session_has_team_code():
+    """True if the current session redeemed a VALUS_UNLIMITED_CODES code.
+    Safe to call outside a request context (returns False)."""
+    try:
+        return bool(session.get("valus_unlimited"))
+    except Exception:
+        return False
+
+
+def _has_full_access(user_or_dict):
+    """Full VALUS+ experience: a paying subscriber OR a stakeholder who
+    redeemed a team access code.  Use this for feature/access gates so
+    code-holders can explore everything (unlimited portfolios, fresh data,
+    no search cap), not just lift the search limit."""
+    return is_valus_plus(user_or_dict) or _session_has_team_code()
+
+
 RISK_FREE_RATE   = 0.043   # 10-yr US Treasury proxy (Apr 2025 ~4.3%)
 EQUITY_RISK_PREM = 0.060   # FIN 415 template MRP (6.0% — matches academic standard)
 
@@ -8757,8 +8774,9 @@ def _resolve_pid(record, pid):
 
 
 def _portfolio_cap_for(user):
-    """Max portfolios this user may own, or None for unlimited (VALUS+)."""
-    return None if is_valus_plus(user) else MAX_PORTFOLIOS_FREE
+    """Max portfolios this user may own, or None for unlimited (VALUS+ or
+    a redeemed team access code)."""
+    return None if _has_full_access(user) else MAX_PORTFOLIOS_FREE
 
 
 # ── Back-compat shims (existing callers stay unchanged) ─────────────────
@@ -8878,6 +8896,7 @@ def portfolios_list():
         "default_pid": record.get("default_pid"),
         "cap":         _portfolio_cap_for(user),
         "is_plus":     is_valus_plus(user),
+        "unlimited_access": _session_has_team_code(),
     })
 
 
@@ -9744,7 +9763,7 @@ def analyze():
     # rate-limit headroom for everyone else).
     _ck = _analyze_cache_key(ticker, dict(request.args))
     _force_fresh = (
-        is_valus_plus(_current_user)
+        _has_full_access(_current_user)
         and request.args.get("fresh", "").lower() in ("1", "true", "yes")
     )
     _cached = None if _force_fresh else _analyze_cache_get(_ck)

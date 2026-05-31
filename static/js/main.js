@@ -3163,7 +3163,7 @@ async function pfPullFromServer() {
     if (!r.ok) return;
     const meta = await r.json();
     _PF_CAP     = (meta.cap === null || typeof meta.cap === "number") ? meta.cap : 3;
-    _PF_IS_PLUS = !!meta.is_plus;
+    _PF_IS_PLUS = !!(meta.is_plus || meta.unlimited_access);
 
     // Fetch items for each server portfolio in parallel.
     const serverPortfolios = {};
@@ -4950,7 +4950,9 @@ async function refreshMe() {
     _ME = data.user || null;
     _AUTH_CONFIGURED = !!data.auth_configured;
     _STRIPE_CONFIGURED = !!data.stripe_configured;
-    _IS_PLUS = !!data.is_plus;
+    // Treat a redeemed team access code as full access for UI gating, so
+    // stakeholders see everything unlocked instead of upgrade prompts.
+    _IS_PLUS = !!(data.is_plus || data.unlimited_access);
     _PLUS_RENEWS_AT = data.plus_renews_at || null;
     // Server-side default is true; treat a missing field as durable so
     // older clients/responses don't trigger the warning erroneously.
