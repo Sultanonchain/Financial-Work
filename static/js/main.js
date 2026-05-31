@@ -4906,6 +4906,7 @@ let _ME = null;
 let _AUTH_CONFIGURED = false;
 let _STRIPE_CONFIGURED = false;
 let _IS_PLUS = false;          // VALUS+ subscriber flag, refreshed from /api/me
+let _UNLIMITED_ACCESS = false; // redeemed team access code (stakeholder)
 let _PLUS_RENEWS_AT = null;    // unix-seconds when current period ends (if plus)
 // True only when the deployment has a working KV/Redis connection — i.e.
 // portfolio writes actually persist across cold starts AND across devices
@@ -4953,6 +4954,7 @@ async function refreshMe() {
     // Treat a redeemed team access code as full access for UI gating, so
     // stakeholders see everything unlocked instead of upgrade prompts.
     _IS_PLUS = !!(data.is_plus || data.unlimited_access);
+    _UNLIMITED_ACCESS = !!data.unlimited_access;
     _PLUS_RENEWS_AT = data.plus_renews_at || null;
     // Server-side default is true; treat a missing field as durable so
     // older clients/responses don't trigger the warning erroneously.
@@ -4962,6 +4964,7 @@ async function refreshMe() {
     _AUTH_CONFIGURED = false;
     _STRIPE_CONFIGURED = false;
     _IS_PLUS = false;
+    _UNLIMITED_ACCESS = false;
     _PLUS_RENEWS_AT = null;
     _STORAGE_DURABLE = true;
   }
@@ -5007,6 +5010,17 @@ function updateAuthControl() {
   const tier      = $("authMenuTier");
   const premLabel = $("authPremiumLabel");
   const premHint  = $("authPremiumHint");
+  // Standalone access badge — shows for code-holders (even when signed out)
+  // and VALUS+ subscribers. "Team" = redeemed access code, "VALUS+" = paid.
+  const accessBadge = $("accessBadge");
+  if (accessBadge) {
+    if (_UNLIMITED_ACCESS || _IS_PLUS) {
+      accessBadge.textContent = _UNLIMITED_ACCESS ? "✦ Team" : "✦ VALUS+";
+      accessBadge.classList.remove("hidden");
+    } else {
+      accessBadge.classList.add("hidden");
+    }
+  }
   if (!signInBtn || !avatar) return;
   if (_ME) {
     signInBtn.classList.add("hidden");
