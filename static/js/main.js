@@ -5707,6 +5707,54 @@ function setupAuthControl() {
     window.location.href = "/";
   };
 
+  // Team access code → unlimited searches. Shared helper used by both the
+  // menu button and the ?code=… auto-redeem below.
+  async function redeemAccessCode(code, { silent = false } = {}) {
+    code = (code || "").trim();
+    if (!code) return false;
+    try {
+      const r = await fetch("/api/redeem-code", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.ok) {
+        _ME = null;                       // force /api/me refresh
+        if (typeof updateAuthControl === "function") { try { await updateAuthControl(); } catch {} }
+        if (!silent) alert("Access code accepted — you now have unlimited searches.");
+        return true;
+      }
+      if (!silent) alert(d.error === "invalid_code"
+        ? "That access code isn't valid."
+        : "Access codes aren't enabled on this deployment.");
+      return false;
+    } catch {
+      if (!silent) alert("Couldn't redeem the code right now. Please try again.");
+      return false;
+    }
+  }
+
+  const codeBtn = $("authCodeBtn");
+  if (codeBtn) codeBtn.onclick = () => {
+    const code = window.prompt("Enter your VALUS access code:");
+    if (code) redeemAccessCode(code);
+  };
+
+  // Auto-redeem from a shareable link: valusfinancial.com/?code=XXXX
+  {
+    const _p = new URLSearchParams(window.location.search);
+    const _code = _p.get("code");
+    if (_code) {
+      redeemAccessCode(_code, { silent: false }).finally(() => {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("code");      // don't leave the code in the URL/history
+        window.history.replaceState({}, "", url);
+      });
+    }
+  }
+
   // After OAuth roundtrip, URL has ?auth_ok=1 — replay any pending intent
   if (window.location.search.includes("auth_ok=1")) {
     // Strip the marker from the URL but keep the rest

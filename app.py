@@ -259,6 +259,25 @@ _TEST_PLUS_EMAILS = {
     if e.strip()
 }
 
+# ── Team access codes (unlimited searches for you + your board) ──────────
+# Comma-separated secret codes in VALUS_UNLIMITED_CODES.  Anyone who
+# redeems a valid code (via POST /api/redeem-code or the ?code=… URL param)
+# gets a session flag that bypasses the daily search limit — no Stripe sub,
+# no email allow-list needed.  Rotate by changing the env var.  Example:
+#   VALUS_UNLIMITED_CODES=valus-board-7Q2x,valus-founder-9KdP
+_UNLIMITED_CODES = [
+    c.strip() for c in
+    (os.environ.get("VALUS_UNLIMITED_CODES") or "").split(",")
+    if c.strip()
+]
+
+
+def _code_is_valid(code: str) -> bool:
+    """Constant-time check of a submitted access code against the env list."""
+    if not code or not _UNLIMITED_CODES:
+        return False
+    return any(hmac.compare_digest(code, valid) for valid in _UNLIMITED_CODES)
+
 
 def _read_subscription(user_sub):
     """Return the saved subscription dict or {} for an unknown user."""
@@ -6705,14 +6724,18 @@ def api_me():
     """
     user = session.get("user")
     plus = is_valus_plus(user)
+    unlimited = bool(session.get("valus_unlimited"))   # redeemed team code
     payload = {
         "user":             user,
         "auth_configured":  _GOOGLE_CONFIGURED,
         "stripe_configured": _STRIPE_CONFIGURED,
         "is_plus":          plus,
-        "tier":             "plus" if plus else ("free" if user else "guest"),
+        "unlimited_access": unlimited,
+        "tier":             ("plus" if plus else
+                             ("team" if unlimited else
+                              ("free" if user else "guest"))),
         "search_limit": (
-            None if plus
+            None if (plus or unlimited)
             else (SIGNED_IN_SEARCH_LIMIT if user else ANON_SEARCH_LIMIT)
         ),
         # True when Vercel KV / Upstash is connected — portfolios written
@@ -6729,6 +6752,26 @@ def api_me():
         if rec.get("current_period_end"):
             payload["plus_renews_at"] = rec["current_period_end"]
     return jsonify(payload)
+
+
+@app.route("/api/redeem-code", methods=["POST"])
+@limiter.limit("10 per minute")   # throttle brute-force guessing of codes
+def redeem_code():
+    """Redeem a team access code for unlimited searches.
+
+    Body: {code}.  On success, flags the session (persisted for 30 days)
+    so the search-limit gate is bypassed.  Rate-limited so the code set
+    can't be brute-forced.  No account required.
+    """
+    body = request.get_json(silent=True) or {}
+    code = (body.get("code") or request.args.get("code") or "").strip()
+    if not _UNLIMITED_CODES:
+        return jsonify({"error": "access codes not configured"}), 503
+    if not _code_is_valid(code):
+        return jsonify({"ok": False, "error": "invalid_code"}), 403
+    session["valus_unlimited"] = True
+    session.permanent = True
+    return jsonify({"ok": True, "unlimited_access": True})
 
 
 @app.before_request
@@ -7724,6 +7767,10 @@ def _check_anon_search_limit(req, ticker: str):
     multiple times in one day is free.  Quota resets at midnight ET.
     """
     if req.headers.get("X-Valus-Internal") == "1":
+        return None
+
+    # Team access code (you + your board) — unlimited, no account needed.
+    if session.get("valus_unlimited"):
         return None
 
     user = session.get("user") or {}
