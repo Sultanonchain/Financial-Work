@@ -29,6 +29,28 @@ except Exception:
     pass
 
 app = Flask(__name__)
+
+# ── Static-asset cache-busting ───────────────────────────────────────────
+# main.js / style.css are referenced without a hashed filename, so browsers
+# cache them aggressively and returning visitors can run a stale bundle
+# (e.g. miss a newly shipped feature). We append ?v=<deploy version> to
+# those URLs; the version changes every deploy (Vercel git SHA), forcing a
+# fresh fetch. Templates use it as {{ asset_v }}.
+def _compute_asset_version():
+    sha = (os.environ.get("VERCEL_GIT_COMMIT_SHA") or "").strip()
+    if sha:
+        return sha[:8]
+    try:
+        return str(int(os.path.getmtime(os.path.join(app.root_path, "static/js/main.js"))))
+    except Exception:
+        return "1"
+
+_ASSET_VERSION = _compute_asset_version()
+
+@app.context_processor
+def _inject_asset_version():
+    return {"asset_v": _ASSET_VERSION}
+
 # Cookie session signing.
 #   - In production (Vercel) we REFUSE to start without SECRET_KEY. Each
 #     lambda instance generates its own per-process random key otherwise,
