@@ -5558,3 +5558,12 @@ button:disabled { cursor: not-allowed; }
 .results-disclaimer__icon { color: #fca5a5; flex-shrink: 0; font-size: 14px; }
 .results-disclaimer strong { color: #fca5a5; }
 .results-disclaimer a { color: var(--accent, #5eead4); text-decoration: underline; }
+
+/* ── Financial statements: larger, tabular numbers (were cramped at 12px) ── */
+#finBody td { font-size: 14.5px; font-variant-numeric: tabular-nums; color: var(--ink-primary); }
+#finBody th { font-size: 12.5px; }
+#finBody td:first-child { font-size: 13px; color: var(--ink-secondary); font-variant-numeric: normal; }
+@media (max-width: 640px) { #finBody td { font-size: 13.5px; } }
+
+/* Suppressed margin-of-safety when the data is unreliable (extreme outliers) */
+.mos-na { color: var(--ink-muted, #8b8b8b); font-weight: 700; }

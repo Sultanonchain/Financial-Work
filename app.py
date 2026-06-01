@@ -9681,6 +9681,57 @@ def leaderboard():
     return jsonify({"items": enriched[:50], "total": len(enriched)})
 
 
+@app.route("/api/valuations", methods=["POST"])
+@limiter.limit(limit_medium)
+def api_valuations():
+    """Current IV / MOS / tier for a set of tickers, read from the SHARED
+    analyze cache so the same ticker resolves identically everywhere — e.g.
+    the same stock held in two different portfolios now shows the SAME margin
+    of safety (the prior bug was each portfolio rendering its own stale
+    add-time snapshot). Extreme / unreliable valuations return mos=null +
+    reliable=false so the UI can suppress them."""
+    body = request.get_json(silent=True) or {}
+    tickers, seen = [], set()
+    for t in (body.get("tickers") or []):
+        t = str(t).strip().upper()
+        if t and t not in seen:
+            seen.add(t); tickers.append(t)
+    tickers = tickers[:60]
+
+    out = {}
+    fresh_budget = 12   # cap live computes per call to bound latency + API cost
+    for tk in tickers:
+        ck = _analyze_cache_key(tk, {})
+        payload = _analyze_cache_get(ck)
+        if payload is None and fresh_budget > 0:
+            fresh_budget -= 1
+            try:
+                with app.test_request_context(
+                    f"/api/analyze?ticker={tk}",
+                    headers={"X-Valus-Internal": "1"},
+                ):
+                    resp = analyze()
+                if isinstance(resp, tuple):
+                    resp = resp[0]
+                payload = resp.get_json() if hasattr(resp, "get_json") else None
+            except Exception:
+                payload = None
+        if not payload or payload.get("error"):
+            out[tk] = None
+            continue
+        mos = payload.get("margin_of_safety")
+        reliable = (mos is not None) and (not payload.get("extreme_mos_flag"))
+        out[tk] = {
+            "price":    payload.get("current_price"),
+            "iv":       payload.get("intrinsic_value"),
+            "mos":      mos if reliable else None,
+            "tier":     (payload.get("priced_for") or {}).get("label"),
+            "grade":    (payload.get("valus_grade") or {}).get("grade") if reliable else None,
+            "reliable": reliable,
+        }
+    return jsonify({"valuations": out})
+
+
 @app.route("/api/dcf/recompute", methods=["POST"])
 @limiter.limit("120 per minute")
 def dcf_recompute():

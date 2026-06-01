@@ -768,27 +768,23 @@ function renderHeroVerdict(d) {
 
   // MOS
   const mos = d.margin_of_safety;
-  if (mos != null) {
-    const fillEl = $("vMosFill");
-    const pctEl  = $("vMosPct");
-    // Append a "low confidence" chip when |MOS| > 100% (extreme outliers
-    // typically indicate a data quirk: stale price, share-class mismatch,
-    // forward-earnings spike, leverage non-monotonicity).
-    if (d.extreme_mos_flag) {
-      const raw = d.margin_of_safety_raw;
-      const label = (raw != null && raw > 200) ? "200%+"
-                  : (raw != null && raw < -99) ? "−99%"
-                  : fmtPct(mos);
-      pctEl.innerHTML = `${label}<span class="mos-confidence-chip" title="MOS clamped — raw model output exceeds ±100%. Inputs may be mispriced (forward-earnings spike, share-class mismatch, stale data). Treat as low-confidence.">Low Conf</span>`;
-    } else if (d.iv_confidence === "low" || d.iv_confidence === "medium") {
-      // Surface emergency / multiples-only IV provenance — investors should
-      // know when the model is leaning on analyst targets / cash-only / P/B
-      // rather than full DCF.
+  const fillEl = $("vMosFill");
+  const pctEl  = $("vMosPct");
+  if (d.extreme_mos_flag) {
+    // Data-quality outlier (share-class mismatch like BRK.B, forward-earnings
+    // spike, stale/split price). A wildly large MOS is almost always a data
+    // error, not a real opportunity — so we SUPPRESS the misleading number
+    // instead of showing "200%+" / "19,000%" with a chip.
+    pctEl.innerHTML = `<span class="mos-na">N/A</span><span class="mos-confidence-chip" title="VALUS can't produce a reliable margin of safety for this ticker. The underlying data (often a share-class mismatch, a forward-earnings spike, or a stale/split-adjusted price) makes the valuation unreliable — treat it as no signal, not as undervalued.">data issue</span>`;
+    if (fillEl) { fillEl.style.width = "0%"; fillEl.classList.remove("positive","negative"); }
+  } else if (mos != null) {
+    if (d.iv_confidence === "low" || d.iv_confidence === "medium") {
+      // Surface emergency / multiples-only IV provenance.
       const conf = d.iv_confidence === "low" ? "Low Conf" : "Medium";
       const tip  = d.iv_source_label
         ? `Source: ${d.iv_source_label}. DCF was unavailable or low-confidence — IV anchored to a fallback method.`
         : "IV from a fallback method (multiples, analyst target, distressed P/B, etc.).";
-      pctEl.innerHTML = `${fmtPct(mos)}<span class="mos-confidence-chip" title="${tip.replace(/"/g, "&quot;")}">${conf}</span>`;
+      pctEl.innerHTML = `${fmtPct(mos)}<span class="mos-confidence-chip" title="${escHtml(tip)}">${conf}</span>`;
     } else {
       pctEl.textContent = fmtPct(mos);
     }
@@ -796,26 +792,22 @@ function renderHeroVerdict(d) {
     const cap = Math.min(Math.abs(mos), 100);
     const widthPct = cap / 2;  // half of total bar
     if (mos >= 0) {
-      fillEl.style.left = "50%";
-      fillEl.style.right = "auto";
-      fillEl.style.width = `${widthPct}%`;
+      fillEl.style.left = "50%"; fillEl.style.right = "auto"; fillEl.style.width = `${widthPct}%`;
       fillEl.classList.add("positive"); fillEl.classList.remove("negative");
     } else {
-      fillEl.style.right = "50%";
-      fillEl.style.left = "auto";
-      fillEl.style.width = `${widthPct}%`;
+      fillEl.style.right = "50%"; fillEl.style.left = "auto"; fillEl.style.width = `${widthPct}%`;
       fillEl.classList.add("negative"); fillEl.classList.remove("positive");
     }
   } else {
-    $("vMosPct").textContent = "—";
-    $("vMosFill").style.width = "0%";
+    pctEl.textContent = "—";
+    if (fillEl) fillEl.style.width = "0%";
   }
 
   // Tier badge
   const tierBadge = $("vTierBadge");
   tierBadge.classList.remove("tier-positive","tier-info","tier-warning","tier-negative");
-  tierBadge.classList.add(tierCls);
-  $("vTierLabel").textContent = pf.label || "Verdict pending";
+  tierBadge.classList.add(d.extreme_mos_flag ? "tier-info" : tierCls);
+  $("vTierLabel").textContent = d.extreme_mos_flag ? "Unreliable data" : (pf.label || "Verdict pending");
 
   // VALUS A-F grade badge (large) + one-line explanation.
   const gRow     = $("vValusGradeRow");
@@ -823,7 +815,7 @@ function renderHeroVerdict(d) {
   const gExplain = $("vValusGradeExplain");
   const g = d.valus_grade;
   if (gRow && gBadgeEl && gExplain) {
-    if (g && g.grade) {
+    if (g && g.grade && !d.extreme_mos_flag) {
       gBadgeEl.innerHTML  = renderGradeBadge(g, { large: true });
       gExplain.textContent = g.explanation || "";
       gRow.hidden = false;
@@ -938,8 +930,10 @@ function renderHeroVerdict(d) {
   //   neutral = generic news, no scoring signal
   renderNewsBlock(d);
 
-  // Verdict line
-  $("vVerdict").textContent = vs.verdict || pf.narrative || "";
+  // Verdict line — suppressed for data-quality outliers (extreme MOS).
+  $("vVerdict").textContent = d.extreme_mos_flag
+    ? "VALUS can't produce a reliable valuation for this ticker — likely a data issue (share-class mismatch, forward-earnings spike, or a stale/split-adjusted price). Treat this as no signal."
+    : (vs.verdict || pf.narrative || "");
 
   // Hero insights (replaces the old Bear/Base/Bull toggle).
   renderHeroInsights(d);
@@ -3936,6 +3930,10 @@ async function openPortfolioPage() {
   $("pfShareBtn").style.display = "";
   $("pfAllocationCard").style.display = "";
   renderPortfolioPage();
+  // Auto-refresh from the shared valuation source so holdings show LIVE,
+  // consistent numbers (same ticker = same MOS in every portfolio) instead
+  // of stale add-time snapshots. Fire-and-forget; re-renders when done.
+  refreshPortfolioPrices();
   setViewHash("portfolio");
   window.scrollTo({ top: 0, behavior: "instant" });
 }
@@ -4135,30 +4133,39 @@ function destroyAllocationPie() {
 async function refreshPortfolioPrices() {
   const items = pfRead();
   if (items.length === 0) return;
+  // Don't write live values back onto a shared/read-only portfolio view.
+  if (_IS_SHARED_VIEW) return;
   const refreshBtn = $("pfRefreshBtn");
   if (refreshBtn) refreshBtn.textContent = "↻ Refreshing…";
 
-  const updated = await Promise.all(items.map(async it => {
-    try {
-      const res = await fetch(`/api/analyze?ticker=${encodeURIComponent(it.ticker)}`);
-      const d = await res.json();
-      if (d.error) return it;
+  try {
+    // ONE batch call to the shared valuation source. Same ticker → same
+    // cached analyze → identical MOS in every portfolio (fixes the
+    // "ORCL shows different MOS in two portfolios" bug). Unreliable/extreme
+    // valuations come back with mos=null so we never persist a bad number.
+    const r = await fetch("/api/valuations", {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tickers: items.map(i => i.ticker) }),
+    });
+    const d = await r.json().catch(() => ({}));
+    const vals = d.valuations || {};
+    const updated = items.map(it => {
+      const v = vals[it.ticker];
+      if (!v) return it;   // not resolvable right now — keep prior snapshot
       return {
         ...it,
-        price: d.current_price,
-        iv: d.intrinsic_value,
-        mos: d.margin_of_safety,
-        tier: d.priced_for?.label || it.tier,
-        // Pick up any tier-reconciled grade on refresh so a Strategic
-        // Discount override propagates into the stored snapshot.
-        grade: d.valus_grade?.grade || it.grade || null,
-        sector: d.sector || it.sector,
-        name: d.company_name || it.name,
+        price: (v.price != null ? v.price : it.price),
+        iv:    (v.iv != null ? v.iv : it.iv),
+        mos:   v.reliable ? v.mos : null,     // suppress extreme/unreliable
+        reliable: v.reliable,
+        tier:  v.tier || it.tier,
+        grade: v.reliable ? (v.grade || null) : null,
       };
-    } catch { return it; }
-  }));
-  pfWrite(updated);
-  renderPortfolioPage();
+    });
+    pfWrite(updated);
+    renderPortfolioPage();
+  } catch { /* keep existing snapshots on failure */ }
   if (refreshBtn) refreshBtn.textContent = "↻ Refresh prices";
 }
 
