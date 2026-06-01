@@ -393,6 +393,10 @@ _fx_cache: dict = {}
 # Refreshed once per hour so news and filings stay current without hammering APIs.
 _catalyst_cache: dict = {}
 CATALYST_CACHE_TTL = 3600   # seconds
+# Max Claude headline-interpreter calls per analysis (cost cap). Each analyze
+# previously fired one AI call per ambiguous headline — and one per EVERY
+# headline on strategic/backstop tickers — which is what ran up the API bill.
+HEADLINE_AI_BUDGET = 3
 
 # Keyword lists for positive catalyst and risk classification
 _CATALYST_STRONG = [
@@ -1335,9 +1339,15 @@ def _lynch_fallback_verdict(ticker, sector, mos, strategic_info,
     }
 
 
-def _score_headline(title: str, summary: str, ticker: str, sector: str, industry: str):
+def _score_headline(title: str, summary: str, ticker: str, sector: str, industry: str,
+                    ai_budget=None):
     """
     Returns dict { score, durability, is_transformative, matched }.
+
+    ai_budget: optional mutable [remaining] counter shared across one analysis.
+    The Claude headline interpreter only fires while budget remains, capping
+    AI calls per analyze (cost control — see HEADLINE_AI_BUDGET). When None,
+    AI is unbounded (legacy behavior).
     score:        [-1.0, +1.0] aggregate signal
     durability:   "oneTime" | "stage1" | "terminal"
     matched:      list of which keyword bucket(s) hit
@@ -1421,9 +1431,13 @@ def _score_headline(title: str, summary: str, ticker: str, sector: str, industry
     # the keyword heuristic was never tuned for (HBM tape-out, DPA Title III
     # order, Treasury filing), so we'd rather pay $0.0005/headline than drop
     # a real signal.  Per-headline cache (24h) keeps cost bounded.
-    is_backstop_ticker = bool(STRATEGIC_ASSETS.get((ticker or "").upper()))
+    # AI is gated by the shared per-analysis budget. (We removed the old
+    # "run AI on EVERY headline for backstop tickers" rule — that was the main
+    # cost multiplier, firing a Claude call per news item on strategic names.)
+    _ai_ok = (ai_budget is None) or (ai_budget[0] > 0)
     # Path 1 — ambiguous band: heuristic gave nothing useful, let Claude decide.
-    if (-0.2 <= score <= 0.2 and not matched) or (is_backstop_ticker and not claude_used):
+    if _ai_ok and (-0.2 <= score <= 0.2 and not matched):
+        if ai_budget is not None: ai_budget[0] -= 1
         ai = _claude_interpret_headline(ticker, sector, title, summary)
         if ai is not None:
             score = ai["score"]
@@ -1439,7 +1453,8 @@ def _score_headline(title: str, summary: str, ticker: str, sector: str, industry
     # durable tag; ask Claude to sanity-check.  Only override if Claude returns
     # high-confidence opposite sign — catches false positives like "Tesla recalls
     # 2 vehicles" being scored as a major risk.
-    elif abs(score) >= 0.5 and durability in ("stage1", "terminal"):
+    elif _ai_ok and abs(score) >= 0.5 and durability in ("stage1", "terminal"):
+        if ai_budget is not None: ai_budget[0] -= 1
         ai = _claude_interpret_headline(ticker, sector, title, summary)
         if ai is not None:
             claude_category = ai.get("category")
@@ -1484,6 +1499,11 @@ def get_catalyst_insights(ticker: str, info: dict, stock) -> dict:
         cached = _catalyst_cache[ticker]
         if now - cached["ts"] < CATALYST_CACHE_TTL:
             return cached["data"]
+
+    # Cost control: cap Claude headline-interpreter calls per analysis. Shared
+    # across the news loop AND the 8-K loop below. The result is still cached
+    # 6h per ticker (CATALYST_CACHE_TTL), so steady-state cost is tiny.
+    _ai_budget = [HEADLINE_AI_BUDGET]
 
     insights          = []
     momentum_premium  = 0.0
@@ -1581,7 +1601,8 @@ def get_catalyst_insights(ticker: str, info: dict, stock) -> dict:
             age_days = max(0.0, (now - pub_ts) / 86400.0) if pub_ts else 7.0
             age_weight = max(0.0, 1.0 - age_days / 7.0)
             interp = _score_headline(raw_title, raw_snippet, ticker,
-                                     sector_for_score, industry_for_score)
+                                     sector_for_score, industry_for_score,
+                                     ai_budget=_ai_budget)
             news_interpretation.append({
                 "title":     raw_title[:120],
                 "score":     interp["score"],
@@ -1641,7 +1662,8 @@ def get_catalyst_insights(ticker: str, info: dict, stock) -> dict:
             # have a publish timestamp here, so age_weight defaults to 1.0
             # (8-Ks are by definition recent and material).
             interp_8k = _score_headline(f["title"], f["summary"], ticker,
-                                        sector_for_score, industry_for_score)
+                                        sector_for_score, industry_for_score,
+                                        ai_budget=_ai_budget)
             news_interpretation.append({
                 "title":      f"SEC 8-K: {f['title'][:100]}",
                 "score":      interp_8k["score"],
