@@ -5822,6 +5822,33 @@ _SHARE_CLASS_PAIRS = {
 }
 
 
+def _mos_unreliable(mos, iv_confidence, ticker):
+    """True only when a margin of safety is almost certainly a DATA ERROR — not
+    merely large. A high-confidence DCF that says a beaten-down growth name is
+    150-250% undervalued is a real (if aggressive) model output and MUST be
+    shown; the earlier blanket `|MOS| > 100` rule wrongly hid those (e.g. FIVN,
+    a high-confidence DCF, was rendering as "N/A · data issue"). We only
+    suppress the verdict when:
+      • the ticker has a known share-class sibling (Yahoo share-count
+        misalignment — BRK.B vs BRK.A, GOOG/GOOGL, etc.),
+      • the gap is absurd (> 300%) — almost always a forward-earnings spike,
+        unit error, or stale/split-adjusted price even when labeled "DCF", or
+      • the gap is large (> 100%) AND the IV is NOT a high-confidence DCF
+        (i.e. it leaned on a fallback/emergency method, so the number is shaky).
+    """
+    if mos is None:
+        return False
+    a = abs(mos)
+    if a <= 100:
+        return False
+    t = (ticker or "").upper()
+    if t in _SHARE_CLASS_PAIRS or t.replace(".", "-") in _SHARE_CLASS_PAIRS:
+        return True
+    if a > 300:
+        return True
+    return (iv_confidence or "").lower() != "high"
+
+
 def _diagnose_low_confidence(info, ticker, mos, intrinsic_value, price):
     """
     Triage the three most common causes of an extreme |MoS| > 100% reading.
@@ -8147,7 +8174,10 @@ def _analyze_cache_key(ticker, args):
     # Namespace bumped to v2 so cached analyze payloads carrying the old
     # action-word Lynch verdict ("Buy"/"Avoid") are not served after the
     # neutral-label rollout.
-    return f"valus:analyze:v3:{ticker}|{relevant}"
+    # v4: recompute so cached payloads carrying the old over-aggressive
+    # extreme_mos_flag (which wrongly hid high-confidence DCFs like FIVN) are
+    # superseded by the recalibrated data-error flag.
+    return f"valus:analyze:v4:{ticker}|{relevant}"
 
 def _analyze_cache_get(key):
     # 1. Check Redis first (shared across all Vercel instances)
@@ -11879,12 +11909,13 @@ def analyze():
             "reality_reconciled":      reality_reconciled,
             "reality_pre_iv":          reality_pre_iv,
             "reality_reason":          reality_reason,
-            # ── Confidence flag for extreme MOS values ─────────────────────
-            # When |MOS| > 100% the DCF inputs are usually mispriced (forward
-            # earnings spike, leverage quirk, share-class issue, stale data).
-            # Flag so the UI can show a "low confidence" badge.
-            "extreme_mos_flag":  (margin_of_safety is not None
-                                  and abs(margin_of_safety) > 100),
+            # ── Data-error flag (suppresses the verdict in the UI) ─────────
+            # Only set when the MOS is almost certainly a DATA ERROR (share-class
+            # misalignment, absurd >300% gap, or a large gap on a non-high-
+            # confidence/fallback IV) — NOT merely large. A high-confidence DCF
+            # with a big margin of safety (e.g. FIVN) is a legitimate result and
+            # is shown normally. See _mos_unreliable for the full rule.
+            "extreme_mos_flag":  _mos_unreliable(margin_of_safety, iv_confidence, ticker),
             # ── "Priced For" Verdict + Verdict Summary ────────────────────
             "priced_for":              priced_for,
             # ── VALUS A-F letter grade (derived from MOS, then reconciled
