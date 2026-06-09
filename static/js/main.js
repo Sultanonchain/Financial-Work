@@ -545,7 +545,7 @@ function renderETFHero(d) {
           callbacks: { label: c => `$${fmt(c.parsed.y, 2)}` }
         } },
         scales: {
-          x: { ticks: { color: "#6b7382", maxTicksLimit: 6, autoSkip: true }, grid: { display: false } },
+          x: { ticks: { color: "#6b7382", maxTicksLimit: 7, autoSkip: true, maxRotation: 0, font: { size: 11 }, callback: function (v) { return fmtAxisDate(this.getLabelForValue(v)); } }, grid: { display: false } },
           y: { ticks: { color: "#6b7382", callback: v => `$${fmt(v, 0)}` }, grid: { color: "rgba(255,255,255,0.04)" } }
         }
       }
@@ -688,7 +688,7 @@ function renderBTCHero(d) {
           }
         },
         scales: {
-          x: { ticks: { color: "#b8a37a", maxTicksLimit: 6, autoSkip: true }, grid: { display: false } },
+          x: { ticks: { color: "#b8a37a", maxTicksLimit: 7, autoSkip: true, maxRotation: 0, font: { size: 11 }, callback: function (v) { return fmtAxisDate(this.getLabelForValue(v)); } }, grid: { display: false } },
           y: { ticks: { color: "#b8a37a", callback: v => `$${fmt(v / 1000, 0)}k` }, grid: { color: "rgba(247, 147, 26, 0.06)" } }
         }
       }
@@ -2137,6 +2137,15 @@ function renderNewsSummaryCard(d) {
   if (insightsGrid) insightsGrid.classList.remove("hidden");
 }
 
+// #5: compact date label for chart x-axes, "2021-06-01" -> "Jun '21".
+const _MONTHS_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function fmtAxisDate(lbl) {
+  if (typeof lbl !== "string") return lbl;
+  const m = lbl.match(/^(\d{4})-(\d{2})/);
+  if (!m) return lbl;
+  return `${_MONTHS_SHORT[parseInt(m[2], 10) - 1] || ""} '${m[1].slice(2)}`;
+}
+
 function renderValuationHistoryChart(payload) {
   const canvas = $("valuationHistoryChart");
   if (!canvas) return;
@@ -2327,7 +2336,11 @@ function renderValuationHistoryChart(payload) {
       },
       scales: {
         x: {
-          ticks: { color: "#6b7382", maxRotation: 0, autoSkip: true, maxTicksLimit: 6 },
+          ticks: {
+            color: "#6b7382", maxRotation: 0, autoSkip: true, maxTicksLimit: 7,
+            font: { size: 11 },
+            callback: function (v) { return fmtAxisDate(this.getLabelForValue(v)); },
+          },
           grid:  { display: false },
         },
         y: {
