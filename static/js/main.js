@@ -776,6 +776,7 @@ function renderHeroVerdict(d) {
     // error, not a real opportunity, so we SUPPRESS the misleading number
     // instead of showing "200%+" / "19,000%" with a chip.
     pctEl.innerHTML = `<span class="mos-na">N/A</span><span class="mos-confidence-chip" title="VALUS can't produce a reliable margin of safety for this ticker. The underlying data (often a share-class mismatch, a forward-earnings spike, or a stale/split-adjusted price) makes the valuation unreliable, treat it as no signal, not as undervalued.">data issue</span>`;
+    pctEl.classList.remove("mos-pct--up","mos-pct--down");
     if (fillEl) { fillEl.style.width = "0%"; fillEl.classList.remove("positive","negative"); }
   } else if (mos != null) {
     if (d.iv_confidence === "low" || d.iv_confidence === "medium") {
@@ -788,6 +789,11 @@ function renderHeroVerdict(d) {
     } else {
       pctEl.textContent = fmtPct(mos);
     }
+    // #12: colour the MOS number by its sign — green when positive — so a
+    // positive MOS reads green even on "expensive" tiers (Growth/Excellence/
+    // Miracle/Fair) instead of inheriting the tier's warning/red accent.
+    pctEl.classList.toggle("mos-pct--up", mos > 0);
+    pctEl.classList.toggle("mos-pct--down", mos < 0);
     // MOS bar fills outward from center toward the side that wins
     const cap = Math.min(Math.abs(mos), 100);
     const widthPct = cap / 2;  // half of total bar
@@ -799,7 +805,8 @@ function renderHeroVerdict(d) {
       fillEl.classList.add("negative"); fillEl.classList.remove("positive");
     }
   } else {
-    pctEl.textContent = ", ";
+    pctEl.textContent = "N/A";
+    pctEl.classList.remove("mos-pct--up","mos-pct--down");
     if (fillEl) fillEl.style.width = "0%";
   }
 
