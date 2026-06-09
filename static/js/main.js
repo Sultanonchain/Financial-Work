@@ -3951,7 +3951,7 @@ async function openPortfolioPage() {
   $("pfSharedBanner")?.classList.add("hidden");
   syncStorageWarnVisibility();
   $("pfPageTitle").textContent = pfActive().name || "My Portfolio";
-  $("pfPageTagline").textContent = "Real-time DCF tracking across your watchlist.";
+  $("pfPageTagline").textContent = t("pf.tagline", "Real-time DCF tracking across your watchlist.");
   $("pfRefreshBtn").style.display = "";
   $("pfShareBtn").style.display = "";
   $("pfAllocationCard").style.display = "";
@@ -5384,10 +5384,159 @@ const ACCENT_PALETTE = {
   rose:   { accent: "#fb7185", soft: "rgba(251,113,133,0.12)", glow: "rgba(251,113,133,0.25)", strong: "rgba(251,113,133,0.55)" },
 };
 const SETTINGS_DEFAULTS = {
-  accent: "mint", textsize: "medium",
+  accent: "mint", textsize: "medium", lang: "en",
   contrast: false, motion: false,
   dyslexia: false, underline: false, touch: false, focusRing: false,
 };
+
+/* ════════════════════════════════════════════════════════════════════════
+   Internationalisation (i18n) — Phase 1
+   ────────────────────────────────────────────────────────────────────────
+   English is the in-DOM source of truth; the es/zh dictionaries below
+   override the persistent UI chrome (header, account menu, settings,
+   portfolio action bar, modal titles, footer).  Translation is keyed by a
+   stable string set as data-i18n="key" on an element (textContent) or
+   data-i18n-ph="key" (placeholder).  Live AI-generated verdict/notes text is
+   intentionally NOT translated here (that needs per-request model calls and
+   is the costly part deferred to a later phase). ──────────────────────── */
+const I18N = {
+  es: {
+    "nav.signin": "Iniciar sesión",
+    "nav.watchlist": "Lista de seguimiento",
+    "menu.settings": "Ajustes",
+    "menu.about": "Acerca de VALUS",
+    "menu.privacy": "Política de privacidad",
+    "menu.terms": "Términos del servicio",
+    "menu.contact": "Contacto y soporte",
+    "menu.code": "Introducir código de acceso",
+    "menu.signout": "Cerrar sesión",
+    "menu.deleteAccount": "Eliminar cuenta",
+    "switcher.new": "Nueva cartera…",
+    "switcher.rename": "Renombrar actual…",
+    "switcher.delete": "Eliminar actual…",
+    "pill.disclaimer": "No es asesoramiento financiero",
+    "pf.tagline": "Seguimiento DCF en tiempo real de tu lista.",
+    "pf.investorHub": "Centro de inversores",
+    "pf.publish": "Publicar",
+    "pf.share": "Compartir",
+    "pf.refresh": "Actualizar",
+    "pf.exportCsv": "Exportar CSV",
+    "pf.leaderboard": "Clasificación",
+    "pf.addFirst": "Añade acciones primero",
+    "pf.linkCopied": "Enlace copiado",
+    "set.title": "Ajustes",
+    "set.accent": "Color de acento",
+    "set.textsize": "Tamaño del texto",
+    "set.small": "Pequeño",
+    "set.medium": "Mediano",
+    "set.large": "Grande",
+    "set.language": "Idioma",
+    "set.contrast": "Alto contraste",
+    "set.contrast.hint": "Aumenta el contraste de texto y bordes para mejor lectura.",
+    "set.motion": "Reducir movimiento",
+    "set.motion.hint": "Desactiva las animaciones por sensibilidad vestibular.",
+    "set.dyslexia": "Fuente para dislexia",
+    "set.dyslexia.hint": "Mayor espaciado entre letras y tipografía legible.",
+    "set.underline": "Subrayar siempre los enlaces",
+    "set.underline.hint": "No depender solo del color para marcar enlaces.",
+    "set.touch": "Áreas táctiles más grandes",
+    "set.touch.hint": "Botones mínimos de 44×44px (WCAG 2.2).",
+    "set.focus": "Anillos de enfoque visibles",
+    "set.focus.hint": "Contorno más grueso al navegar con teclado.",
+    "set.reset": "Restablecer valores",
+    "set.done": "Listo",
+    "modal.compare": "Comparar lado a lado",
+    "modal.grades": "Cómo funcionan las calificaciones VALUS",
+    "modal.signin": "Iniciar sesión en VALUS",
+    "modal.investorHub": "Centro de inversores",
+    "modal.whyVerdict": "¿Por qué este veredicto?",
+    "res.currentPrice": "Precio actual",
+    "res.mos": "Margen de seguridad",
+    "res.fairValue": "Valor justo",
+    "vg.sanity": "Comprobación frente a Wall Street",
+    "vg.flip": "Qué cambiaría este veredicto",
+    "tab.investors": "Inversores",
+    "tab.strategies": "Estrategias",
+  },
+  zh: {
+    "nav.signin": "登录",
+    "nav.watchlist": "关注列表",
+    "menu.settings": "设置",
+    "menu.about": "关于 VALUS",
+    "menu.privacy": "隐私政策",
+    "menu.terms": "服务条款",
+    "menu.contact": "联系与支持",
+    "menu.code": "输入访问码",
+    "menu.signout": "退出登录",
+    "menu.deleteAccount": "删除账户",
+    "switcher.new": "新建组合…",
+    "switcher.rename": "重命名当前…",
+    "switcher.delete": "删除当前…",
+    "pill.disclaimer": "非投资建议",
+    "pf.tagline": "对你的关注列表进行实时 DCF 跟踪。",
+    "pf.investorHub": "投资者中心",
+    "pf.publish": "发布",
+    "pf.share": "分享",
+    "pf.refresh": "刷新",
+    "pf.exportCsv": "导出 CSV",
+    "pf.leaderboard": "排行榜",
+    "pf.addFirst": "请先添加股票",
+    "pf.linkCopied": "链接已复制",
+    "set.title": "设置",
+    "set.accent": "强调色",
+    "set.textsize": "文字大小",
+    "set.small": "小",
+    "set.medium": "中",
+    "set.large": "大",
+    "set.language": "语言",
+    "set.contrast": "高对比度",
+    "set.contrast.hint": "增强文字和边框对比度以便阅读。",
+    "set.motion": "减少动态效果",
+    "set.motion.hint": "为前庭敏感者关闭动画。",
+    "set.dyslexia": "易读字体（适合阅读障碍）",
+    "set.dyslexia.hint": "更宽的字距与高可读性字体。",
+    "set.underline": "始终为链接加下划线",
+    "set.underline.hint": "不仅依赖颜色来标识链接。",
+    "set.touch": "更大的触控区域",
+    "set.touch.hint": "按钮最小 44×44 像素（WCAG 2.2）。",
+    "set.focus": "明显的焦点框",
+    "set.focus.hint": "使用键盘导航时显示更粗的轮廓。",
+    "set.reset": "恢复默认",
+    "set.done": "完成",
+    "modal.compare": "并排比较",
+    "modal.grades": "VALUS 评级如何运作",
+    "modal.signin": "登录 VALUS",
+    "modal.investorHub": "投资者中心",
+    "modal.whyVerdict": "为何是此评级？",
+    "res.currentPrice": "当前价格",
+    "res.mos": "安全边际",
+    "res.fairValue": "合理价值",
+    "vg.sanity": "对比华尔街的合理性检查",
+    "vg.flip": "什么会改变此评级",
+    "tab.investors": "投资者",
+    "tab.strategies": "策略",
+  },
+};
+const _i18nOrig = new WeakMap();   // captured English source, for round-tripping back to en
+function applyI18n(lang) {
+  const dict = I18N[lang] || null;
+  document.documentElement.lang = lang || "en";
+  document.querySelectorAll("[data-i18n]").forEach(el => {
+    if (!_i18nOrig.has(el)) _i18nOrig.set(el, el.textContent);
+    el.textContent = (dict && dict[el.dataset.i18n]) || _i18nOrig.get(el);
+  });
+  document.querySelectorAll("[data-i18n-ph]").forEach(el => {
+    if (!_i18nOrig.has(el)) _i18nOrig.set(el, el.getAttribute("placeholder") || "");
+    el.setAttribute("placeholder", (dict && dict[el.dataset.i18nPh]) || _i18nOrig.get(el));
+  });
+}
+// Translate a dynamic string from JS-generated markup; falls back to English.
+function t(key, fallback) {
+  let lang = "en";
+  try { lang = (loadUserSettings().lang) || "en"; } catch {}
+  const dict = I18N[lang];
+  return (dict && dict[key]) || fallback || key;
+}
 
 function loadUserSettings() {
   try {
@@ -5420,6 +5569,8 @@ function applyUserSettings(s) {
   root.classList.toggle("ul-on",    !!s.underline);
   root.classList.toggle("touch-on", !!s.touch);
   root.classList.toggle("focus-on", !!s.focusRing);
+  // Language → translate the persistent UI chrome (Phase 1 i18n).
+  applyI18n(s.lang || "en");
 }
 
 function openSettingsModal() {
@@ -5433,6 +5584,9 @@ function openSettingsModal() {
   });
   document.querySelectorAll("#settingsTextSize .settings-segment").forEach(b => {
     b.classList.toggle("active", b.dataset.textsize === s.textsize);
+  });
+  document.querySelectorAll("#settingsLanguage .settings-segment").forEach(b => {
+    b.classList.toggle("active", b.dataset.lang === (s.lang || "en"));
   });
   $("settingsContrast").checked = !!s.contrast;
   $("settingsMotion").checked   = !!s.motion;
@@ -5463,6 +5617,15 @@ function setupSettings() {
       s.textsize = b.dataset.textsize;
       saveUserSettings(s); applyUserSettings(s);
       document.querySelectorAll("#settingsTextSize .settings-segment").forEach(x =>
+        x.classList.toggle("active", x === b));
+    };
+  });
+  document.querySelectorAll("#settingsLanguage .settings-segment").forEach(b => {
+    b.onclick = () => {
+      const s = loadUserSettings();
+      s.lang = b.dataset.lang;
+      saveUserSettings(s); applyUserSettings(s);
+      document.querySelectorAll("#settingsLanguage .settings-segment").forEach(x =>
         x.classList.toggle("active", x === b));
     };
   });
@@ -5985,8 +6148,8 @@ function setupSubmitToLeaderboard() {
   publishBtn.onclick = async () => {
     const items = pfRead();
     if (items.length === 0) {
-      publishBtn.textContent = "Add stocks first ★";
-      setTimeout(() => { publishBtn.innerHTML = ic("trophy") + " Publish"; }, 1500);
+      publishBtn.textContent = t("pf.addFirst", "Add stocks first") + " ★";
+      setTimeout(() => { publishBtn.innerHTML = ic("trophy") + " " + escHtml(t("pf.publish", "Publish")); }, 1500);
       return;
     }
     // Gate on real auth, sign-in modal is shown if not signed in.
@@ -6453,18 +6616,18 @@ function setupSharePortfolio() {
   shareBtn.onclick = () => {
     const items = pfRead();
     if (items.length === 0) {
-      shareBtn.textContent = "Add stocks first ★";
-      setTimeout(() => { shareBtn.textContent = "↗ Share"; }, 1500);
+      shareBtn.textContent = t("pf.addFirst", "Add stocks first") + " ★";
+      setTimeout(() => { shareBtn.textContent = "↗ " + t("pf.share", "Share"); }, 1500);
       return;
     }
     const tickers = items.map(it => it.ticker).join(",");
     const url = `${window.location.origin}/?p=${encodeURIComponent(tickers)}`;
     navigator.clipboard.writeText(url).then(() => {
       shareBtn.classList.add("starred");
-      shareBtn.textContent = "✓ Link copied";
+      shareBtn.textContent = "✓ " + t("pf.linkCopied", "Link copied");
       setTimeout(() => {
         shareBtn.classList.remove("starred");
-        shareBtn.textContent = "↗ Share";
+        shareBtn.textContent = "↗ " + t("pf.share", "Share");
       }, 1800);
     });
   };

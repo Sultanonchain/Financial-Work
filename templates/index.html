@@ -73,7 +73,7 @@
            via localStorage; sign-in pulls/merges. -->
       <button class="header-btn" id="watchlistBtn" type="button" aria-label="Open watchlist">
         <span class="header-btn__icon">≡</span>
-        <span class="header-btn__label">Watchlist</span>
+        <span class="header-btn__label" data-i18n="nav.watchlist">Watchlist</span>
         <span class="header-btn__count" id="watchlistCount" hidden>0</span>
       </button>
       <!-- Unified portfolio nav: ONE button.  When signed in, clicking
@@ -93,20 +93,20 @@
           <div class="pf-switcher__sep"></div>
           <button class="pf-switcher__action" id="pfSwitcherNew" role="menuitem" type="button">
             <span class="pf-switcher__action-icon" aria-hidden="true">＋</span>
-            <span class="pf-switcher__action-label">New portfolio…</span>
+            <span class="pf-switcher__action-label" data-i18n="switcher.new">New portfolio…</span>
             <span class="pf-switcher__action-cap" id="pfSwitcherCapHint" hidden></span>
           </button>
           <button class="pf-switcher__action" id="pfSwitcherRename" role="menuitem" type="button">
             <span class="pf-switcher__action-icon" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#vi-pencil"></use></svg></span>
-            <span class="pf-switcher__action-label">Rename current…</span>
+            <span class="pf-switcher__action-label" data-i18n="switcher.rename">Rename current…</span>
           </button>
           <button class="pf-switcher__action pf-switcher__action--danger" id="pfSwitcherDelete" role="menuitem" type="button">
             <span class="pf-switcher__action-icon" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#vi-trash"></use></svg></span>
-            <span class="pf-switcher__action-label">Delete current…</span>
+            <span class="pf-switcher__action-label" data-i18n="switcher.delete">Delete current…</span>
           </button>
         </div>
       </div>
-      <span class="disclaimer-pill" title="VALUS is an educational research tool. Not investment advice."><svg class="ic" aria-hidden="true"><use href="#vi-alert"></use></svg> Not financial advice</span>
+      <span class="disclaimer-pill" title="VALUS is an educational research tool. Not investment advice."><svg class="ic" aria-hidden="true"><use href="#vi-alert"></use></svg> <span data-i18n="pill.disclaimer">Not financial advice</span></span>
       <!-- Shown when the visitor has full access via a redeemed team code or
            an active VALUS+ subscription. Visible even when not signed in. -->
       <span class="access-badge hidden" id="accessBadge" title="Full access, unlimited"></span>
@@ -116,7 +116,7 @@
       <div class="auth-control" id="authControl">
         <button class="header-btn" id="signInBtn" type="button" aria-label="Sign in">
           <span class="header-btn__icon">↪</span>
-          <span class="header-btn__label">Sign in</span>
+          <span class="header-btn__label" data-i18n="nav.signin">Sign in</span>
         </button>
         <button class="auth-avatar hidden" id="authAvatar" type="button" aria-label="Account">
           <img id="authAvatarImg" alt="" />
@@ -133,36 +133,36 @@
           </button>
           <button class="auth-menu__btn auth-menu__btn--neutral" id="authSettingsBtn" type="button">
             <span class="auth-menu__icon"><svg class="ic" aria-hidden="true"><use href="#vi-settings"></use></svg></span>
-            <span class="auth-menu__label">Settings</span>
+            <span class="auth-menu__label" data-i18n="menu.settings">Settings</span>
           </button>
           <button class="auth-menu__btn auth-menu__btn--neutral" id="authAboutBtn" type="button">
             <span class="auth-menu__icon">?</span>
-            <span class="auth-menu__label">About VALUS</span>
+            <span class="auth-menu__label" data-i18n="menu.about">About VALUS</span>
           </button>
           <button class="auth-menu__btn auth-menu__btn--neutral" id="authPrivacyBtn" type="button">
             <span class="auth-menu__icon"><svg class="ic" aria-hidden="true"><use href="#vi-shield"></use></svg></span>
-            <span class="auth-menu__label">Privacy Policy</span>
+            <span class="auth-menu__label" data-i18n="menu.privacy">Privacy Policy</span>
           </button>
           <a class="auth-menu__btn auth-menu__btn--neutral" href="/terms">
             <span class="auth-menu__icon"><svg class="ic" aria-hidden="true"><use href="#vi-file"></use></svg></span>
-            <span class="auth-menu__label">Terms of Service</span>
+            <span class="auth-menu__label" data-i18n="menu.terms">Terms of Service</span>
           </a>
           <a class="auth-menu__btn auth-menu__btn--neutral" href="mailto:contact@valusfinancial.com">
             <span class="auth-menu__icon"><svg class="ic" aria-hidden="true"><use href="#vi-mail"></use></svg></span>
-            <span class="auth-menu__label">Contact &amp; support</span>
+            <span class="auth-menu__label" data-i18n="menu.contact">Contact &amp; support</span>
           </a>
           <button class="auth-menu__btn auth-menu__btn--neutral" id="authCodeBtn" type="button">
             <span class="auth-menu__icon"><svg class="ic" aria-hidden="true"><use href="#vi-key"></use></svg></span>
-            <span class="auth-menu__label">Enter access code</span>
+            <span class="auth-menu__label" data-i18n="menu.code">Enter access code</span>
           </button>
           <div class="auth-menu__sep"></div>
           <button class="auth-menu__btn" id="authSignOutBtn" type="button">
             <span class="auth-menu__icon">⏻</span>
-            <span class="auth-menu__label">Sign out</span>
+            <span class="auth-menu__label" data-i18n="menu.signout">Sign out</span>
           </button>
           <button class="auth-menu__btn auth-menu__btn--danger" id="authDeleteBtn" type="button">
             <span class="auth-menu__icon"><svg class="ic" aria-hidden="true"><use href="#vi-trash"></use></svg></span>
-            <span class="auth-menu__label">Delete account</span>
+            <span class="auth-menu__label" data-i18n="menu.deleteAccount">Delete account</span>
           </button>
         </div>
       </div>
@@ -180,12 +180,12 @@
         <p id="pfPageTagline">Real-time DCF tracking across your watchlist.</p>
       </div>
       <div class="pf-page__actions">
-        <button class="copy-btn" id="pfTemplatesBtn" type="button" title="Browse famous investor 13F portfolios and classic allocation strategies"><svg class="ic" aria-hidden="true"><use href="#vi-cap"></use></svg> Investor Hub</button>
-        <button class="copy-btn starred" id="pfPublishBtn" type="button"><svg class="ic" aria-hidden="true"><use href="#vi-trophy"></use></svg> Publish</button>
-        <button class="copy-btn" id="pfShareBtn" type="button">↗ Share</button>
-        <button class="copy-btn" id="pfRefreshBtn" type="button">↻ Refresh</button>
-        <button class="copy-btn" id="pfExportCsvBtn" type="button" title="Download this portfolio as CSV">⤓ Export CSV</button>
-        <button class="copy-btn" id="pfViewLeaderboardBtn" type="button" title="See top portfolios from other users"><svg class="ic" aria-hidden="true"><use href="#vi-trophy"></use></svg> Leaderboard →</button>
+        <button class="copy-btn" id="pfTemplatesBtn" type="button" title="Browse famous investor 13F portfolios and classic allocation strategies"><svg class="ic" aria-hidden="true"><use href="#vi-cap"></use></svg> <span data-i18n="pf.investorHub">Investor Hub</span></button>
+        <button class="copy-btn starred" id="pfPublishBtn" type="button"><svg class="ic" aria-hidden="true"><use href="#vi-trophy"></use></svg> <span data-i18n="pf.publish">Publish</span></button>
+        <button class="copy-btn" id="pfShareBtn" type="button">↗ <span data-i18n="pf.share">Share</span></button>
+        <button class="copy-btn" id="pfRefreshBtn" type="button">↻ <span data-i18n="pf.refresh">Refresh</span></button>
+        <button class="copy-btn" id="pfExportCsvBtn" type="button" title="Download this portfolio as CSV">⤓ <span data-i18n="pf.exportCsv">Export CSV</span></button>
+        <button class="copy-btn" id="pfViewLeaderboardBtn" type="button" title="See top portfolios from other users"><svg class="ic" aria-hidden="true"><use href="#vi-trophy"></use></svg> <span data-i18n="pf.leaderboard">Leaderboard</span> →</button>
       </div>
     </div>
     <div class="pf-shared-banner hidden" id="pfSharedBanner">
@@ -472,7 +472,7 @@
   <div class="modal__backdrop" data-modal-close></div>
   <div class="modal__panel" style="max-width: 880px;">
     <div class="modal__head">
-      <h2 class="modal__title" id="compareModalTitle">Compare side-by-side</h2>
+      <h2 class="modal__title" id="compareModalTitle" data-i18n="modal.compare">Compare side-by-side</h2>
       <button class="modal__close" data-modal-close aria-label="Close">✕</button>
     </div>
     <div class="modal__body">
@@ -504,7 +504,7 @@
   <div class="modal__backdrop" data-modal-close></div>
   <div class="modal__panel" style="max-width: 560px;">
     <div class="modal__head">
-      <h2 class="modal__title" id="gradeExplainerTitle">How VALUS grades work</h2>
+      <h2 class="modal__title" id="gradeExplainerTitle" data-i18n="modal.grades">How VALUS grades work</h2>
       <button class="modal__close" data-modal-close aria-label="Close">✕</button>
     </div>
     <div class="modal__body">
@@ -567,7 +567,7 @@
   <div class="modal__backdrop" data-modal-close></div>
   <div class="modal__panel" style="max-width: 440px;">
     <div class="modal__head">
-      <h2 class="modal__title" id="signInTitle">Sign in to VALUS</h2>
+      <h2 class="modal__title" id="signInTitle" data-i18n="modal.signin">Sign in to VALUS</h2>
       <button class="modal__close" data-modal-close aria-label="Close">✕</button>
     </div>
     <div class="modal__body">
@@ -607,13 +607,23 @@
   <div class="modal__backdrop" data-modal-close></div>
   <div class="modal__panel" style="max-width: 480px;">
     <div class="modal__head">
-      <h2 class="modal__title" id="settingsTitle">Settings</h2>
+      <h2 class="modal__title" id="settingsTitle" data-i18n="set.title">Settings</h2>
       <button class="modal__close" data-modal-close aria-label="Close">✕</button>
     </div>
     <div class="modal__body">
+      <!-- Language -->
+      <div class="settings-row">
+        <div class="settings-row__label" data-i18n="set.language">Language</div>
+        <div class="settings-segments" id="settingsLanguage">
+          <button class="settings-segment" data-lang="en">English</button>
+          <button class="settings-segment" data-lang="es">Español</button>
+          <button class="settings-segment" data-lang="zh">中文</button>
+        </div>
+      </div>
+
       <!-- Accent color -->
       <div class="settings-row">
-        <div class="settings-row__label">Accent color</div>
+        <div class="settings-row__label" data-i18n="set.accent">Accent color</div>
         <div class="settings-swatches" id="settingsAccent">
           <button class="settings-swatch" data-accent="mint"   style="--sw: #5eead4" aria-label="Mint"></button>
           <button class="settings-swatch" data-accent="blue"   style="--sw: #60a5fa" aria-label="Blue"></button>
@@ -625,19 +635,19 @@
 
       <!-- Text size -->
       <div class="settings-row">
-        <div class="settings-row__label">Text size</div>
+        <div class="settings-row__label" data-i18n="set.textsize">Text size</div>
         <div class="settings-segments" id="settingsTextSize">
-          <button class="settings-segment" data-textsize="small">Small</button>
-          <button class="settings-segment" data-textsize="medium">Medium</button>
-          <button class="settings-segment" data-textsize="large">Large</button>
+          <button class="settings-segment" data-textsize="small"  data-i18n="set.small">Small</button>
+          <button class="settings-segment" data-textsize="medium" data-i18n="set.medium">Medium</button>
+          <button class="settings-segment" data-textsize="large"  data-i18n="set.large">Large</button>
         </div>
       </div>
 
       <!-- High contrast -->
       <div class="settings-row settings-row--toggle">
         <div>
-          <div class="settings-row__label">High contrast</div>
-          <div class="settings-row__hint">Boosts text + border contrast for readability.</div>
+          <div class="settings-row__label" data-i18n="set.contrast">High contrast</div>
+          <div class="settings-row__hint" data-i18n="set.contrast.hint">Boosts text + border contrast for readability.</div>
         </div>
         <label class="settings-switch">
           <input type="checkbox" id="settingsContrast"/>
@@ -648,8 +658,8 @@
       <!-- Reduce motion -->
       <div class="settings-row settings-row--toggle">
         <div>
-          <div class="settings-row__label">Reduce motion</div>
-          <div class="settings-row__hint">Disables animations for vestibular sensitivity.</div>
+          <div class="settings-row__label" data-i18n="set.motion">Reduce motion</div>
+          <div class="settings-row__hint" data-i18n="set.motion.hint">Disables animations for vestibular sensitivity.</div>
         </div>
         <label class="settings-switch">
           <input type="checkbox" id="settingsMotion"/>
@@ -660,8 +670,8 @@
       <!-- Dyslexia-friendly font -->
       <div class="settings-row settings-row--toggle">
         <div>
-          <div class="settings-row__label">Dyslexia-friendly font</div>
-          <div class="settings-row__hint">Wider letter-spacing + high-readability typeface.</div>
+          <div class="settings-row__label" data-i18n="set.dyslexia">Dyslexia-friendly font</div>
+          <div class="settings-row__hint" data-i18n="set.dyslexia.hint">Wider letter-spacing + high-readability typeface.</div>
         </div>
         <label class="settings-switch">
           <input type="checkbox" id="settingsDyslexia"/>
@@ -672,8 +682,8 @@
       <!-- Always-underline links -->
       <div class="settings-row settings-row--toggle">
         <div>
-          <div class="settings-row__label">Always-underline links</div>
-          <div class="settings-row__hint">Don't rely on color alone to mark links.</div>
+          <div class="settings-row__label" data-i18n="set.underline">Always-underline links</div>
+          <div class="settings-row__hint" data-i18n="set.underline.hint">Don't rely on color alone to mark links.</div>
         </div>
         <label class="settings-switch">
           <input type="checkbox" id="settingsUnderline"/>
@@ -684,8 +694,8 @@
       <!-- Larger touch targets -->
       <div class="settings-row settings-row--toggle">
         <div>
-          <div class="settings-row__label">Larger touch targets</div>
-          <div class="settings-row__hint">Minimum 44×44px buttons (WCAG 2.2).</div>
+          <div class="settings-row__label" data-i18n="set.touch">Larger touch targets</div>
+          <div class="settings-row__hint" data-i18n="set.touch.hint">Minimum 44×44px buttons (WCAG 2.2).</div>
         </div>
         <label class="settings-switch">
           <input type="checkbox" id="settingsTouch"/>
@@ -696,8 +706,8 @@
       <!-- Prominent focus rings -->
       <div class="settings-row settings-row--toggle">
         <div>
-          <div class="settings-row__label">Prominent focus rings</div>
-          <div class="settings-row__hint">Thicker outline when navigating with keyboard.</div>
+          <div class="settings-row__label" data-i18n="set.focus">Prominent focus rings</div>
+          <div class="settings-row__hint" data-i18n="set.focus.hint">Thicker outline when navigating with keyboard.</div>
         </div>
         <label class="settings-switch">
           <input type="checkbox" id="settingsFocus"/>
@@ -706,9 +716,9 @@
       </div>
 
       <div class="settings-actions">
-        <a class="copy-btn" href="/privacy"><svg class="ic" aria-hidden="true"><use href="#vi-shield"></use></svg> Privacy Policy</a>
-        <button class="copy-btn" id="settingsResetBtn" type="button">↺ Reset to defaults</button>
-        <button class="copy-btn copy-btn--primary" data-modal-close type="button">Done</button>
+        <a class="copy-btn" href="/privacy"><svg class="ic" aria-hidden="true"><use href="#vi-shield"></use></svg> <span data-i18n="menu.privacy">Privacy Policy</span></a>
+        <button class="copy-btn" id="settingsResetBtn" type="button">↺ <span data-i18n="set.reset">Reset to defaults</span></button>
+        <button class="copy-btn copy-btn--primary" data-modal-close type="button" data-i18n="set.done">Done</button>
       </div>
     </div>
   </div>
@@ -719,12 +729,12 @@
   <div class="modal__backdrop" data-modal-close></div>
   <div class="modal__panel pf-templates__panel">
     <div class="modal__head">
-      <h2 class="modal__title" id="pfTemplatesTitle">Investor Hub</h2>
+      <h2 class="modal__title" id="pfTemplatesTitle" data-i18n="modal.investorHub">Investor Hub</h2>
       <button class="modal__close" data-modal-close aria-label="Close">✕</button>
     </div>
     <div class="pf-tpl__tabs" role="tablist">
-      <button class="pf-tpl__tab active" data-tpl-tab="investors"  role="tab" type="button">Investors</button>
-      <button class="pf-tpl__tab"        data-tpl-tab="strategies" role="tab" type="button">Strategies</button>
+      <button class="pf-tpl__tab active" data-tpl-tab="investors"  role="tab" type="button" data-i18n="tab.investors">Investors</button>
+      <button class="pf-tpl__tab"        data-tpl-tab="strategies" role="tab" type="button" data-i18n="tab.strategies">Strategies</button>
     </div>
     <div class="modal__body">
       <div class="pf-tpl__pane" data-tpl-pane="investors" id="pfTplInvestors">
@@ -745,7 +755,7 @@
   <div class="modal__backdrop" data-modal-close></div>
   <div class="modal__panel">
     <div class="modal__head">
-      <h2 class="modal__title" id="tierGlossaryTitle">Why this verdict?</h2>
+      <h2 class="modal__title" id="tierGlossaryTitle" data-i18n="modal.whyVerdict">Why this verdict?</h2>
       <button class="modal__close" data-modal-close aria-label="Close">✕</button>
     </div>
     <div class="modal__body">
@@ -848,7 +858,7 @@
       </div>
       <div class="etf-price-row">
         <div class="pi-block">
-          <span class="pi-label">Current price</span>
+          <span class="pi-label" data-i18n="res.currentPrice">Current price</span>
           <span class="pi-value numeric" id="etfPrice">N/A</span>
         </div>
         <div class="etf-stats">
@@ -1096,18 +1106,18 @@
 
       <div class="price-iv">
         <div class="pi-block">
-          <span class="pi-label">Current price</span>
+          <span class="pi-label" data-i18n="res.currentPrice">Current price</span>
           <span class="pi-value numeric" id="vPrice">N/A</span>
         </div>
         <div class="mos-bar">
-          <span class="mos-label">Margin of safety</span>
+          <span class="mos-label" data-i18n="res.mos">Margin of safety</span>
           <div class="mos-track">
             <span class="mos-fill" id="vMosFill" style="width: 0%"></span>
           </div>
           <span class="mos-pct" id="vMosPct">N/A</span>
         </div>
         <div class="pi-block right">
-          <span class="pi-label">Fair value</span>
+          <span class="pi-label" data-i18n="res.fairValue">Fair value</span>
           <span class="pi-value iv numeric" id="vIV">N/A</span>
         </div>
       </div>
@@ -1226,7 +1236,7 @@
       <div class="card vg-card" id="sanityCard" hidden>
         <div class="vg-head">
           <span class="vg-icon" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#vi-scale"></use></svg></span>
-          <span class="vg-title">Sanity check vs Wall Street</span>
+          <span class="vg-title" data-i18n="vg.sanity">Sanity check vs Wall Street</span>
           <span class="vg-pill" id="sanityTier">N/A</span>
         </div>
         <div class="vg-row">
@@ -1249,7 +1259,7 @@
       <div class="card vg-card" id="flipCard" hidden>
         <div class="vg-head">
           <span class="vg-icon" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#vi-target"></use></svg></span>
-          <span class="vg-title">What would change this verdict</span>
+          <span class="vg-title" data-i18n="vg.flip">What would change this verdict</span>
         </div>
         <div class="flip-list" id="flipList"></div>
       </div>
