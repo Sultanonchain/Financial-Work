@@ -4533,18 +4533,51 @@ async function loadInvestor13F(cik) {
   renderInvestor13F(data);
 }
 
+// #10/#14: fill the VALUS MOS column on a 13F holdings table from the shared
+// valuation source (cached + shared, so the same ticker reads identically to
+// the rest of the app). Coloured by sign like the hero MOS.
+async function populateInvestor13FMos(holdings) {
+  const tickers = [...new Set((holdings || []).filter(h => h.ticker).map(h => h.ticker.toUpperCase()))].slice(0, 30);
+  if (!tickers.length) return;
+  const fill = (mapFn) => document.querySelectorAll("[data-mos-cell]").forEach(cell => {
+    const r = mapFn(cell.getAttribute("data-mos-cell"));
+    cell.textContent = r.text;
+    cell.classList.remove("mos-up", "mos-down", "mos-muted");
+    if (r.cls) cell.classList.add(r.cls);
+  });
+  try {
+    const resp = await fetch("/api/valuations", {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tickers }),
+    });
+    const vals = (await resp.json()).valuations || {};
+    fill(tk => {
+      const v = vals[tk];
+      if (!v || !v.reliable || v.mos == null) return { text: "N/A", cls: "mos-muted" };
+      return { text: fmtPct(v.mos), cls: v.mos > 0 ? "mos-up" : (v.mos < 0 ? "mos-down" : "") };
+    });
+  } catch {
+    fill(() => ({ text: "N/A", cls: "mos-muted" }));
+  }
+}
+
 function renderInvestor13F(data) {
   const detail = $("pfTplInvestorDetail");
   if (!detail) return;
   const inv = data.investor || {};
   const rows = (data.holdings || []).map((h, i) => {
-    const tkr = h.ticker || `<span class="pf-tpl__no-ticker">, </span>`;
+    const tkr = h.ticker || `<span class="pf-tpl__no-ticker">N/A</span>`;
+    const mosCell = h.ticker
+      ? `<td class="pf-tpl__hold-mos numeric" data-mos-cell="${escHtml(h.ticker.toUpperCase())}">…</td>`
+      : `<td class="pf-tpl__hold-mos numeric mos-muted">N/A</td>`;
     return `
       <tr class="pf-tpl__hold-row" ${h.ticker ? `data-hold-ticker="${escHtml(h.ticker)}"` : ""}>
         <td class="pf-tpl__hold-rank">${i + 1}</td>
         <td class="pf-tpl__hold-tkr">${tkr}</td>
         <td class="pf-tpl__hold-name">${escHtml(h.name || "")}</td>
         <td class="pf-tpl__hold-pct numeric">${(h.weight_pct ?? 0).toFixed(2)}%</td>
+        ${mosCell}
       </tr>
     `;
   }).join("");
@@ -4563,11 +4596,12 @@ function renderInvestor13F(data) {
     </div>
     <div class="pf-tpl__hold-tablewrap">
       <table class="pf-tpl__hold-table">
-        <thead><tr><th>#</th><th>Ticker</th><th>Company</th><th class="numeric">Weight</th></tr></thead>
+        <thead><tr><th>#</th><th>Ticker</th><th>Company</th><th class="numeric">Weight</th><th class="numeric">VALUS MOS</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>
   `;
+  populateInvestor13FMos(data.holdings || []);   // #10/#14
   const backEl = document.getElementById("pfTplInvBack");
   if (backEl) backEl.onclick = () => _setInvestorPaneFocused(false);
   detail.querySelectorAll("[data-copy-top]").forEach(btn => {
