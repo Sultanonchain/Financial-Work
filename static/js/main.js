@@ -102,7 +102,7 @@ function itemGradeChip(it) {
   const mos = it.mos;
   const mosTxt = (typeof mos === "number")
     ? `${mos >= 0 ? "+" : ""}${fmt(mos, 1)}%`
-    : ", ";
+    : "N/A";
   return `
     <span class="valus-grade" data-grade="${escHtml(stored)}"
           title="VALUS grade ${escHtml(stored)} · ${mosTxt}, click for definitions">
@@ -511,11 +511,11 @@ function renderETFHero(d) {
 
   $("etfName").textContent  = d.company_name || d.ticker;
   $("etfClass").textContent = d.asset_class || "ETF";
-  $("etfPrice").textContent = d.current_price != null ? fmtPrice(d.current_price) : ", ";
-  $("etfHigh").textContent  = d["52w_high"] != null ? fmtPrice(d["52w_high"]) : ", ";
-  $("etfLow").textContent   = d["52w_low"]  != null ? fmtPrice(d["52w_low"])  : ", ";
-  $("etfYtd").textContent   = d.ytd_return != null ? fmtPct(d.ytd_return * 100) : ", ";
-  $("etfExpense").textContent = d.expense_ratio != null ? `${fmt(d.expense_ratio * 100, 2)}%` : ", ";
+  $("etfPrice").textContent = d.current_price != null ? fmtPrice(d.current_price) : "N/A";
+  $("etfHigh").textContent  = d["52w_high"] != null ? fmtPrice(d["52w_high"]) : "N/A";
+  $("etfLow").textContent   = d["52w_low"]  != null ? fmtPrice(d["52w_low"])  : "N/A";
+  $("etfYtd").textContent   = d.ytd_return != null ? fmtPct(d.ytd_return * 100) : "N/A";
+  $("etfExpense").textContent = d.expense_ratio != null ? `${fmt(d.expense_ratio * 100, 2)}%` : "N/A";
   $("etfMessage").textContent = d.etf_message || "";
 
   // Render price chart (theme by YTD direction)
@@ -645,9 +645,9 @@ function renderBTCHero(d) {
     }
   }
 
-  $("btcMcap").textContent = mcap != null ? fmtBig(mcap) : ", ";
-  $("btcHigh").textContent = high != null ? fmtPrice(high) : ", ";
-  $("btcLow").textContent  = low  != null ? fmtPrice(low)  : ", ";
+  $("btcMcap").textContent = mcap != null ? fmtBig(mcap) : "N/A";
+  $("btcHigh").textContent = high != null ? fmtPrice(high) : "N/A";
+  $("btcLow").textContent  = low  != null ? fmtPrice(low)  : "N/A";
 
   // Render chart with orange BTC theme
   const canvas = $("btcChart");
@@ -755,7 +755,7 @@ function renderHeroVerdict(d) {
   // Company info
   $("vName").textContent = d.company_name || d.ticker;
   $("vTicker").textContent = d.ticker;
-  $("vSector").textContent = d.sector || ", ";
+  $("vSector").textContent = d.sector || "N/A";
   $("vRange").textContent = d["52w_low"] && d["52w_high"]
     ? `52W $${fmt(d["52w_low"])}, $${fmt(d["52w_high"])}`
     : "";
@@ -1220,7 +1220,7 @@ function activateScenario(which) {
   // Update tier label
   const tierLabelMap = { bear: "Bear case scenario", bull: "Bull case scenario" };
   if (which === "base") {
-    $("vTierLabel").textContent = (_LAST_DATA.priced_for || {}).label || ", ";
+    $("vTierLabel").textContent = (_LAST_DATA.priced_for || {}).label || "N/A";
   } else {
     $("vTierLabel").textContent = tierLabelMap[which];
   }
@@ -1433,7 +1433,7 @@ function renderScenarios(d) {
 
   const w = sc.weighted;
   const wd = sc.weighted_upside;
-  $("scWeighted").textContent = w != null ? fmtPrice(w) : ", ";
+  $("scWeighted").textContent = w != null ? fmtPrice(w) : "N/A";
   $("scWeightedDelta").textContent = wd != null ? fmtPct(wd) + " potential" : "";
 }
 
@@ -1442,12 +1442,12 @@ function renderScenarios(d) {
    ════════════════════════════════════════════════════════════════════════ */
 
 function renderMiniStats(d) {
-  $("mMcap").textContent   = d.market_cap != null ? fmtBig(d.market_cap) : ", ";
-  $("mPE").textContent     = d.pe_ratio != null ? fmtX(d.pe_ratio) : ", ";
+  $("mMcap").textContent   = d.market_cap != null ? fmtBig(d.market_cap) : "N/A";
+  $("mPE").textContent     = d.pe_ratio != null ? fmtX(d.pe_ratio) : "N/A";
   const dy = d.dividend_yield;
-  $("mDiv").textContent    = dy != null ? `${fmt(dy, 2)}%` : ", ";
+  $("mDiv").textContent    = dy != null ? `${fmt(dy, 2)}%` : "N/A";
   const tgt = d.target_price;
-  $("mTarget").textContent = tgt != null ? fmtPrice(tgt) : ", ";
+  $("mTarget").textContent = tgt != null ? fmtPrice(tgt) : "N/A";
 
   // Color analyst target if it differs significantly from current price
   const tgtEl = $("mTarget");
@@ -1501,17 +1501,17 @@ function renderDrawerContent(d) {
         "Years projected":  "How many years of explicit cash flow are forecast before applying the terminal value formula.",
       };
       const rows = [
-        ["WACC",            d.wacc != null ? `${fmt(d.wacc, 1)}%` : ", "],
-        ["Cost of Equity",  d.cost_of_equity != null ? `${fmt(d.cost_of_equity, 1)}%` : ", "],
-        ["Cost of Debt",    d.cost_of_debt != null ? `${fmt(d.cost_of_debt, 1)}%` : ", "],
-        ["Beta",            d.beta != null ? fmt(d.beta, 2) : ", "],
-        ["Stage 1 growth",  d.stage1_growth != null ? `${fmt(d.stage1_growth, 1)}%` : ", "],
-        ["Stage 2 growth", d.stage2_growth != null ? `${fmt(d.stage2_growth, 1)}%` : ", "],
-        ["Terminal growth", d.terminal_growth != null ? `${fmt(d.terminal_growth, 1)}%` : ", "],
-        ["Tax rate",        d.tax_rate != null ? `${fmt(d.tax_rate, 1)}%` : ", "],
-        ["Base FCF",        d.base_fcf != null ? fmtBig(d.base_fcf) : ", "],
-        ["Net debt",        d.net_debt != null ? fmtBig(d.net_debt) : ", "],
-        ["Shares out",      d.shares_outstanding != null ? fmtBig(d.shares_outstanding).replace("$","") : ", "],
+        ["WACC",            d.wacc != null ? `${fmt(d.wacc, 1)}%` : "N/A"],
+        ["Cost of Equity",  d.cost_of_equity != null ? `${fmt(d.cost_of_equity, 1)}%` : "N/A"],
+        ["Cost of Debt",    d.cost_of_debt != null ? `${fmt(d.cost_of_debt, 1)}%` : "N/A"],
+        ["Beta",            d.beta != null ? fmt(d.beta, 2) : "N/A"],
+        ["Stage 1 growth",  d.stage1_growth != null ? `${fmt(d.stage1_growth, 1)}%` : "N/A"],
+        ["Stage 2 growth", d.stage2_growth != null ? `${fmt(d.stage2_growth, 1)}%` : "N/A"],
+        ["Terminal growth", d.terminal_growth != null ? `${fmt(d.terminal_growth, 1)}%` : "N/A"],
+        ["Tax rate",        d.tax_rate != null ? `${fmt(d.tax_rate, 1)}%` : "N/A"],
+        ["Base FCF",        d.base_fcf != null ? fmtBig(d.base_fcf) : "N/A"],
+        ["Net debt",        d.net_debt != null ? fmtBig(d.net_debt) : "N/A"],
+        ["Shares out",      d.shares_outstanding != null ? fmtBig(d.shares_outstanding).replace("$","") : "N/A"],
         ["Years projected", d.projection_years || 10],
       ];
       const esc = s => String(s).replace(/"/g, "&quot;");
@@ -1870,7 +1870,7 @@ function renderQualityCard(d) {
   if (block && score && Number.isFinite(score.score)) {
     document.getElementById("qualityScoreNum").textContent = score.score;
     const grade = document.getElementById("qualityScoreGrade");
-    grade.textContent = score.grade || ", ";
+    grade.textContent = score.grade || "N/A";
     block.classList.remove("hidden");
     block.dataset.grade = (score.grade || "").toLowerCase();
   } else if (block) {
@@ -1880,7 +1880,7 @@ function renderQualityCard(d) {
   grid.innerHTML = metrics.map(m => {
     const v = m.value_pct != null ? `${fmt(m.value_pct, 1)}%`
             : m.value_ratio != null ? `${fmt(m.value_ratio, 2)}×`
-            : ", ";
+            : "N/A";
     return `
       <div class="quality-cell q-${m.tier || 'ok'}">
         <span class="quality-cell__label">${escHtml(m.label)}</span>
@@ -1903,7 +1903,7 @@ function renderMoatCard(d) {
     return;
   }
   const strengthLabel = ({wide: "Wide moat", narrow: "Narrow moat",
-                         single: "Single edge", none: "No structural moat"})[mb.strength] || ", ";
+                         single: "Single edge", none: "No structural moat"})[mb.strength] || "N/A";
   document.getElementById("moatStrength").textContent =
     `${strengthLabel} · ${mb.n_applies}/4 dimensions`;
   list.innerHTML = mb.categories.map(c => `
@@ -1935,19 +1935,19 @@ function renderBuffettCard(d) {
     if (Number.isFinite(b.passes) && Number.isFinite(b.evaluated)) {
       score.textContent = `Passes ${b.passes}/${b.evaluated} criteria`;
     } else {
-      score.textContent = ", ";
+      score.textContent = "N/A";
     }
   }
   list.innerHTML = b.rows.map(r => {
     const cls = r.passes === true ? "buf-row--pass"
               : r.passes === false ? "buf-row--fail"
               : "buf-row--na";
-    const icon = r.passes === true ? "✓" : r.passes === false ? "✕" : ", ";
+    const icon = r.passes === true ? "✓" : r.passes === false ? "✕" : "N/A";
     return `
       <li class="buf-row ${cls}" title="${escHtml(r.hint || '')}">
         <span class="buf-row__icon" aria-hidden="true">${icon}</span>
         <span class="buf-row__label">${escHtml(r.label)}</span>
-        <span class="buf-row__value">${escHtml(r.value != null ? r.value : ", ")}</span>
+        <span class="buf-row__value">${escHtml(r.value != null ? r.value : "N/A")}</span>
       </li>
     `;
   }).join("");
@@ -1963,12 +1963,12 @@ function renderMomentumCard(d) {
   if (!m || !m.tier) { card.hidden = true; return; }
   const tierEl = document.getElementById("momentumTier");
   if (tierEl) {
-    tierEl.textContent = m.label || ", ";
+    tierEl.textContent = m.label || "N/A";
     tierEl.dataset.tier = m.tier;
   }
-  document.getElementById("momPrice").textContent = m.price != null ? fmtPrice(m.price) : ", ";
-  document.getElementById("momMa50").textContent  = m.ma50  != null ? fmtPrice(m.ma50)  : ", ";
-  document.getElementById("momMa200").textContent = m.ma200 != null ? fmtPrice(m.ma200) : ", ";
+  document.getElementById("momPrice").textContent = m.price != null ? fmtPrice(m.price) : "N/A";
+  document.getElementById("momMa50").textContent  = m.ma50  != null ? fmtPrice(m.ma50)  : "N/A";
+  document.getElementById("momMa200").textContent = m.ma200 != null ? fmtPrice(m.ma200) : "N/A";
   const fmtGap = (g) => g == null ? "" : `${g >= 0 ? "+" : ""}${fmt(g, 1)}%`;
   const setGap = (id, g) => {
     const el = document.getElementById(id);
@@ -1993,7 +1993,7 @@ function renderEarningsQualityCard(d) {
   if (!eq || !eq.tier) { card.hidden = true; return; }
   const tierEl = document.getElementById("eqTier");
   if (tierEl) {
-    tierEl.textContent = eq.label || ", ";
+    tierEl.textContent = eq.label || "N/A";
     tierEl.dataset.tier = eq.tier;
   }
   document.getElementById("eqNarrative").textContent = eq.narrative || "";
@@ -2708,7 +2708,7 @@ function renderDcfChart(fcfData) {
       dyPv.textContent   = `$${fmt(pv,  2)}B`;
       dyGrowth.textContent = g != null
         ? `${(g >= 0 ? "+" : "")}${fmt(g * 100, 1)}% growth`
-        : ", ";
+        : "N/A";
       dyDiscNote.textContent =
         `Discount factor: 1 / (1 + ${fmt(wacc, 1)}%)^${y} = ${fmt(1 / discFactor, 4)} · ` +
         `Year-${y} growth applied: ${g != null ? fmt(g * 100, 1) + "%" : ", "}`;
@@ -3723,8 +3723,8 @@ function renderWatchlistPage() {
   if (empty) empty.classList.add("hidden");
   list.innerHTML = items.map(it => {
     const mos      = (typeof it.mos === "number") ? it.mos : null;
-    const priceTxt = (typeof it.price === "number") ? fmtPrice(it.price) : ", ";
-    const ivTxt    = (typeof it.iv    === "number") ? fmtPrice(it.iv)    : ", ";
+    const priceTxt = (typeof it.price === "number") ? fmtPrice(it.price) : "N/A";
+    const ivTxt    = (typeof it.iv    === "number") ? fmtPrice(it.iv)    : "N/A";
     return `
       <div class="pf-item" data-wl-row="${escHtml(it.ticker)}">
         <button class="pf-item__ticker" data-wl-open="${escHtml(it.ticker)}" type="button">
@@ -3992,9 +3992,9 @@ function renderPortfolioPage() {
     list.innerHTML = "";
     $("pfAllocationCard").style.display = "none";
     $("pfCount").textContent = "0";
-    $("pfAvgMos").textContent = ", ";
+    $("pfAvgMos").textContent = "N/A";
     $("pfUnderCount").textContent = "0 / 0";
-    $("pfBest").textContent = ", ";
+    $("pfBest").textContent = "N/A";
     return;
   }
   empty.classList.add("hidden");
@@ -4038,7 +4038,7 @@ function renderPortfolioPage() {
   const mosVals = items.filter(it => it.mos != null).map(it => it.mos);
   const avgMos = mosVals.length ? mosVals.reduce((a, b) => a + b, 0) / mosVals.length : null;
   const avgEl = $("pfAvgMos");
-  avgEl.textContent = avgMos != null ? fmtPct(avgMos) : ", ";
+  avgEl.textContent = avgMos != null ? fmtPct(avgMos) : "N/A";
   avgEl.classList.toggle("text-positive", avgMos != null && avgMos > 5);
   avgEl.classList.toggle("text-negative", avgMos != null && avgMos < -5);
 
@@ -4046,7 +4046,7 @@ function renderPortfolioPage() {
   $("pfUnderCount").textContent = `${underCount} / ${items.length}`;
 
   const best = items.filter(it => it.mos != null).sort((a, b) => b.mos - a.mos)[0];
-  $("pfBest").textContent = best ? `${best.ticker} ${fmtPct(best.mos)}` : ", ";
+  $("pfBest").textContent = best ? `${best.ticker} ${fmtPct(best.mos)}` : "N/A";
 
   // Sector allocation, doughnut + side legend.  Same aggregation as
   // before; just a clearer read than a horizontal stacked bar at 12
@@ -4592,7 +4592,7 @@ function openTierModal() {
   // Fallback meta for any tier we don't recognise, modal must always open.
   const meta = TIER_META[tier] || {
     label: (pf.label || "Verdict"),
-    mos:   ", ",
+    mos: "N/A",
     color: "tier-info",
     desc:  (pf.narrative || "VALUS verdict for this stock. Detail metadata not available."),
   };
@@ -4629,7 +4629,7 @@ function openTierModal() {
       </div>
       <div class="tg-num">
         <span class="tg-num__label">Sector ceiling</span>
-        <span class="tg-num__value">${ceil != null ? `${ceil}% (${escHtml(ceilLbl || ", ")})` : ", "}</span>
+        <span class="tg-num__value">${ceil != null ? `${ceil}% (${escHtml(ceilLbl || "N/A")})` : ", "}</span>
       </div>
     </div>
   `;
@@ -4745,7 +4745,7 @@ function setupCustomDCFSliders() {
     const deltaEl = $("cdYourDelta");
     if (!yourEl || !deltaEl) return;
     if (data.error || data.iv == null || !isFinite(data.iv) || data.iv <= 0) {
-      yourEl.textContent = ", ";
+      yourEl.textContent = "N/A";
       deltaEl.textContent = data.error === "network" ? "Offline" : "";
       deltaEl.classList.remove("positive", "negative");
       return;
@@ -4792,7 +4792,7 @@ function setupCustomDCFSliders() {
     $("cdTgVal").textContent   = `${fmt(tg, 1)}%`;
 
     const valusIv = d.intrinsic_value;
-    $("cdValusIV").textContent = valusIv != null ? fmtPrice(valusIv) : ", ";
+    $("cdValusIV").textContent = valusIv != null ? fmtPrice(valusIv) : "N/A";
 
     const basis = d.dcf_recompute_basis;
     const yourEl  = $("cdYourIV");
@@ -4801,7 +4801,7 @@ function setupCustomDCFSliders() {
     // No DCF basis means this ticker uses a non-DCF model (banking, biotech,
     // FCF-negative), the slider can't produce a comparable number.
     if (!basis) {
-      yourEl.textContent = ", ";
+      yourEl.textContent = "N/A";
       deltaEl.textContent = "DCF not available for this ticker";
       deltaEl.classList.remove("positive", "negative");
       return;
@@ -4832,7 +4832,7 @@ function setupCustomDCFSliders() {
           deltaEl.textContent = "";
         }
       } else {
-        yourEl.textContent = ", ";
+        yourEl.textContent = "N/A";
         deltaEl.textContent = "";
       }
       return;
@@ -4878,13 +4878,13 @@ function renderComparablesCard(d) {
   }
   card.classList.remove("hidden");
 
-  $("cmpProb").textContent = cmp.p_attain != null ? `P=${fmt(cmp.p_attain, 0)}%` : ", ";
+  $("cmpProb").textContent = cmp.p_attain != null ? `P=${fmt(cmp.p_attain, 0)}%` : "N/A";
   $("cmpReason").textContent = cmp.reason || "";
 
-  $("cmpAge").textContent       = cmp.age_years != null ? `${fmt(cmp.age_years, 1)} yr` : ", ";
-  $("cmpCurMargin").textContent = cmp.current_margin != null ? `${fmt(cmp.current_margin, 1)}%` : ", ";
-  $("cmpPeerAvg").textContent   = cmp.peer_avg_margin != null ? `${fmt(cmp.peer_avg_margin, 1)}%` : ", ";
-  $("cmpPAttain").textContent   = cmp.p_attain != null ? `${fmt(cmp.p_attain, 0)}%` : ", ";
+  $("cmpAge").textContent       = cmp.age_years != null ? `${fmt(cmp.age_years, 1)} yr` : "N/A";
+  $("cmpCurMargin").textContent = cmp.current_margin != null ? `${fmt(cmp.current_margin, 1)}%` : "N/A";
+  $("cmpPeerAvg").textContent   = cmp.peer_avg_margin != null ? `${fmt(cmp.peer_avg_margin, 1)}%` : "N/A";
+  $("cmpPAttain").textContent   = cmp.p_attain != null ? `${fmt(cmp.p_attain, 0)}%` : "N/A";
 
   const peers = cmp.peer_margins || {};
   $("cmpPeers").innerHTML = Object.keys(peers).length === 0
@@ -4895,9 +4895,9 @@ function renderComparablesCard(d) {
           <span class="cmp-peer__margin">${fmt(m, 1)}%</span>
         </span>`).join("");
 
-  $("cmpFcfNow").textContent      = cmp.current_base_fcf != null ? fmtBig(cmp.current_base_fcf) : ", ";
-  $("cmpFcfPeer").textContent     = cmp.peer_implied_fcf != null ? fmtBig(cmp.peer_implied_fcf) : ", ";
-  $("cmpFcfWeighted").textContent = cmp.weighted_base_fcf != null ? fmtBig(cmp.weighted_base_fcf) : ", ";
+  $("cmpFcfNow").textContent      = cmp.current_base_fcf != null ? fmtBig(cmp.current_base_fcf) : "N/A";
+  $("cmpFcfPeer").textContent     = cmp.peer_implied_fcf != null ? fmtBig(cmp.peer_implied_fcf) : "N/A";
+  $("cmpFcfWeighted").textContent = cmp.weighted_base_fcf != null ? fmtBig(cmp.weighted_base_fcf) : "N/A";
 }
 
 // ── Low confidence explainer ───────────────────────────────────────────
@@ -5502,23 +5502,23 @@ function setupCompareModal() {
   // important deltas (fair value, MOS, market cap, analyst target) sit
   // at the top of the table.
   const COMPARE_FIELDS = [
-    ["price",          "Price",           v => v != null ? fmtPrice(v) : ", ", "higher_better:false"],
-    ["iv",             "VALUS fair value",v => v != null ? fmtPrice(v) : ", ", "higher_better:true"],
-    ["mos",            "Margin of safety",v => v != null ? fmtPct(v)  : ", ",  "higher_better:true"],
-    ["tier_label",     "Verdict",         v => v || ", ",                       "neutral"],
-    ["valus_grade",    "VALUS grade",     v => v ? renderGradeBadge(v, {showLabel:false}) : ", ", "neutral"],
+    ["price",          "Price",           v => v != null ? fmtPrice(v) : "N/A", "higher_better:false"],
+    ["iv",             "VALUS fair value",v => v != null ? fmtPrice(v) : "N/A", "higher_better:true"],
+    ["mos",            "Margin of safety",v => v != null ? fmtPct(v)  : "N/A",  "higher_better:true"],
+    ["tier_label",     "Verdict",         v => v || "N/A",                       "neutral"],
+    ["valus_grade",    "VALUS grade",     v => v ? renderGradeBadge(v, {showLabel:false}) : "N/A", "neutral"],
     ["market_cap",     "Market cap",      fmtMktCap,                           "neutral"],
-    ["analyst_target", "Analyst target",  v => v != null ? fmtPrice(v) : ", ", "higher_better:true"],
-    ["quality_score",  "Quality (0-100)", v => v && v.score != null ? `${v.score} (${v.grade})` : ", ", "higher_better:true_quality"],
-    ["roe",            "ROE",             v => v != null ? `${fmt(v, 1)}%` : ", ", "higher_better:true"],
-    ["rev_growth",     "Revenue growth",  v => v != null ? `${fmt(v, 1)}%` : ", ", "higher_better:true"],
-    ["forward_pe",     "Forward P/E",     v => v != null ? `${fmt(v, 1)}×` : ", ", "higher_better:false"],
-    ["peg",            "PEG ratio",       v => v != null ? `${fmt(v, 2)}×` : ", ", "higher_better:false"],
-    ["dividend_yield", "Dividend yield",  v => v != null ? `${fmt(v, 2)}%` : ", ", "higher_better:true"],
-    ["fcf_yield",      "FCF yield",       v => v != null ? `${fmt(v, 2)}%` : ", ", "higher_better:true"],
-    ["wacc",           "Discount (WACC)", v => v != null ? `${fmt(v, 2)}%` : ", ", "higher_better:false"],
-    ["implied_growth", "Market-implied growth", v => v != null ? `${fmt(v, 1)}%` : ", ", "neutral"],
-    ["iv_confidence",  "DCF confidence",  v => v || ", ", "neutral"],
+    ["analyst_target", "Analyst target",  v => v != null ? fmtPrice(v) : "N/A", "higher_better:true"],
+    ["quality_score",  "Quality (0-100)", v => v && v.score != null ? `${v.score} (${v.grade})` : "N/A", "higher_better:true_quality"],
+    ["roe",            "ROE",             v => v != null ? `${fmt(v, 1)}%` : "N/A", "higher_better:true"],
+    ["rev_growth",     "Revenue growth",  v => v != null ? `${fmt(v, 1)}%` : "N/A", "higher_better:true"],
+    ["forward_pe",     "Forward P/E",     v => v != null ? `${fmt(v, 1)}×` : "N/A", "higher_better:false"],
+    ["peg",            "PEG ratio",       v => v != null ? `${fmt(v, 2)}×` : "N/A", "higher_better:false"],
+    ["dividend_yield", "Dividend yield",  v => v != null ? `${fmt(v, 2)}%` : "N/A", "higher_better:true"],
+    ["fcf_yield",      "FCF yield",       v => v != null ? `${fmt(v, 2)}%` : "N/A", "higher_better:true"],
+    ["wacc",           "Discount (WACC)", v => v != null ? `${fmt(v, 2)}%` : "N/A", "higher_better:false"],
+    ["implied_growth", "Market-implied growth", v => v != null ? `${fmt(v, 1)}%` : "N/A", "neutral"],
+    ["iv_confidence",  "DCF confidence",  v => v || "N/A", "neutral"],
   ];
 
   // For an N-ticker row of values, return a Set of column indices that
@@ -6248,7 +6248,7 @@ async function openSharedPortfolio(tickers) {
       return {
         ticker: d.ticker || t,
         name:   d.company_name || t,
-        sector: d.sector || ", ",
+        sector: d.sector || "N/A",
         price:  d.current_price,
         iv:     d.intrinsic_value,
         mos:    d.margin_of_safety,
@@ -6303,9 +6303,9 @@ function renderSharedList(items) {
   const under = items.filter(it => it.mos != null && it.mos > 5).length;
   const best = items.filter(it => it.mos != null).sort((a, b) => b.mos - a.mos)[0];
   $("pfCount").textContent = items.length;
-  $("pfAvgMos").textContent = avg != null ? fmtPct(avg) : ", ";
+  $("pfAvgMos").textContent = avg != null ? fmtPct(avg) : "N/A";
   $("pfUnderCount").textContent = `${under} / ${items.length}`;
-  $("pfBest").textContent = best ? `${best.ticker} ${fmtPct(best.mos)}` : ", ";
+  $("pfBest").textContent = best ? `${best.ticker} ${fmtPct(best.mos)}` : "N/A";
   $("pfAllocationCard").style.display = "none";   // simpler shared view
 }
 
