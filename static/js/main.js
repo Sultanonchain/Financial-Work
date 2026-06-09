@@ -4318,7 +4318,7 @@ function setupPortfolioPage() {
 }
 
 /* ════════════════════════════════════════════════════════════════════════
-   Portfolio Templates, Strategies + Investor 13F portfolios
+   Investor Hub — Investor 13F portfolios + allocation Strategies
    ════════════════════════════════════════════════════════════════════════ */
 
 const PF_STRATEGIES = [
@@ -4399,8 +4399,8 @@ let _PF_TPL_HOLDINGS  = {};         // cik -> payload
 function openTemplatesModal() {
   const modal = $("pfTemplatesModal");
   if (!modal) return;
-  renderStrategiesGrid();
-  switchTemplatesTab("strategies");
+  renderStrategiesGrid();                 // cheap + guarded; ready for the Strategies tab
+  switchTemplatesTab("investors");        // Investor Hub leads with the 13F investors
   // Reset the investor pane to the grid view so we don't reopen on a stale
   // single-fund detail from a previous session.
   _setInvestorPaneFocused(false);
