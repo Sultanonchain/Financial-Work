@@ -33,6 +33,12 @@ const fmtBig = (n) => {
 
 const fmtX = (n) => n == null ? ", " : `${fmt(n, 1)}×`;
 
+// VALUS icon helper — returns inline SVG that references the sprite defined
+// at the top of index.html (see #vi-* symbols).  Replaces the old colour
+// emojis in JS-generated markup; inherits text colour via currentColor.
+const ic = (name, cls = "") =>
+  `<svg class="ic${cls ? " " + cls : ""}" aria-hidden="true"><use href="#vi-${name}"></use></svg>`;
+
 // ── VALUS A-F grade badge (Phase 5) ──────────────────────────────────
 // Renders the {grade,label,explanation,mos} payload the backend ships in
 // d.valus_grade.  Two variants, default chip, used in row contexts, and
@@ -1068,7 +1074,7 @@ function renderNewsBlock(d) {
       const cls  = score > 0 ? "news-row__score--up" : "news-row__score--down";
       scoreChip = `<span class="news-row__score ${cls}">${sign}${score.toFixed(1)}${dur ? ` · ${escHtml(dur)}` : ""}</span>`;
     }
-    const marker = isTransform ? `<span class="news-row__marker" title="Transformative catalyst, bumped Stage-1 growth">🚀</span>` : "";
+    const marker = isTransform ? `<span class="news-row__marker" title="Transformative catalyst, bumped Stage-1 growth">${ic("rocket")}</span>` : "";
     const ageStr = (row.age_days != null && !isNaN(row.age_days))
       ? `<span class="news-row__age">${Math.round(row.age_days)}d ago</span>`
       : "";
@@ -5300,7 +5306,7 @@ function handleStripeRedirect() {
       attempts++;
       await refreshMe();
       if (_IS_PLUS) {
-        showToast("🎉 Welcome to VALUS+, unlimited searches unlocked.", "success");
+        showToast("Welcome to VALUS+, unlimited searches unlocked.", "success");
         return;
       }
       if (attempts < 6) setTimeout(poll, 2000);
@@ -5953,7 +5959,7 @@ function setupAuthControl() {
     const msg = map[_authErr] || `Sign-in failed (${_authErr}). Please try again.`;
     const banner = document.createElement("div");
     banner.className = "auth-error-banner";
-    banner.textContent = "⚠ " + msg;
+    banner.innerHTML = ic("alert") + " " + escHtml(msg);
     document.body.appendChild(banner);
     setTimeout(() => banner.classList.add("is-fading"), 6000);
     setTimeout(() => banner.remove(), 7000);
@@ -5980,7 +5986,7 @@ function setupSubmitToLeaderboard() {
     const items = pfRead();
     if (items.length === 0) {
       publishBtn.textContent = "Add stocks first ★";
-      setTimeout(() => { publishBtn.textContent = "🏆 Publish"; }, 1500);
+      setTimeout(() => { publishBtn.innerHTML = ic("trophy") + " Publish"; }, 1500);
       return;
     }
     // Gate on real auth, sign-in modal is shown if not signed in.

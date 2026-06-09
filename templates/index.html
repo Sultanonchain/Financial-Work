@@ -30,6 +30,34 @@
 </head>
 <body>
 
+<!-- ── VALUS ICON SET ─────────────────────────────────────────────────────
+     One clean, monochrome line-icon set (Lucide-derived) that replaces the
+     old colour emojis.  Every icon inherits the surrounding text colour via
+     currentColor, so it picks up the Valus accent wherever the text is teal.
+     Reference an icon anywhere with:  <svg class="ic"><use href="#vi-NAME"/></svg>
+     The JS equivalent is the ic("name") helper in main.js. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="vi-pencil" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+    <symbol id="vi-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/></symbol>
+    <symbol id="vi-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+    <symbol id="vi-settings" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="vi-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1Z"/></symbol>
+    <symbol id="vi-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></symbol>
+    <symbol id="vi-mail" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></symbol>
+    <symbol id="vi-key" viewBox="0 0 24 24"><path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/></symbol>
+    <symbol id="vi-cap" viewBox="0 0 24 24"><path d="M21.42 10.92a1 1 0 0 0-.02-1.84L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.83l8.57 3.91a2 2 0 0 0 1.66 0Z"/><path d="M22 10v6"/><path d="M6 12.5V16a6 3 0 0 0 12 0v-3.5"/></symbol>
+    <symbol id="vi-trophy" viewBox="0 0 24 24"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></symbol>
+    <symbol id="vi-zap" viewBox="0 0 24 24"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14Z"/></symbol>
+    <symbol id="vi-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+    <symbol id="vi-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
+    <symbol id="vi-news" viewBox="0 0 24 24"><path d="M15 22H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v16a2 2 0 0 0 2 2 2 2 0 0 0 2-2v-9a1 1 0 0 0-1-1h-3"/><path d="M10 6h8v4h-8V6Z"/><path d="M18 14h-8"/><path d="M15 18h-5"/></symbol>
+    <symbol id="vi-scale" viewBox="0 0 24 24"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></symbol>
+    <symbol id="vi-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></symbol>
+    <symbol id="vi-rocket" viewBox="0 0 24 24"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91 0Z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2Z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></symbol>
+  </defs>
+</svg>
+
 <!-- ── HEADER ─────────────────────────────────────────────────────────── -->
 <header class="site-header">
   <div class="container site-header__inner">
@@ -69,16 +97,16 @@
             <span class="pf-switcher__action-cap" id="pfSwitcherCapHint" hidden></span>
           </button>
           <button class="pf-switcher__action" id="pfSwitcherRename" role="menuitem" type="button">
-            <span class="pf-switcher__action-icon" aria-hidden="true">✎</span>
+            <span class="pf-switcher__action-icon" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#vi-pencil"></use></svg></span>
             <span class="pf-switcher__action-label">Rename current…</span>
           </button>
           <button class="pf-switcher__action pf-switcher__action--danger" id="pfSwitcherDelete" role="menuitem" type="button">
-            <span class="pf-switcher__action-icon" aria-hidden="true">🗑</span>
+            <span class="pf-switcher__action-icon" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#vi-trash"></use></svg></span>
             <span class="pf-switcher__action-label">Delete current…</span>
           </button>
         </div>
       </div>
-      <span class="disclaimer-pill" title="VALUS is an educational research tool. Not investment advice.">⚠ Not financial advice</span>
+      <span class="disclaimer-pill" title="VALUS is an educational research tool. Not investment advice."><svg class="ic" aria-hidden="true"><use href="#vi-alert"></use></svg> Not financial advice</span>
       <!-- Shown when the visitor has full access via a redeemed team code or
            an active VALUS+ subscription. Visible even when not signed in. -->
       <span class="access-badge hidden" id="accessBadge" title="Full access, unlimited"></span>
@@ -104,7 +132,7 @@
             <span class="auth-menu__hint" id="authPremiumHint"></span>
           </button>
           <button class="auth-menu__btn auth-menu__btn--neutral" id="authSettingsBtn" type="button">
-            <span class="auth-menu__icon">⚙</span>
+            <span class="auth-menu__icon"><svg class="ic" aria-hidden="true"><use href="#vi-settings"></use></svg></span>
             <span class="auth-menu__label">Settings</span>
           </button>
           <button class="auth-menu__btn auth-menu__btn--neutral" id="authAboutBtn" type="button">
@@ -112,19 +140,19 @@
             <span class="auth-menu__label">About VALUS</span>
           </button>
           <button class="auth-menu__btn auth-menu__btn--neutral" id="authPrivacyBtn" type="button">
-            <span class="auth-menu__icon">🛡</span>
+            <span class="auth-menu__icon"><svg class="ic" aria-hidden="true"><use href="#vi-shield"></use></svg></span>
             <span class="auth-menu__label">Privacy Policy</span>
           </button>
           <a class="auth-menu__btn auth-menu__btn--neutral" href="/terms">
-            <span class="auth-menu__icon">📄</span>
+            <span class="auth-menu__icon"><svg class="ic" aria-hidden="true"><use href="#vi-file"></use></svg></span>
             <span class="auth-menu__label">Terms of Service</span>
           </a>
           <a class="auth-menu__btn auth-menu__btn--neutral" href="mailto:contact@valusfinancial.com">
-            <span class="auth-menu__icon">✉</span>
+            <span class="auth-menu__icon"><svg class="ic" aria-hidden="true"><use href="#vi-mail"></use></svg></span>
             <span class="auth-menu__label">Contact &amp; support</span>
           </a>
           <button class="auth-menu__btn auth-menu__btn--neutral" id="authCodeBtn" type="button">
-            <span class="auth-menu__icon">🔑</span>
+            <span class="auth-menu__icon"><svg class="ic" aria-hidden="true"><use href="#vi-key"></use></svg></span>
             <span class="auth-menu__label">Enter access code</span>
           </button>
           <div class="auth-menu__sep"></div>
@@ -133,7 +161,7 @@
             <span class="auth-menu__label">Sign out</span>
           </button>
           <button class="auth-menu__btn auth-menu__btn--danger" id="authDeleteBtn" type="button">
-            <span class="auth-menu__icon">🗑</span>
+            <span class="auth-menu__icon"><svg class="ic" aria-hidden="true"><use href="#vi-trash"></use></svg></span>
             <span class="auth-menu__label">Delete account</span>
           </button>
         </div>
@@ -152,12 +180,12 @@
         <p id="pfPageTagline">Real-time DCF tracking across your watchlist.</p>
       </div>
       <div class="pf-page__actions">
-        <button class="copy-btn" id="pfTemplatesBtn" type="button" title="Browse famous investor 13F portfolios and classic allocation strategies">🎓 Investor Hub</button>
-        <button class="copy-btn starred" id="pfPublishBtn" type="button">🏆 Publish</button>
+        <button class="copy-btn" id="pfTemplatesBtn" type="button" title="Browse famous investor 13F portfolios and classic allocation strategies"><svg class="ic" aria-hidden="true"><use href="#vi-cap"></use></svg> Investor Hub</button>
+        <button class="copy-btn starred" id="pfPublishBtn" type="button"><svg class="ic" aria-hidden="true"><use href="#vi-trophy"></use></svg> Publish</button>
         <button class="copy-btn" id="pfShareBtn" type="button">↗ Share</button>
         <button class="copy-btn" id="pfRefreshBtn" type="button">↻ Refresh</button>
         <button class="copy-btn" id="pfExportCsvBtn" type="button" title="Download this portfolio as CSV">⤓ Export CSV</button>
-        <button class="copy-btn" id="pfViewLeaderboardBtn" type="button" title="See top portfolios from other users">🏆 Leaderboard →</button>
+        <button class="copy-btn" id="pfViewLeaderboardBtn" type="button" title="See top portfolios from other users"><svg class="ic" aria-hidden="true"><use href="#vi-trophy"></use></svg> Leaderboard →</button>
       </div>
     </div>
     <div class="pf-shared-banner hidden" id="pfSharedBanner">
@@ -167,7 +195,7 @@
          live only in this browser; signing in on another device won't surface
          them.  Dismissable; remembered in localStorage so we don't nag. -->
     <div class="pf-storage-warn hidden" id="pfStorageWarn">
-      <span class="pf-storage-warn__icon" aria-hidden="true">⚠</span>
+      <span class="pf-storage-warn__icon" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#vi-alert"></use></svg></span>
       <div class="pf-storage-warn__body">
         <strong>Cross-device sync isn't enabled on this deploy.</strong>
         Your portfolios are saved in this browser only, signing in on another device won't show them.
@@ -352,7 +380,7 @@
       </div>
 
       <button type="button" class="advanced-toggle" id="advancedToggle">
-        <span>⚙</span> Customize DCF assumptions
+        <span><svg class="ic" aria-hidden="true"><use href="#vi-settings"></use></svg></span> Customize DCF assumptions
       </button>
 
       <div class="advanced-panel hidden" id="advancedPanel">
@@ -434,7 +462,7 @@
     </section>
   </div>
   <div class="error-shell hidden" id="error">
-    <span class="error-shell__icon">⚠</span>
+    <span class="error-shell__icon"><svg class="ic" aria-hidden="true"><use href="#vi-alert"></use></svg></span>
     <span id="errorMsg">Something went wrong.</span>
   </div>
 </section>
@@ -513,8 +541,8 @@
         <li><span class="plus-perks__icon">⌖</span><div><strong>Scenario analysis</strong>, bear / base / bull weighted fair value.</div></li>
         <li><span class="plus-perks__icon">▣</span><div><strong>Insider trading</strong>, Form 4 filings for every ticker.</div></li>
         <li><span class="plus-perks__icon">↗</span><div><strong>5-year valuation history</strong>, model IV vs market price replay.</div></li>
-        <li><span class="plus-perks__icon">🏆</span><div><strong>Publish to leaderboard</strong>, flex your undervalued picks.</div></li>
-        <li><span class="plus-perks__icon">⚡</span><div><strong>Priority data refresh</strong>, fresher caches on every analyze.</div></li>
+        <li><span class="plus-perks__icon"><svg class="ic" aria-hidden="true"><use href="#vi-trophy"></use></svg></span><div><strong>Publish to leaderboard</strong>, flex your undervalued picks.</div></li>
+        <li><span class="plus-perks__icon"><svg class="ic" aria-hidden="true"><use href="#vi-zap"></use></svg></span><div><strong>Priority data refresh</strong>, fresher caches on every analyze.</div></li>
       </ul>
       <div class="plus-cta-row">
         <button class="copy-btn" data-modal-close type="button">Maybe later</button>
@@ -526,8 +554,8 @@
         Secure checkout via Stripe. Cancel anytime, your access continues through the current billing period.
       </p>
       <p class="signin-not-configured hidden" id="plusNotConfigured">
-        ⚠ Subscription checkout is not yet configured on this deployment.  The
-        owner needs to set <code>STRIPE_SECRET_KEY</code>N/A<code>STRIPE_PRICE_ID</code>,
+        <svg class="ic" aria-hidden="true"><use href="#vi-alert"></use></svg> Subscription checkout is not yet configured on this deployment.  The
+        owner needs to set <code>STRIPE_SECRET_KEY</code>, <code>STRIPE_PRICE_ID</code>,
         and <code>STRIPE_WEBHOOK_SECRET</code> environment variables.
       </p>
     </div>
@@ -562,8 +590,8 @@
       </button>
 
       <p class="signin-not-configured hidden" id="signInNotConfigured">
-        ⚠ Sign-in is not yet configured on this deployment.  The owner needs
-        to set <code>GOOGLE_CLIENT_ID</code>N/A<code>GOOGLE_CLIENT_SECRET</code>, and
+        <svg class="ic" aria-hidden="true"><use href="#vi-alert"></use></svg> Sign-in is not yet configured on this deployment.  The owner needs
+        to set <code>GOOGLE_CLIENT_ID</code>, <code>GOOGLE_CLIENT_SECRET</code>, and
         <code>SECRET_KEY</code> environment variables.
       </p>
 
@@ -678,7 +706,7 @@
       </div>
 
       <div class="settings-actions">
-        <a class="copy-btn" href="/privacy">🛡 Privacy Policy</a>
+        <a class="copy-btn" href="/privacy"><svg class="ic" aria-hidden="true"><use href="#vi-shield"></use></svg> Privacy Policy</a>
         <button class="copy-btn" id="settingsResetBtn" type="button">↺ Reset to defaults</button>
         <button class="copy-btn copy-btn--primary" data-modal-close type="button">Done</button>
       </div>
@@ -952,7 +980,7 @@
       </div>
       <div class="lb-list" id="lbList"></div>
       <div class="lb-empty hidden" id="lbEmpty">
-        <div class="portfolio-empty__icon">🏆</div>
+        <div class="portfolio-empty__icon"><svg class="ic" aria-hidden="true"><use href="#vi-trophy"></use></svg></div>
         <div class="portfolio-empty__title">No one's submitted yet</div>
         <div class="portfolio-empty__sub">Be the first, build a portfolio and click "Submit to leaderboard".</div>
       </div>
@@ -1011,10 +1039,10 @@
       </blockquote>
 
       <div class="btc-traits">
-        <span class="btc-trait">⛓ 21M HARD CAP</span>
-        <span class="btc-trait">⚡ SOUND MONEY</span>
-        <span class="btc-trait">🌐 DECENTRALIZED</span>
-        <span class="btc-trait">🛡 SEIZURE-RESISTANT</span>
+        <span class="btc-trait"><svg class="ic" aria-hidden="true"><use href="#vi-link"></use></svg> 21M HARD CAP</span>
+        <span class="btc-trait"><svg class="ic" aria-hidden="true"><use href="#vi-zap"></use></svg> SOUND MONEY</span>
+        <span class="btc-trait"><svg class="ic" aria-hidden="true"><use href="#vi-globe"></use></svg> DECENTRALIZED</span>
+        <span class="btc-trait"><svg class="ic" aria-hidden="true"><use href="#vi-shield"></use></svg> SEIZURE-RESISTANT</span>
         <span class="btc-trait">∞ DEFLATIONARY</span>
         <span class="btc-trait">◈ DIGITAL GOLD</span>
       </div>
@@ -1033,7 +1061,7 @@
 
     <!-- Persistent disclaimer on every results view (not just the navbar pill). -->
     <div class="results-disclaimer" role="note">
-      <span class="results-disclaimer__icon">⚠</span>
+      <span class="results-disclaimer__icon"><svg class="ic" aria-hidden="true"><use href="#vi-alert"></use></svg></span>
       <span><strong>Educational analysis, not financial advice.</strong>
       VALUS is a research tool, not an investment adviser. Figures are model
       estimates from public data and may be wrong. Do your own research and
@@ -1124,7 +1152,7 @@
            plus any live policy tailwinds detected from news. -->
       <div class="strategic-banner hidden" id="vStrategicBanner">
         <div class="strategic-banner__head">
-          <span class="strategic-banner__icon" aria-hidden="true">⛨</span>
+          <span class="strategic-banner__icon" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#vi-shield"></use></svg></span>
           <span class="strategic-banner__label" id="vStrategicLabel">Strategic Asset</span>
           <span class="strategic-banner__live hidden" id="vStrategicLive" title="Live policy tailwind detected in recent news">● Live policy tailwind</span>
         </div>
@@ -1140,7 +1168,7 @@
            Google News, scored by the heuristic + Claude tie-breaker. -->
       <div class="news-block hidden" id="vNewsBlock">
         <button class="news-chip" id="vNewsChip" type="button" aria-expanded="false">
-          <span class="news-chip__icon" aria-hidden="true">📰</span>
+          <span class="news-chip__icon" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#vi-news"></use></svg></span>
           <span class="news-chip__count" id="vNewsCount">N/A</span>
           <span class="news-chip__hint">click to expand</span>
           <span class="news-chip__caret" aria-hidden="true">▾</span>
@@ -1197,7 +1225,7 @@
     <section class="verdict-grid hidden" id="verdictGrid">
       <div class="card vg-card" id="sanityCard" hidden>
         <div class="vg-head">
-          <span class="vg-icon" aria-hidden="true">⚖</span>
+          <span class="vg-icon" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#vi-scale"></use></svg></span>
           <span class="vg-title">Sanity check vs Wall Street</span>
           <span class="vg-pill" id="sanityTier">N/A</span>
         </div>
@@ -1220,7 +1248,7 @@
 
       <div class="card vg-card" id="flipCard" hidden>
         <div class="vg-head">
-          <span class="vg-icon" aria-hidden="true">🎯</span>
+          <span class="vg-icon" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#vi-target"></use></svg></span>
           <span class="vg-title">What would change this verdict</span>
         </div>
         <div class="flip-list" id="flipList"></div>
@@ -1279,7 +1307,7 @@
            consistently far below price (auto/airline/semi trough names).
            Pure DCF systematically undervalues these, surface that. -->
       <div class="vh-caveat hidden" id="vhCaveat">
-        <span class="vh-caveat__icon" aria-hidden="true">⚠</span>
+        <span class="vh-caveat__icon" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#vi-alert"></use></svg></span>
         <span class="vh-caveat__text" id="vhCaveatText"></span>
       </div>
       <div class="vh-chart-wrap">
