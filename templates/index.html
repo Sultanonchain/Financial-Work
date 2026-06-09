@@ -174,7 +174,7 @@
 <main class="portfolio-page hidden" id="portfolioPage">
   <div class="container">
     <div class="pf-page__head">
-      <button class="copy-btn" id="pfBackBtn" type="button">← Back to research</button>
+      <button class="copy-btn" id="pfBackBtn" type="button">← <span data-i18n="nav.back">Back to research</span></button>
       <div class="pf-page__title">
         <h1 id="pfPageTitle">My Portfolio</h1>
         <p id="pfPageTagline">Real-time DCF tracking across your watchlist.</p>
@@ -253,16 +253,16 @@
       <div class="section-title-row">
         <div class="section-title">Holdings</div>
         <div class="pf-sort-toggle">
-          <button class="pf-sort" data-pf-sort="ticker" type="button">Ticker</button>
-          <button class="pf-sort" data-pf-sort="mos" type="button">MOS</button>
-          <button class="pf-sort active" data-pf-sort="added" type="button">Recently added</button>
+          <button class="pf-sort" data-pf-sort="ticker" type="button" data-i18n="sort.ticker">Ticker</button>
+          <button class="pf-sort" data-pf-sort="mos" type="button" data-i18n="sort.mos">MOS</button>
+          <button class="pf-sort active" data-pf-sort="added" type="button" data-i18n="sort.added">Recently added</button>
         </div>
       </div>
       <div class="portfolio-empty" id="portfolioEmpty">
         <div class="portfolio-empty__icon">★</div>
-        <div class="portfolio-empty__title">No stocks in your portfolio yet</div>
-        <div class="portfolio-empty__sub">Search any ticker and tap "Add to Portfolio" to start tracking it.</div>
-        <button class="copy-btn" id="pfStartBtn" type="button" style="margin-top: 16px;">Start adding stocks</button>
+        <div class="portfolio-empty__title" data-i18n="pf.emptyTitle">No stocks in your portfolio yet</div>
+        <div class="portfolio-empty__sub" data-i18n="pf.emptySub">Search any ticker and tap "Add to Portfolio" to start tracking it.</div>
+        <button class="copy-btn" id="pfStartBtn" type="button" style="margin-top: 16px;" data-i18n="pf.startAdding">Start adding stocks</button>
       </div>
       <div class="portfolio-list" id="portfolioList"></div>
     </div>
@@ -276,22 +276,22 @@
 <main class="portfolio-page hidden" id="watchlistPage">
   <div class="container">
     <div class="pf-page__head">
-      <button class="copy-btn" id="wlBackBtn" type="button">← Back to research</button>
+      <button class="copy-btn" id="wlBackBtn" type="button">← <span data-i18n="nav.back">Back to research</span></button>
       <div class="pf-page__title">
-        <h1>Watchlist</h1>
+        <h1 data-i18n="nav.watchlist">Watchlist</h1>
         <p>Stocks you're tracking, price vs VALUS fair value at a glance.
            <span id="watchlistCountInline">0</span> tracked.</p>
       </div>
       <div class="pf-page__actions">
-        <button class="copy-btn" id="wlExportCsvBtn" type="button" title="Download this watchlist as CSV">⤓ Export CSV</button>
+        <button class="copy-btn" id="wlExportCsvBtn" type="button" title="Download this watchlist as CSV">⤓ <span data-i18n="pf.exportCsv">Export CSV</span></button>
       </div>
     </div>
 
     <div class="card">
       <div class="portfolio-empty" id="watchlistEmpty">
         <div class="portfolio-empty__icon">≡</div>
-        <div class="portfolio-empty__title">No stocks in your watchlist yet</div>
-        <div class="portfolio-empty__sub">Search any ticker and tap "Add to Watchlist" to start tracking it.</div>
+        <div class="portfolio-empty__title" data-i18n="wl.emptyTitle">No stocks in your watchlist yet</div>
+        <div class="portfolio-empty__sub" data-i18n="wl.emptySub">Search any ticker and tap "Add to Watchlist" to start tracking it.</div>
       </div>
       <div class="portfolio-list watchlist-list" id="watchlistList"></div>
     </div>
@@ -307,8 +307,8 @@
     <aside class="onboarding-callout hidden" id="onboardingCallout" role="note" aria-labelledby="onboardingCalloutTitle">
       <span class="onboarding-callout__icon" aria-hidden="true">✦</span>
       <div class="onboarding-callout__body">
-        <h3 class="onboarding-callout__title" id="onboardingCalloutTitle">First time here? Read this in 20 seconds.</h3>
-        <p class="onboarding-callout__text">
+        <h3 class="onboarding-callout__title" id="onboardingCalloutTitle" data-i18n="onb.title">First time here? Read this in 20 seconds.</h3>
+        <p class="onboarding-callout__text" data-i18n-html="onb.text">
           VALUS estimates each stock's <strong>fair value</strong> with a 10-year
           <strong>discounted cash flow (DCF)</strong> model, projecting future cash
           back to today and dividing by share count. Compare that to the market price
@@ -316,14 +316,14 @@
           discount, the better the <strong>A-F grade</strong>.
         </p>
       </div>
-      <button class="onboarding-callout__close" id="onboardingCalloutClose" type="button" aria-label="Dismiss">Got it ✓</button>
+      <button class="onboarding-callout__close" id="onboardingCalloutClose" type="button" aria-label="Dismiss" data-i18n="onb.gotit">Got it ✓</button>
     </aside>
 
-    <h1 class="hero__title">
+    <h1 class="hero__title" data-i18n-html="hero.title">
       Search any stock.<br/>
       Understand its valuation instantly.
     </h1>
-    <p class="hero__subtitle">
+    <p class="hero__subtitle" data-i18n="hero.subtitle">
       Free 10-year DCF model, intrinsic value estimate, margin of safety, and a
       transparent breakdown of every assumption, institutional-grade rigor for
       learners and curious investors.
@@ -334,8 +334,8 @@
          names; populated by loadHomepageTopPicks() on page boot. -->
     <section class="home-toppicks hidden" id="homeTopPicks" aria-labelledby="homeTopPicksTitle">
       <div class="home-toppicks__head">
-        <h2 class="home-toppicks__title" id="homeTopPicksTitle">Top Picks</h2>
-        <span class="home-toppicks__sub">VALUS thinks these are the most undervalued right now</span>
+        <h2 class="home-toppicks__title" id="homeTopPicksTitle" data-i18n="home.topPicks">Top Picks</h2>
+        <span class="home-toppicks__sub" data-i18n="home.topPicksSub">VALUS thinks these are the most undervalued right now</span>
       </div>
       <div class="home-toppicks__row" id="homeTopPicksRow"></div>
     </section>
@@ -347,18 +347,19 @@
           class="search-input"
           type="text"
           placeholder="Ticker or company (e.g. AAPL, Microsoft, Berkshire)"
+          data-i18n-ph="search.ph"
           aria-label="Search ticker or company"
           autocomplete="off"
           spellcheck="false"
         />
-        <button type="submit" class="search-btn" id="analyzeBtn">Analyze</button>
+        <button type="submit" class="search-btn" id="analyzeBtn" data-i18n="search.analyze">Analyze</button>
         <div class="search-dropdown hidden" id="searchDropdown" role="listbox"></div>
       </form>
 
       <!-- Trending today, populated from /api/trending. Hidden until ≥3
            tickers are tracked so we never show an empty state. -->
       <div class="trending-row hidden" id="trendingRow">
-        <span class="trending-row__label">Trending today</span>
+        <span class="trending-row__label" data-i18n="home.trending">Trending today</span>
         <div class="trending-row__chips" id="trendingChips"></div>
       </div>
       <!-- Recent-tickers chip row: shown when signed in and there is search
@@ -476,18 +477,18 @@
       <button class="modal__close" data-modal-close aria-label="Close">✕</button>
     </div>
     <div class="modal__body">
-      <p class="signin-detail">Pick 2 or 3 stocks. We'll run VALUS on each and show the deltas across price, fair value, market cap, analyst target, quality, moat, and momentum. Best in each row is highlighted.</p>
+      <p class="signin-detail" data-i18n="compare.detail">Pick 2 or 3 stocks. We'll run VALUS on each and show the deltas across price, fair value, market cap, analyst target, quality, moat, and momentum. Best in each row is highlighted.</p>
       <div class="cmp-form">
-        <input class="lb-input" id="cmpInputA" type="text" placeholder="Ticker 1, e.g. AAPL" maxlength="12" autocomplete="off" spellcheck="false"/>
+        <input class="lb-input" id="cmpInputA" type="text" placeholder="Ticker 1, e.g. AAPL" data-i18n-ph="compare.phA" maxlength="12" autocomplete="off" spellcheck="false"/>
         <span class="cmp-vs">vs</span>
-        <input class="lb-input" id="cmpInputB" type="text" placeholder="Ticker 2, e.g. MSFT" maxlength="12" autocomplete="off" spellcheck="false"/>
+        <input class="lb-input" id="cmpInputB" type="text" placeholder="Ticker 2, e.g. MSFT" data-i18n-ph="compare.phB" maxlength="12" autocomplete="off" spellcheck="false"/>
         <span class="cmp-vs">vs</span>
-        <input class="lb-input" id="cmpInputC" type="text" placeholder="Ticker 3 (optional)" maxlength="12" autocomplete="off" spellcheck="false"/>
-        <button class="copy-btn copy-btn--primary" id="cmpRunBtn" type="button">Compare</button>
+        <input class="lb-input" id="cmpInputC" type="text" placeholder="Ticker 3 (optional)" data-i18n-ph="compare.phC" maxlength="12" autocomplete="off" spellcheck="false"/>
+        <button class="copy-btn copy-btn--primary" id="cmpRunBtn" type="button" data-i18n="compare.run">Compare</button>
       </div>
       <div class="cmp-loading hidden" id="cmpLoading">
         <div class="spinner"></div>
-        <span>Running VALUS on both…</span>
+        <span data-i18n="compare.loading">Running VALUS on both…</span>
       </div>
       <div class="cmp-error hidden" id="cmpError"></div>
       <div class="cmp-results hidden" id="cmpResults"></div>
@@ -508,13 +509,13 @@
       <button class="modal__close" data-modal-close aria-label="Close">✕</button>
     </div>
     <div class="modal__body">
-      <p class="signin-detail" style="margin-bottom: 14px;">
+      <p class="signin-detail" style="margin-bottom: 14px;" data-i18n-html="grade.intro">
         Every stock gets a single A-F letter that compares its <strong>current market price</strong> to <strong>VALUS fair value</strong>. The percent next to the letter is the <em>margin of safety</em>, how far below (positive) or above (negative) fair value the stock is trading.
       </p>
       <ul class="grade-explainer__list" id="gradeExplainerList">
         <!-- Populated by setupGradeExplainer(); single data source. -->
       </ul>
-      <p class="plus-fineprint" style="margin-top: 14px;">
+      <p class="plus-fineprint" style="margin-top: 14px;" data-i18n-html="grade.fineprint">
         The letter is derived purely from the DCF model + the current price.
         It's <strong>not</strong> a buy/sell signal, read the full verdict
         and the underlying methodology before acting on it.
@@ -535,22 +536,22 @@
       <button class="modal__close" data-modal-close aria-label="Close">✕</button>
     </div>
     <div class="modal__body">
-      <p class="plus-intro">Unlock the institutional toolkit for <strong>$2 / month</strong>.</p>
+      <p class="plus-intro" data-i18n-html="plus.intro">Unlock the institutional toolkit for <strong>$2 / month</strong>.</p>
       <ul class="plus-perks">
-        <li><span class="plus-perks__icon">∞</span><div><strong>Unlimited searches.</strong> No daily cap on any ticker.</div></li>
-        <li><span class="plus-perks__icon">⌖</span><div><strong>Scenario analysis</strong>, bear / base / bull weighted fair value.</div></li>
-        <li><span class="plus-perks__icon">▣</span><div><strong>Insider trading</strong>, Form 4 filings for every ticker.</div></li>
-        <li><span class="plus-perks__icon">↗</span><div><strong>5-year valuation history</strong>, model IV vs market price replay.</div></li>
-        <li><span class="plus-perks__icon"><svg class="ic" aria-hidden="true"><use href="#vi-trophy"></use></svg></span><div><strong>Publish to leaderboard</strong>, flex your undervalued picks.</div></li>
-        <li><span class="plus-perks__icon"><svg class="ic" aria-hidden="true"><use href="#vi-zap"></use></svg></span><div><strong>Priority data refresh</strong>, fresher caches on every analyze.</div></li>
+        <li><span class="plus-perks__icon">∞</span><div data-i18n-html="plus.perk1"><strong>Unlimited searches.</strong> No daily cap on any ticker.</div></li>
+        <li><span class="plus-perks__icon">⌖</span><div data-i18n-html="plus.perk2"><strong>Scenario analysis</strong>, bear / base / bull weighted fair value.</div></li>
+        <li><span class="plus-perks__icon">▣</span><div data-i18n-html="plus.perk3"><strong>Insider trading</strong>, Form 4 filings for every ticker.</div></li>
+        <li><span class="plus-perks__icon">↗</span><div data-i18n-html="plus.perk4"><strong>5-year valuation history</strong>, model IV vs market price replay.</div></li>
+        <li><span class="plus-perks__icon"><svg class="ic" aria-hidden="true"><use href="#vi-trophy"></use></svg></span><div data-i18n-html="plus.perk5"><strong>Publish to leaderboard</strong>, flex your undervalued picks.</div></li>
+        <li><span class="plus-perks__icon"><svg class="ic" aria-hidden="true"><use href="#vi-zap"></use></svg></span><div data-i18n-html="plus.perk6"><strong>Priority data refresh</strong>, fresher caches on every analyze.</div></li>
       </ul>
       <div class="plus-cta-row">
-        <button class="copy-btn" data-modal-close type="button">Maybe later</button>
+        <button class="copy-btn" data-modal-close type="button" data-i18n="common.maybeLater">Maybe later</button>
         <button class="copy-btn copy-btn--primary plus-cta" id="plusCheckoutBtn" type="button">
-          <span>VALUS+, Unlimited for $2/month</span>
+          <span data-i18n="plus.cta">VALUS+, Unlimited for $2/month</span>
         </button>
       </div>
-      <p class="plus-fineprint">
+      <p class="plus-fineprint" data-i18n="plus.fineprint">
         Secure checkout via Stripe. Cancel anytime, your access continues through the current billing period.
       </p>
       <p class="signin-not-configured hidden" id="plusNotConfigured">
@@ -572,7 +573,7 @@
     </div>
     <div class="modal__body">
       <p class="signin-intent" id="signInIntent">Sign in to continue.</p>
-      <p class="signin-detail">
+      <p class="signin-detail" data-i18n="signin.detail">
         VALUS is free to use without an account, search any stock, drag the
         DCF sliders, browse the leaderboard, all without signing in.  Sign in
         only when you want to save a portfolio across devices or publish to
@@ -586,7 +587,7 @@
           <path fill="#FBBC05" d="M3.97 10.71a5.41 5.41 0 0 1 0-3.42V4.95H.96a9 9 0 0 0 0 8.1l3.01-2.34z"/>
           <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.46 3.44 1.35l2.58-2.58A9 9 0 0 0 .96 4.96L3.97 7.3C4.68 5.18 6.66 3.58 9 3.58z"/>
         </svg>
-        <span>Continue with Google</span>
+        <span data-i18n="signin.google">Continue with Google</span>
       </button>
 
       <p class="signin-not-configured hidden" id="signInNotConfigured">
@@ -595,7 +596,7 @@
         <code>SECRET_KEY</code> environment variables.
       </p>
 
-      <button class="copy-btn" data-modal-close type="button" style="margin-top: 16px; width: 100%;">
+      <button class="copy-btn" data-modal-close type="button" style="margin-top: 16px; width: 100%;" data-i18n="common.maybeLater">
         Maybe later
       </button>
     </div>
@@ -862,18 +863,18 @@
           <span class="pi-value numeric" id="etfPrice">N/A</span>
         </div>
         <div class="etf-stats">
-          <div class="etf-stat"><span class="etf-stat__label">52W High</span><span class="etf-stat__value numeric" id="etfHigh">N/A</span></div>
-          <div class="etf-stat"><span class="etf-stat__label">52W Low</span><span class="etf-stat__value numeric" id="etfLow">N/A</span></div>
-          <div class="etf-stat"><span class="etf-stat__label">YTD Return</span><span class="etf-stat__value numeric" id="etfYtd">N/A</span></div>
-          <div class="etf-stat"><span class="etf-stat__label">Expense Ratio</span><span class="etf-stat__value numeric" id="etfExpense">N/A</span></div>
+          <div class="etf-stat"><span class="etf-stat__label" data-i18n="etf.52wHigh">52W High</span><span class="etf-stat__value numeric" id="etfHigh">N/A</span></div>
+          <div class="etf-stat"><span class="etf-stat__label" data-i18n="etf.52wLow">52W Low</span><span class="etf-stat__value numeric" id="etfLow">N/A</span></div>
+          <div class="etf-stat"><span class="etf-stat__label" data-i18n="etf.ytd">YTD Return</span><span class="etf-stat__value numeric" id="etfYtd">N/A</span></div>
+          <div class="etf-stat"><span class="etf-stat__label" data-i18n="etf.expense">Expense Ratio</span><span class="etf-stat__value numeric" id="etfExpense">N/A</span></div>
         </div>
       </div>
       <div class="chart-wrap"><canvas id="etfChart"></canvas></div>
       <div class="etf-message" id="etfMessage"></div>
 
       <div class="etf-cta-row">
-        <button class="copy-btn" id="etfAddPortfolio" type="button">★ Add to Portfolio</button>
-        <button class="copy-btn" id="etfBack" type="button">← Back to search</button>
+        <button class="copy-btn" id="etfAddPortfolio" type="button">★ <span data-i18n="common.addPortfolio">Add to Portfolio</span></button>
+        <button class="copy-btn" id="etfBack" type="button">← <span data-i18n="nav.backSearch">Back to search</span></button>
       </div>
     </section>
   </div>
@@ -966,33 +967,33 @@
 <main class="lb-page hidden" id="leaderboardPage">
   <div class="container">
     <div class="pf-page__head">
-      <button class="copy-btn" id="lbBackBtn" type="button">← Back</button>
+      <button class="copy-btn" id="lbBackBtn" type="button">← <span data-i18n="common.back">Back</span></button>
       <div class="pf-page__title">
-        <h1>Leaderboard</h1>
-        <p>See who's spotted the best value picks. Sorted by margin of safety.</p>
+        <h1 data-i18n="lb.title">Leaderboard</h1>
+        <p data-i18n="lb.subtitle">See who's spotted the best value picks. Sorted by margin of safety.</p>
       </div>
-      <button class="copy-btn" id="lbRefreshBtn" type="button">↻ Refresh</button>
+      <button class="copy-btn" id="lbRefreshBtn" type="button">↻ <span data-i18n="pf.refresh">Refresh</span></button>
     </div>
 
     <div class="card disc-filters">
       <div class="disc-filter-row">
-        <span class="disc-filter-label">Sort:</span>
-        <button class="disc-tier-pill active" data-lb-sort="avg_mos" type="button">Avg MOS</button>
-        <button class="disc-tier-pill" data-lb-sort="recent" type="button">Most Recent</button>
-        <button class="disc-tier-pill" data-lb-sort="size" type="button">Most Holdings</button>
+        <span class="disc-filter-label" data-i18n="lb.sortLabel">Sort:</span>
+        <button class="disc-tier-pill active" data-lb-sort="avg_mos" type="button" data-i18n="lb.avgMos">Avg MOS</button>
+        <button class="disc-tier-pill" data-lb-sort="recent" type="button" data-i18n="lb.recent">Most Recent</button>
+        <button class="disc-tier-pill" data-lb-sort="size" type="button" data-i18n="lb.size">Most Holdings</button>
       </div>
     </div>
 
     <div class="card">
       <div class="lb-loading hidden" id="lbLoading">
         <div class="spinner"></div>
-        <span>Loading leaderboard…</span>
+        <span data-i18n="lb.loading">Loading leaderboard…</span>
       </div>
       <div class="lb-list" id="lbList"></div>
       <div class="lb-empty hidden" id="lbEmpty">
         <div class="portfolio-empty__icon"><svg class="ic" aria-hidden="true"><use href="#vi-trophy"></use></svg></div>
-        <div class="portfolio-empty__title">No one's submitted yet</div>
-        <div class="portfolio-empty__sub">Be the first, build a portfolio and click "Submit to leaderboard".</div>
+        <div class="portfolio-empty__title" data-i18n="lb.emptyTitle">No one's submitted yet</div>
+        <div class="portfolio-empty__sub" data-i18n="lb.emptySub">Be the first, build a portfolio and click "Submit to leaderboard".</div>
       </div>
     </div>
   </div>
@@ -1008,12 +1009,12 @@
       <div class="btc-card__top">
         <div class="btc-mark" aria-hidden="true">₿</div>
         <h1 class="btc-headline">HODL</h1>
-        <p class="btc-tagline">The greatest asset in human history.<br/><span>Indestructible. Inevitable. Inviolable.</span></p>
+        <p class="btc-tagline" data-i18n-html="btc.tagline">The greatest asset in human history.<br/><span>Indestructible. Inevitable. Inviolable.</span></p>
       </div>
 
       <div class="btc-price-row">
         <div class="btc-price-block">
-          <span class="btc-price-label">Spot · BTC/USD</span>
+          <span class="btc-price-label" data-i18n="btc.spot">Spot · BTC/USD</span>
           <span class="btc-price-value numeric" id="btcPrice">N/A</span>
           <div class="btc-price-deltas">
             <span class="btc-delta" id="btcDelta24h">N/A</span>
@@ -1022,7 +1023,7 @@
         </div>
         <div class="btc-stats">
           <div class="btc-stat">
-            <span class="btc-stat__label">Market Cap</span>
+            <span class="btc-stat__label" data-i18n="btc.mcap">Market Cap</span>
             <span class="btc-stat__value numeric" id="btcMcap">N/A</span>
           </div>
           <div class="btc-stat">
@@ -1058,8 +1059,8 @@
       </div>
 
       <div class="btc-cta-row">
-        <button class="copy-btn" id="btcAddPortfolio" type="button">★ Add to Portfolio</button>
-        <button class="copy-btn" id="btcBack" type="button">← Back to stocks</button>
+        <button class="copy-btn" id="btcAddPortfolio" type="button">★ <span data-i18n="common.addPortfolio">Add to Portfolio</span></button>
+        <button class="copy-btn" id="btcBack" type="button">← <span data-i18n="nav.backStocks">Back to stocks</span></button>
       </div>
     </section>
   </div>
@@ -1193,17 +1194,17 @@
            detailed Scenario Analysis card below). -->
       <div class="hero-insights" id="vInsights">
         <div class="hero-insight" id="viConfidenceWrap" hidden>
-          <span class="hero-insight__label">Confidence</span>
+          <span class="hero-insight__label" data-i18n="insight.confidence">Confidence</span>
           <span class="hero-insight__value" id="viConfidence">N/A</span>
           <span class="hero-insight__hint" id="viConfidenceHint"></span>
         </div>
         <div class="hero-insight" id="viImpliedWrap" hidden>
-          <span class="hero-insight__label">Implied growth</span>
+          <span class="hero-insight__label" data-i18n="insight.implied">Implied growth</span>
           <span class="hero-insight__value" id="viImplied">N/A</span>
           <span class="hero-insight__hint" id="viImpliedHint"></span>
         </div>
         <div class="hero-insight hero-insight--range" id="viRangeWrap" hidden>
-          <span class="hero-insight__label">52-week range</span>
+          <span class="hero-insight__label" data-i18n="insight.range">52-week range</span>
           <div class="hr-bar">
             <div class="hr-bar__track">
               <div class="hr-bar__marker" id="viRangeMarker"></div>
@@ -1691,7 +1692,7 @@
 <!-- ── FOOTER ─────────────────────────────────────────────────────────── -->
 <footer class="site-footer">
   <div class="container">
-    <span>VALUS · Educational research tool · Data via Yahoo Finance · Not investment advice · <a href="/how-it-works" style="color: inherit; text-decoration: underline; opacity: 0.8;">How it works</a> · <a href="/methodology" style="color: inherit; text-decoration: underline; opacity: 0.8;">Methodology</a> · <a href="/terms" style="color: inherit; text-decoration: underline; opacity: 0.8;">Terms</a> · <a href="/privacy" style="color: inherit; text-decoration: underline; opacity: 0.8;">Privacy</a> · <a href="mailto:contact@valusfinancial.com" style="color: inherit; text-decoration: underline; opacity: 0.8;">Contact</a></span>
+    <span>VALUS · <span data-i18n="footer.desc">Educational research tool · Data via Yahoo Finance · Not investment advice</span> · <a href="/how-it-works" style="color: inherit; text-decoration: underline; opacity: 0.8;" data-i18n="footer.howItWorks">How it works</a> · <a href="/methodology" style="color: inherit; text-decoration: underline; opacity: 0.8;" data-i18n="footer.methodology">Methodology</a> · <a href="/terms" style="color: inherit; text-decoration: underline; opacity: 0.8;" data-i18n="footer.terms">Terms</a> · <a href="/privacy" style="color: inherit; text-decoration: underline; opacity: 0.8;" data-i18n="footer.privacy">Privacy</a> · <a href="mailto:contact@valusfinancial.com" style="color: inherit; text-decoration: underline; opacity: 0.8;" data-i18n="footer.contact">Contact</a></span>
   </div>
 </footer>
 
