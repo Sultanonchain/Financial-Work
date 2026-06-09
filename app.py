@@ -57,7 +57,7 @@ def _inject_asset_version():
 #     which means cookies signed by instance A can't be verified by
 #     instance B. OAuth state lives in the session, so the round-trip
 #     to Google fails for any user that happens to land on a different
-#     instance for the callback — exactly the "some people can't sign
+#     instance for the callback, exactly the "some people can't sign
 #     in" symptom.
 #   - In local dev we use a deterministic fallback so sessions survive
 #     a `python3 app.py` restart.
@@ -78,11 +78,10 @@ app.config.update(
     SESSION_COOKIE_SECURE=bool(os.environ.get("VERCEL")),  # secure cookies on prod only
     # 30-day persistent login: when auth_callback sets session.permanent = True,
     # the signed cookie survives browser restarts and follows the user across
-    # devices for 30 days. Without this, sessions expire on browser close —
-    # which is the "I have to sign in every time I open the site" symptom.
+    # devices for 30 days. Without this, sessions expire on browser close, # which is the "I have to sign in every time I open the site" symptom.
     PERMANENT_SESSION_LIFETIME=timedelta(days=30),
 )
-# CORS — credentialed requests are restricted to an explicit allow-list.
+# CORS, credentialed requests are restricted to an explicit allow-list.
 # A wildcard origin with supports_credentials=True would let any website
 # make authenticated (cookie-bearing) cross-origin calls to our API.  The
 # frontend is served same-origin, so the only legitimate cross-origin
@@ -100,7 +99,7 @@ else:
     ]
 CORS(app, supports_credentials=True, origins=_cors_origins)
 
-# ── Vercel KV (Redis) adapter — durable storage when a Redis URL is set ─
+# ── Vercel KV (Redis) adapter, durable storage when a Redis URL is set ─
 # Falls back silently to a process-level dict + /tmp file when env is
 # missing (local dev with no KV provisioned still works exactly like
 # before).
@@ -120,7 +119,7 @@ def _discover_kv_url():
         "KV_URL", "REDIS_URL", "UPSTASH_REDIS_URL",
         "STORAGE_REDIS_URL", "KV_REDIS_URL", "STORAGE_KV_URL",
     )
-    # Canonical-name pass — case-insensitive (Vercel sometimes preserves
+    # Canonical-name pass, case-insensitive (Vercel sometimes preserves
     # the casing the user typed into the integration's prefix field,
     # which then fails the case-sensitive `os.environ.get` lookup on
     # Linux).
@@ -129,7 +128,7 @@ def _discover_kv_url():
         hit = env_ci.get(name)
         if hit and hit[1]:
             return hit[1], hit[0]
-    # Fallback pass — anything that smells like a Redis URL.  Skips
+    # Fallback pass, anything that smells like a Redis URL.  Skips
     # REST-API token URLs (those are HTTPS and need the @upstash/redis
     # client, not redis-py); keeps to redis:// / rediss:// only.
     for k, v in os.environ.items():
@@ -156,14 +155,14 @@ if _kv_url:
         _kv = None
 else:
     # Surface which env vars we actually saw so a misconfigured deploy
-    # is debuggable from the log — helps the owner spot a typo'd prefix
+    # is debuggable from the log, helps the owner spot a typo'd prefix
     # like "Storage_RDIS_URL" without having to grep production.
     _candidates_seen = [k for k in os.environ
                         if any(t in k.upper() for t in ("KV_URL", "REDIS"))]
     if _candidates_seen:
         print(f"[valus] No usable Redis URL found. Env vars matching KV/REDIS: {_candidates_seen}")
     else:
-        print("[valus] No KV/Redis env var set — search-limit + analytics use ephemeral in-memory")
+        print("[valus] No KV/Redis env var set, search-limit + analytics use ephemeral in-memory")
 
 def kv_get(key):
     if _kv:
@@ -180,7 +179,7 @@ def kv_set(key, value, ttl=None):
         except Exception: pass
     return False
 
-# ── Rate limiting — uses Redis when available, falls back to memory ────
+# ── Rate limiting, uses Redis when available, falls back to memory ────
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
@@ -201,7 +200,7 @@ def _is_signed_in():
     except Exception:
         return False
 
-# Dynamic limits — signed-in users get 3-5x more than anonymous
+# Dynamic limits, signed-in users get 3-5x more than anonymous
 def limit_analyze():
     return "40 per minute; 300 per day" if _is_signed_in() else "10 per minute; 50 per day"
 def limit_discover():
@@ -220,7 +219,7 @@ limiter = Limiter(
     headers_enabled=True,
 )
 
-# ── Google OAuth (optional — gracefully disabled when env vars absent) ─
+# ── Google OAuth (optional, gracefully disabled when env vars absent) ─
 _oauth = None
 _GOOGLE_CONFIGURED = bool(
     os.environ.get("GOOGLE_CLIENT_ID") and
@@ -243,13 +242,13 @@ if _GOOGLE_CONFIGURED:
         _GOOGLE_CONFIGURED = False
 
 # ── Stripe (VALUS+ $2/month subscription) ─────────────────────────────────
-# Optional — the app works fully without Stripe configured (Phase-1 search
+# Optional, the app works fully without Stripe configured (Phase-1 search
 # limits still apply, no one can become VALUS+, but everything else works).
 #
 # Three env vars together enable the paid tier:
-#   STRIPE_SECRET_KEY      — sk_live_… or sk_test_…
-#   STRIPE_PRICE_ID        — price_…   the $2/month recurring price
-#   STRIPE_WEBHOOK_SECRET  — whsec_…   raw-body signature secret
+#   STRIPE_SECRET_KEY, sk_live_… or sk_test_…
+#   STRIPE_PRICE_ID, price_…   the $2/month recurring price
+#   STRIPE_WEBHOOK_SECRET, whsec_…   raw-body signature secret
 _stripe = None
 _STRIPE_CONFIGURED = bool(
     os.environ.get("STRIPE_SECRET_KEY") and
@@ -266,7 +265,7 @@ if _STRIPE_CONFIGURED:
         _STRIPE_CONFIGURED = False
 
 # Subscription record in KV.  One key per user (sub) holds the latest
-# Stripe subscription state. Free users have no key — absence == not plus.
+# Stripe subscription state. Free users have no key, absence == not plus.
 # Shape: { "status": "active", "customer_id": "cus_…", "subscription_id":
 # "sub_…", "current_period_end": 1700000000, "since": 1690000000 }
 SUBSCRIPTION_KEY_FMT = "valus:plus:{sub}"
@@ -284,7 +283,7 @@ _TEST_PLUS_EMAILS = {
 # ── Team access codes (unlimited searches for you + your board) ──────────
 # Comma-separated secret codes in VALUS_UNLIMITED_CODES.  Anyone who
 # redeems a valid code (via POST /api/redeem-code or the ?code=… URL param)
-# gets a session flag that bypasses the daily search limit — no Stripe sub,
+# gets a session flag that bypasses the daily search limit, no Stripe sub,
 # no email allow-list needed.  Rotate by changing the env var.  Example:
 #   VALUS_UNLIMITED_CODES=valus-board-7Q2x,valus-founder-9KdP
 _UNLIMITED_CODES = [
@@ -384,9 +383,9 @@ def _has_full_access(user_or_dict):
 
 
 RISK_FREE_RATE   = 0.043   # 10-yr US Treasury proxy (Apr 2025 ~4.3%)
-EQUITY_RISK_PREM = 0.060   # FIN 415 template MRP (6.0% — matches academic standard)
+EQUITY_RISK_PREM = 0.060   # FIN 415 template MRP (6.0%, matches academic standard)
 
-# FX rate cache (in-memory, lives for the process lifetime — good enough for a session)
+# FX rate cache (in-memory, lives for the process lifetime, good enough for a session)
 _fx_cache: dict = {}
 
 # ── Catalyst / Discovery Layer cache ──────────────────────────────────────────
@@ -394,8 +393,8 @@ _fx_cache: dict = {}
 _catalyst_cache: dict = {}
 CATALYST_CACHE_TTL = 3600   # seconds
 # Max Claude headline-interpreter calls per analysis (cost cap). Each analyze
-# previously fired one AI call per ambiguous headline — and one per EVERY
-# headline on strategic/backstop tickers — which is what ran up the API bill.
+# previously fired one AI call per ambiguous headline, and one per EVERY
+# headline on strategic/backstop tickers, which is what ran up the API bill.
 HEADLINE_AI_BUDGET = 3
 
 # Keyword lists for positive catalyst and risk classification
@@ -423,13 +422,13 @@ _RISK_KEYWORDS = [
 # ── Transformative catalysts ────────────────────────────────────────────────
 # These are events that signal a *durable* growth shift, not a one-time IV
 # bump.  When one fires, the model lifts Stage-1 growth in addition to the
-# usual IV multiplier — a "first commercial flight" reflects 2-3 years of
+# usual IV multiplier, a "first commercial flight" reflects 2-3 years of
 # accelerating revenue, not just a sentiment pop.
 #
 # Coverage by industry (curated to the events that have actually moved
 # stocks 20%+ over the past 24 months):
 _CATALYST_TRANSFORMATIVE = [
-    # eVTOL / Urban Air Mobility — JOBY, ACHR, EVTL
+    # eVTOL / Urban Air Mobility, JOBY, ACHR, EVTL
     "first commercial flight", "first commercial ride", "first paid passenger",
     "first paid flight", "first paid ride", "part 135 certification",
     "type certificate", "air taxi launch", "urban air mobility launch",
@@ -438,15 +437,15 @@ _CATALYST_TRANSFORMATIVE = [
     "commercial passenger flight", "begins air taxi", "passenger air taxi",
     "commercial service launch", "begins commercial service",
     "completes first passenger", "completes first commercial",
-    # Semiconductors — MU, INTC, TSMC, ARM
+    # Semiconductors, MU, INTC, TSMC, ARM
     "tape-out", "tape out", "first silicon", "yield ramp",
     "hbm4 sampling", "hbm3e sampling", "cxl ga", "ga release",
     "high-volume production", "production ramp",
-    # Autos / EV / Robotics — TSLA, GM, F, RIVN
+    # Autos / EV / Robotics, TSLA, GM, F, RIVN
     "deliveries record", "delivery record", "production milestone",
     "factory online", "factory commissioned", "robotaxi launch",
     "robotaxi expansion", "fsd unsupervised", "optimus production",
-    # Energy — CEG, VST, NEE, OXY
+    # Energy, CEG, VST, NEE, OXY
     "first power", "grid connection", "facility commissioned",
     "ppa signed", "hyperscaler ppa", "datacenter ppa",
     "reactor restart", "haleu delivery", "small modular reactor",
@@ -454,14 +453,14 @@ _CATALYST_TRANSFORMATIVE = [
     "only us producer", "sole us producer", "sole supplier",
     "exclusive supplier", "no us competitor", "only domestic supplier",
     "trusted foundry designation",
-    # Biotech / Pharma — LLY, VRTX, REGN, MRNA
+    # Biotech / Pharma, LLY, VRTX, REGN, MRNA
     "bla filing", "bla accepted", "bla approval", "phase 3 success",
     "phase 3 met primary", "fda priority review", "breakthrough therapy",
     "label expansion", "first patient dosed",
-    # Defense — LMT, RTX, NOC, GD, HII
+    # Defense, LMT, RTX, NOC, GD, HII
     "sole-source contract", "indefinite delivery indefinite quantity",
     "idiq award", "production go-ahead", "milestone c approval",
-    # AI infra / Cloud — NVDA, MSFT, GOOGL, AMZN
+    # AI infra / Cloud, NVDA, MSFT, GOOGL, AMZN
     "blackwell shipping", "blackwell ga", "rubin shipping",
     "sovereign ai contract", "gigawatt deal",
 ]
@@ -487,9 +486,9 @@ _POLICY_TAILWIND_KEYWORDS = [
 ]
 
 # Headwinds specific to policy / geopolitical risk (different bucket from
-# generic litigation risk — these speak to capital flow reversals).
+# generic litigation risk, these speak to capital flow reversals).
 _POLICY_HEADWIND_KEYWORDS = [
-    "export control" ,    # generic — context-disambiguated below if it co-occurs with "win"
+    "export control" ,    # generic, context-disambiguated below if it co-occurs with "win"
     "outbound investment restriction", "cfius blocked",
     "tariff retaliation", "china ban", "china restriction",
     "delisting risk", "denied entity list", "entity list addition",
@@ -501,7 +500,7 @@ _POLICY_HEADWIND_KEYWORDS = [
 # max_tg:      maximum terminal growth rate (capped at long-run GDP)
 # min_wacc:    WACC floor regardless of capital structure
 # wacc_spread: minimum (WACC − terminal growth) to avoid near-zero denominators
-# max_s1:      cap on Stage 1 growth — prevents using cyclical recovery as perpetual rate
+# max_s1:      cap on Stage 1 growth, prevents using cyclical recovery as perpetual rate
 INDUSTRY_PARAMS = {
     # Airlines: low long-run growth, high capital intensity, often junk-rated
     "airlines":        {"max_tg": 0.020, "min_wacc": 0.085, "wacc_spread": 0.025, "max_s1": 0.12},
@@ -516,7 +515,7 @@ INDUSTRY_PARAMS = {
     # Autos: cyclical, capital-intensive
     "auto":            {"max_tg": 0.025, "min_wacc": 0.075, "wacc_spread": 0.020, "max_s1": 0.15},
     # Structural Transformer: traditional-sector company reinventing itself via AI/Robotics capex
-    # (e.g. Tesla — classified as Auto but investing at tech-company intensity)
+    # (e.g. Tesla, classified as Auto but investing at tech-company intensity)
     # Higher TG ceiling, 8% floor, lifted Stage 1 cap for platform-scale growth
     "structural_transformer": {"max_tg": 0.030, "min_wacc": 0.080, "wacc_spread": 0.018, "max_s1": 0.35},
     # Payment Networks / Asset-Light Credit: zero-marginal-cost scaling, global duopoly moats.
@@ -524,13 +523,13 @@ INDUSTRY_PARAMS = {
     # without triggering the 42× Gordon Growth explosion of a 5%-TG / 7.5%-WACC combination.
     # 7.5% WACC floor: very low capital risk vs. traditional financial services.
     "payment_network": {"max_tg": 0.035, "min_wacc": 0.075, "wacc_spread": 0.020, "max_s1": 0.20},
-    # Default (tech, consumer, healthcare, etc.) — global sanity floor
+    # Default (tech, consumer, healthcare, etc.), global sanity floor
     "default":         {"max_tg": 0.025, "min_wacc": 0.075, "wacc_spread": 0.020, "max_s1": 0.25},
 }
 
 # Industry-standard multiples for fallback valuation when DCF is unavailable
 # Sourced from Damodaran sector averages (updated annually)
-# (forward_pe_multiple, ev_ebitda_multiple) — None means that metric isn't reliable for sector
+# (forward_pe_multiple, ev_ebitda_multiple), None means that metric isn't reliable for sector
 SECTOR_MULT_PARAMS = {
     "technology":         (25.0, 23.0),  # moat ×1.20 → ~30x fpe / ~27.6x ev/ebitda
     "consumer_cyclical":  (18.0, 12.0),
@@ -625,7 +624,7 @@ def _fetch_edgar_8k(ticker: str) -> list:
         return []
 
 
-# ── Google News RSS — third news source ──────────────────────────────────────
+# ── Google News RSS, third news source ──────────────────────────────────────
 # yfinance.news has been broken since Yahoo deprecated their news format
 # months ago (returns empty lists for most tickers).  EDGAR 8-K Atom feed
 # returns generic "8-K - Current report" titles with summaries too brief
@@ -671,7 +670,7 @@ def _fetch_google_news(ticker: str, company_name: str = "") -> list:
             pubdate = (item.findtext("pubDate")    or "").strip()
             # Strip HTML from description (often contains nested anchor tags)
             desc_clean = re.sub(r"<[^>]+>", " ", desc).strip()[:400]
-            # Parse pubDate — RFC 822 format like "Tue, 28 Apr 2026 14:32:00 GMT"
+            # Parse pubDate, RFC 822 format like "Tue, 28 Apr 2026 14:32:00 GMT"
             ts = 0
             try:
                 from email.utils import parsedate_to_datetime
@@ -703,7 +702,7 @@ _NEGATION_TOKENS = (
 # interpretation.  Adds ~1-2s + a few cents/day; falls back to heuristic
 # gracefully if the call fails or the key is missing.
 _CLAUDE_INTERP_CACHE = {}        # {(ticker, title_hash): (ts, payload)}
-_CLAUDE_INTERP_CACHE_TTL = 3600  # 1 hour — same as the catalyst cache
+_CLAUDE_INTERP_CACHE_TTL = 3600  # 1 hour, same as the catalyst cache
 
 def _claude_interpret_headline(ticker, sector, title, summary):
     """
@@ -718,7 +717,7 @@ def _claude_interpret_headline(ticker, sector, title, summary):
     cached = _CLAUDE_INTERP_CACHE.get(cache_key)
     if cached and (time.time() - cached[0]) < _CLAUDE_INTERP_CACHE_TTL:
         return cached[1]
-    # Redis lookup — cuts cost across Vercel instances
+    # Redis lookup, cuts cost across Vercel instances
     redis_key = f"valus:claude:{ticker}:{hash((title or '')[:200])}"
     if _kv:
         try:
@@ -735,15 +734,15 @@ def _claude_interpret_headline(ticker, sector, title, summary):
             "You are a buyside equity analyst trained in Peter Lynch's method "
             "from One Up On Wall Street.  Read this headline through Lynch's lens.\n\n"
             "LYNCH'S SIX CATEGORIES (classify the company first):\n"
-            "  slowGrower  — large, mature, low single-digit growth, bought for dividend.\n"
-            "  stalwart    — multibillion-dollar, 10–12% earnings growth, recession-resilient (KO, PG).\n"
-            "                Realistic upside: 30–50% over 1–2 years; not a tenbagger.\n"
-            "  fastGrower  — small/aggressive, 20–25%+ growth, room to expand.  Tenbagger territory.\n"
+            "  slowGrower, large, mature, low single-digit growth, bought for dividend.\n"
+            "  stalwart, multibillion-dollar, 10-12% earnings growth, recession-resilient (KO, PG).\n"
+            "                Realistic upside: 30-50% over 1-2 years; not a tenbagger.\n"
+            "  fastGrower, small/aggressive, 20-25%+ growth, room to expand.  Tenbagger territory.\n"
             "                Risk: outgrowing the industry or running out of runway.\n"
-            "  cyclical    — earnings rise/fall with macro (autos, airlines, steel, chemicals).\n"
+            "  cyclical, earnings rise/fall with macro (autos, airlines, steel, chemicals).\n"
             "                Timing is everything; can lose 80% in a downturn.\n"
-            "  turnaround  — battered/near-bankruptcy companies that may rebound (Chrysler-style).\n"
-            "  assetPlay   — hidden assets (real estate, cash, brand) not reflected in price.\n\n"
+            "  turnaround, battered/near-bankruptcy companies that may rebound (Chrysler-style).\n"
+            "  assetPlay, hidden assets (real estate, cash, brand) not reflected in price.\n\n"
             "LYNCH'S CHECKLIST (weight headlines by what matters per category):\n"
             "  • P/E vs growth (PEG): low PEG = bullish, high = bearish.\n"
             "  • Insider buying / company buybacks = strong positive.\n"
@@ -757,7 +756,7 @@ def _claude_interpret_headline(ticker, sector, title, summary):
             "LYNCH'S RED FLAGS (treat as bearish even if news sounds positive):\n"
             "  • Hot stock in a hot industry with no earnings.\n"
             "  • 'The next [Microsoft/Tesla]' framing.\n"
-            "  • Diworsification — acquisitions outside core competence.\n"
+            "  • Diworsification, acquisitions outside core competence.\n"
             "  • Whisper stocks, hyped 'sure things,' takeover speculation as the thesis.\n"
             "  • Heavy debt taken on to fund growth or acquisitions.\n\n"
             f"Ticker: {ticker}\nSector: {sector or '?'}\n"
@@ -768,7 +767,7 @@ def _claude_interpret_headline(ticker, sector, title, summary):
             "  score: -1.0 to +1.0 (Lynch-weighted: a 'strong earnings beat' is huge for a stalwart, modest for a fast grower)\n"
             "  durability: one of \"oneTime\", \"stage1\", \"terminal\"\n"
             "  confidence: one of \"low\", \"med\", \"high\"\n"
-            "  reason: under 60 characters, Lynch-flavored (e.g. 'PEG <1, insider buying' or 'cyclical near peak')\n"
+            "  reason: under 60 characters, Lynch-flavored (e.g. 'PEG <1, insider buying' or 'cyclical near peak'). No em-dashes; use commas.\n"
             "If the headline is press-release filler, hot-stock hype, or unrelated, return score near 0 and confidence=low."
         )
         body = {
@@ -831,12 +830,12 @@ def _market_epoch():
     trading days.  Weekends and pre-open weekday hours defer to the most
     recent close, so the same cached verdict serves through the weekend.
     Holidays produce a slightly-off label but the cache behavior is still
-    correct — the epoch persists until 9:30 of the next trading-day."""
+    correct, the epoch persists until 9:30 of the next trading-day."""
     try:
         from zoneinfo import ZoneInfo
         now = datetime.now(ZoneInfo("America/New_York"))
     except Exception:
-        # zoneinfo missing on some minimal containers — UTC-5 is a fine
+        # zoneinfo missing on some minimal containers, UTC-5 is a fine
         # approximation; we only need stability within a 6.5-hour window.
         now = datetime.utcnow() - timedelta(hours=5)
     wd  = now.weekday()                   # 0=Mon, 6=Sun
@@ -880,12 +879,12 @@ def _market_epoch_label(epoch):
 # AI-adjusted ("VALUS") IV that renders alongside the deterministic DCF IV.
 # Strategic-asset narrative is fed in explicitly so Haiku does NOT issue a
 # distress verdict on a CHIPS-Act semi or a defense prime just because near-
-# term FCF is weak — the sovereign backstop is part of the thesis.
+# term FCF is weak, the sovereign backstop is part of the thesis.
 _LYNCH_CACHE = {}
-_LYNCH_CACHE_TTL = 5 * 24 * 3600   # 5 days — must cover weekend (Fri-close → Mon-open ~ 66h)
+_LYNCH_CACHE_TTL = 5 * 24 * 3600   # 5 days, must cover weekend (Fri-close → Mon-open ~ 66h)
 
 # When Anthropic returns 429/529, we set this to a future timestamp and skip
-# the API entirely until then — the verdict falls back to DCF facts so the
+# the API entirely until then, the verdict falls back to DCF facts so the
 # page stays fast and we don't burn the rate limit retrying every request.
 _ANTHROPIC_COOLDOWN_UNTIL = 0.0
 
@@ -898,7 +897,7 @@ _ANTHROPIC_COOLDOWN_UNTIL = 0.0
 # for the product.  So we translate every internal token to a neutral
 # *valuation assessment* before it ever leaves the server or hits the cache.
 # The raw token is preserved as `verdict_key` purely so the frontend can pick
-# a matching color — it is never shown to the user as a label.
+# a matching color, it is never shown to the user as a label.
 _VERDICT_DISPLAY = {
     "Buy":        "Undervalued",
     "Accumulate": "Modestly Undervalued",
@@ -928,14 +927,14 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key or not ticker:
         if not api_key:
-            print("[valus] lynch: ANTHROPIC_API_KEY not set in this runtime — "
+            print("[valus] lynch: ANTHROPIC_API_KEY not set in this runtime, "
                   "using DCF fallback verdict")
         return None
-    # Respect an active cooldown after a recent 429/529 — skip the call.
+    # Respect an active cooldown after a recent 429/529, skip the call.
     if time.time() < _ANTHROPIC_COOLDOWN_UNTIL:
         return None
 
-    # Cache bucket — re-key only at the next market open (9:30 ET) or close
+    # Cache bucket, re-key only at the next market open (9:30 ET) or close
     # (4:00 ET) on a trading day.  Same epoch persists through the weekend.
     # Within an epoch, the verdict is frozen so live-price ticks don't burn
     # API credits or cause the Lynch card to flap.
@@ -958,7 +957,7 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         except Exception:
             pass
 
-    # Compact the inputs so the prompt stays small — Haiku is cheap but the
+    # Compact the inputs so the prompt stays small, Haiku is cheap but the
     # Anthropic JSON-mode parser is more reliable on focused context.
     qm_lines = []
     for m in (quality_metrics or [])[:6]:
@@ -981,12 +980,12 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
 
     if strategic_info and strategic_info.get("is_strategic"):
         strat_block = (
-            f"YES — {strategic_info.get('strategic_label')}\n"
+            f"YES, {strategic_info.get('strategic_label')}\n"
             f"  Reason: {strategic_info.get('strategic_reason')}\n"
             f"  Sovereign capital backstop applies (CHIPS Act grants, DPA Title III\n"
             f"  contracts, energy-sovereignty PPAs, or direct US government equity).\n"
             f"  This is a HARD FLOOR on the verdict: NEVER Avoid, NEVER Watch on\n"
-            f"  this ticker — the floor is Hold.  Treat near-term FCF weakness as\n"
+            f"  this ticker, the floor is Hold.  Treat near-term FCF weakness as\n"
             f"  transitory and LEAD the bull case with the backstop, not bury it."
         )
     else:
@@ -1018,49 +1017,49 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         prompt = (
             "You are a buyside analyst trained in Peter Lynch's method from "
             "One Up On Wall Street.  Issue ONE verdict on this stock from the "
-            "snapshot below.  Write like Lynch — short plain sentences, no "
+            "snapshot below.  Write like Lynch, short plain sentences, no "
             "sell-side jargon, blunt where the numbers are blunt.\n\n"
-            "LYNCH'S SIX CATEGORIES — pick the one that fits best:\n"
-            "  slowGrower  — large, mature, low single-digit growth, dividend.\n"
-            "  stalwart    — multibillion, 10–12% growth, recession-resilient.\n"
-            "  fastGrower  — small/aggressive 20%+ growth, tenbagger territory.\n"
-            "  cyclical    — earnings rise/fall with macro (autos, airlines, semis).\n"
-            "  turnaround  — battered names that may rebound.\n"
-            "  assetPlay   — hidden assets (real estate, cash, brand) understated.\n\n"
+            "LYNCH'S SIX CATEGORIES, pick the one that fits best:\n"
+            "  slowGrower, large, mature, low single-digit growth, dividend.\n"
+            "  stalwart, multibillion, 10-12% growth, recession-resilient.\n"
+            "  fastGrower, small/aggressive 20%+ growth, tenbagger territory.\n"
+            "  cyclical, earnings rise/fall with macro (autos, airlines, semis).\n"
+            "  turnaround, battered names that may rebound.\n"
+            "  assetPlay, hidden assets (real estate, cash, brand) understated.\n\n"
             "LYNCH HEURISTICS (use the numerics, don't paraphrase):\n"
             "  • PEG ≤ 0.5 with rising earnings → strong; PEG ≥ 1.5 → trim regardless of story.\n"
             "  • FastGrower needs ≥20% revenue growth AND debt/equity < 0.5.\n"
-            "    Debt-fueled growth is the #1 trap — call it out.\n"
+            "    Debt-fueled growth is the #1 trap, call it out.\n"
             "  • Cyclical at peak margins + bullish headline = sell signal, not buy.\n"
-            "  • Stalwarts realistically deliver 30–50% over 1–2 years, not 10x.\n"
+            "  • Stalwarts realistically deliver 30-50% over 1-2 years, not 10x.\n"
             "  • Turnaround thesis is invalid without ≥18 months of cash runway.\n"
             "  • Diworsification, hot-stock hype, analyst chase = red flags.\n\n"
             "STRATEGIC BACKSTOP RULE (critical):\n"
             f"{strat_block}\n\n"
-            "REGIME RULE (critical — read this carefully):\n"
+            "REGIME RULE (critical, read this carefully):\n"
             "  The TAPE block tells you what the stock is actually doing.\n"
             "  When tape and fundamentals disagree, NAME THE DISAGREEMENT.  Do\n"
             "  not parrot the IV when the tape says something else is going on.\n"
             "  Apply the regime hint as follows:\n\n"
-            "    momentum_runup   — Stock is melting up on flow, not earnings.\n"
+            "    momentum_runup, Stock is melting up on flow, not earnings.\n"
             "                       Lead the thesis by NAMING the move\n"
             "                       ('momentum melt-up', 'FOMO bid', 'AI-themed\n"
             "                       chase'). State separately what the\n"
             "                       fundamentals say.  DO NOT issue Avoid based\n"
-            "                       on IV alone — you can't time tops.  Verdict\n"
+            "                       on IV alone, you can't time tops.  Verdict\n"
             "                       caps at Hold or Watch.  Never Buy a parabola.\n\n"
-            "    squeeze_risk     — High short %, volume spike.  Tape is being\n"
+            "    squeeze_risk, High short %, volume spike.  Tape is being\n"
             "                       moved by positioning, not fundamentals.\n"
             "                       Verdict caps at Hold or Watch.  Refuse a\n"
             "                       decisive call and say so plainly.\n\n"
-            "    post_runup_pullback — Big 6-month move, recent pullback.  Easy\n"
+            "    post_runup_pullback, Big 6-month move, recent pullback.  Easy\n"
             "                       money is gone but the regime change may be\n"
             "                       real.  Hold or Accumulate based on quality.\n\n"
-            "    broken           — Down hard, near 52w low.  If quality metrics\n"
+            "    broken, Down hard, near 52w low.  If quality metrics\n"
             "                       are intact, this is Lynch turnaround\n"
-            "                       territory — say so explicitly and check the\n"
+            "                       territory, say so explicitly and check the\n"
             "                       cash-runway rule above.\n\n"
-            "    stable           — Judge normally on DCF + quality.\n\n"
+            "    stable, Judge normally on DCF + quality.\n\n"
             "  HONESTY RULE: When the tape contradicts the DCF, the thesis MUST\n"
             "  acknowledge it.  No glossing.  Better to be a useful skeptic than\n"
             "  a confidently-wrong machine.\n\n"
@@ -1089,10 +1088,12 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
 
         instructions = (
             "Return ONLY a single-line JSON object with these keys (no prose):\n"
+            "  In all text fields, do NOT use em-dashes or en-dashes; use commas\n"
+            "  or periods instead. Keep wording plain and easy to read.\n"
             "  category: one of slowGrower|stalwart|fastGrower|cyclical|turnaround|assetPlay\n"
             "  verdict:  one of Buy|Accumulate|Hold|Watch|Avoid\n"
             "  thesis:   <= 240 chars, plain English, Lynch-flavored.  DESCRIBE\n"
-            "            the valuation and the business — do NOT issue direct\n"
+            "            the valuation and the business, do NOT issue direct\n"
             "            commands to buy, sell, or hold.  This is educational\n"
             "            analysis, not investment advice.\n"
             "  bull_points: array of 2-3 strings (each <= 70 chars)\n"
@@ -1110,9 +1111,9 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
             "    the DCF growth rate doesn't capture (HBM ramp, AI cycle, foundry\n"
             "    fill).  Negative wacc_delta = sovereign capital lowers cost of\n"
             "    equity (CHIPS Act, gov't equity stake, DPA-protected revenue).\n"
-            "    Use zeros when no edge exists — do NOT pad. Stay inside the bounds.\n"
+            "    Use zeros when no edge exists, do NOT pad. Stay inside the bounds.\n"
             "Be honest.  If numbers are weak AND no backstop applies AND regime is\n"
-            "stable, say Avoid.  If a backstop applies, the verdict floor is HOLD —\n"
+            "stable, say Avoid.  If a backstop applies, the verdict floor is HOLD, \n"
             "NEVER Avoid, NEVER Watch on a backstopped name.  Lead the bull case\n"
             "with the backstop.  If regime is momentum_runup or squeeze_risk, cap\n"
             "verdict at Hold/Watch and lead with what the tape is doing.\n"
@@ -1127,7 +1128,7 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         # 429 (rate limit) / 529 (overloaded) resilience: retry once after a
         # short backoff, and if it still fails set a global cooldown so we
         # stop hammering Anthropic (and stop adding latency to every analyze)
-        # for a few minutes — the card just shows the DCF fallback meanwhile.
+        # for a few minutes, the card just shows the DCF fallback meanwhile.
         resp = None
         for _attempt in range(2):
             resp = requests.post(
@@ -1146,10 +1147,10 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         if resp.status_code in (429, 529):
             _ANTHROPIC_COOLDOWN_UNTIL = time.time() + 300   # 5-min cooldown
             print(f"[valus] lynch {ticker}: Anthropic HTTP {resp.status_code} "
-                  f"(rate-limit/overloaded) — backing off 5 min. {resp.text[:200]}")
+                  f"(rate-limit/overloaded), backing off 5 min. {resp.text[:200]}")
             return None
         if resp.status_code != 200:
-            print(f"[valus] lynch {ticker}: Anthropic HTTP {resp.status_code} — "
+            print(f"[valus] lynch {ticker}: Anthropic HTTP {resp.status_code}, "
                   f"{resp.text[:300]}")
             return None
         data = resp.json()
@@ -1157,10 +1158,10 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         for block in data.get("content", []):
             if block.get("type") == "text":
                 txt += block.get("text", "")
-        # Match the outermost JSON object — the model occasionally wraps in prose
+        # Match the outermost JSON object, the model occasionally wraps in prose
         m = re.search(r"\{.*\}", txt, re.DOTALL)
         if not m:
-            print(f"[valus] lynch {ticker}: no JSON object in model reply — "
+            print(f"[valus] lynch {ticker}: no JSON object in model reply, "
                   f"{txt[:200]!r}")
             return None
         import json as _json_loads
@@ -1199,7 +1200,7 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
 
         # Strategic-backstop floor: sovereign capital makes failure
         # off-the-table for these names, so Avoid/Watch is never the right
-        # call.  Floor at Hold.  Does NOT override Buy/Accumulate — only
+        # call.  Floor at Hold.  Does NOT override Buy/Accumulate, only
         # clamps the downside.
         is_backstopped = bool(strategic_info and strategic_info.get("is_strategic"))
         if is_backstopped and verdict_final in ("Avoid", "Watch"):
@@ -1229,7 +1230,7 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
             if isinstance(raw_tweaks, dict):
                 g = float(raw_tweaks.get("growth_delta_pp") or 0.0)
                 w = float(raw_tweaks.get("wacc_delta_pp") or 0.0)
-                # Hard clamp to the prompted bounds — the model occasionally
+                # Hard clamp to the prompted bounds, the model occasionally
                 # overshoots, and these dials feed the math directly.
                 g = max(-3.0, min(3.0, g))
                 w = max(-1.0, min(1.0, w))
@@ -1268,7 +1269,7 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         # Most often a 10s requests timeout on a cold lambda, or a JSON
         # decode error. Logged so the cause is visible in the Vercel logs
         # instead of silently dropping to the DCF fallback.
-        print(f"[valus] lynch {ticker}: verdict generation failed — "
+        print(f"[valus] lynch {ticker}: verdict generation failed, "
               f"{type(e).__name__}: {str(e)[:200]}")
         return None
 
@@ -1277,7 +1278,7 @@ def _lynch_fallback_verdict(ticker, sector, mos, strategic_info,
                             regime, confidence_weaknesses):
     """Builds a Lynch-verdict-shaped dict from DCF + strategic facts only.
     Used when ANTHROPIC_API_KEY is missing, Claude is unreachable, or the
-    JSON parse fails — so the Lynch card never silently disappears."""
+    JSON parse fails, so the Lynch card never silently disappears."""
     is_strategic = bool(strategic_info and strategic_info.get("is_strategic"))
     regime = regime or "stable"
 
@@ -1346,7 +1347,7 @@ def _score_headline(title: str, summary: str, ticker: str, sector: str, industry
 
     ai_budget: optional mutable [remaining] counter shared across one analysis.
     The Claude headline interpreter only fires while budget remains, capping
-    AI calls per analyze (cost control — see HEADLINE_AI_BUDGET). When None,
+    AI calls per analyze (cost control, see HEADLINE_AI_BUDGET). When None,
     AI is unbounded (legacy behavior).
     score:        [-1.0, +1.0] aggregate signal
     durability:   "oneTime" | "stage1" | "terminal"
@@ -1420,22 +1421,22 @@ def _score_headline(title: str, summary: str, ticker: str, sector: str, industry
     # ── Optional Claude API tie-breaker for ambiguous scores ────────────
     # When the heuristic lands in the ambiguous band [-0.2, +0.2] AND no
     # keyword bucket fired, ask Claude to interpret the headline directly.
-    # This is the "model decides on its own" path — turns generic headlines
+    # This is the "model decides on its own" path, turns generic headlines
     # into structured signal instead of dropping them on the floor.
     claude_used = False
     claude_reason = None
     claude_overrode = False
     claude_category = None
     # Backstop tickers (CHIPS-Act semis, defense primes, energy sovereignty)
-    # get the AI on EVERY headline — sovereign-capital tickers have catalysts
+    # get the AI on EVERY headline, sovereign-capital tickers have catalysts
     # the keyword heuristic was never tuned for (HBM tape-out, DPA Title III
     # order, Treasury filing), so we'd rather pay $0.0005/headline than drop
     # a real signal.  Per-headline cache (24h) keeps cost bounded.
     # AI is gated by the shared per-analysis budget. (We removed the old
-    # "run AI on EVERY headline for backstop tickers" rule — that was the main
+    # "run AI on EVERY headline for backstop tickers" rule, that was the main
     # cost multiplier, firing a Claude call per news item on strategic names.)
     _ai_ok = (ai_budget is None) or (ai_budget[0] > 0)
-    # Path 1 — ambiguous band: heuristic gave nothing useful, let Claude decide.
+    # Path 1, ambiguous band: heuristic gave nothing useful, let Claude decide.
     if _ai_ok and (-0.2 <= score <= 0.2 and not matched):
         if ai_budget is not None: ai_budget[0] -= 1
         ai = _claude_interpret_headline(ticker, sector, title, summary)
@@ -1449,9 +1450,9 @@ def _score_headline(title: str, summary: str, ticker: str, sector: str, industry
             claude_reason = ai.get("reason")
             claude_category = ai.get("category")
             matched.append("claude")
-    # Path 2 — high-stakes second opinion: heuristic is confidently strong on a
+    # Path 2, high-stakes second opinion: heuristic is confidently strong on a
     # durable tag; ask Claude to sanity-check.  Only override if Claude returns
-    # high-confidence opposite sign — catches false positives like "Tesla recalls
+    # high-confidence opposite sign, catches false positives like "Tesla recalls
     # 2 vehicles" being scored as a major risk.
     elif _ai_ok and abs(score) >= 0.5 and durability in ("stage1", "terminal"):
         if ai_budget is not None: ai_budget[0] -= 1
@@ -1488,11 +1489,11 @@ def get_catalyst_insights(ticker: str, info: dict, stock) -> dict:
     Discovery Layer: scan recent news (yfinance) + SEC 8-K filings for catalysts and risks.
 
     Returns:
-        insights          – up to 3 bullet strings for the Live Analyst Notes box
-        momentum_premium  – 0.05–0.10 multiplier if strong positive catalyst found (else 0)
-        wacc_risk_add     – 0.01 if a material risk keyword found (else 0)
-        has_positive_catalyst / has_material_risk – booleans for UI badges
-        catalyst_labels / risk_labels – short strings describing what triggered the flag
+        insights, up to 3 bullet strings for the Live Analyst Notes box
+        momentum_premium, 0.05-0.10 multiplier if strong positive catalyst found (else 0)
+        wacc_risk_add, 0.01 if a material risk keyword found (else 0)
+        has_positive_catalyst / has_material_risk, booleans for UI badges
+        catalyst_labels / risk_labels, short strings describing what triggered the flag
     """
     now = time.time()
     if ticker in _catalyst_cache:
@@ -1512,7 +1513,7 @@ def get_catalyst_insights(ticker: str, info: dict, stock) -> dict:
     has_risk          = False
     catalyst_labels   = []
     risk_labels       = []
-    # Policy-signal accumulators — distinct from generic momentum/risk so
+    # Policy-signal accumulators, distinct from generic momentum/risk so
     # the UI can present "Policy Tailwind" as its own chip.
     policy_tailwind_labels = []
     policy_headwind_labels = []
@@ -1563,7 +1564,7 @@ def get_catalyst_insights(ticker: str, info: dict, stock) -> dict:
             is_strong = any(kw in text for kw in _CATALYST_STRONG)
             is_mod    = any(kw in text for kw in _CATALYST_MODERATE)
             is_risk   = any(kw in text for kw in _RISK_KEYWORDS)
-            # Policy detection — disambiguate "export control" so a *win*
+            # Policy detection, disambiguate "export control" so a *win*
             # against a competitor reads as tailwind, not headwind.
             is_policy_tw = any(kw in text for kw in _POLICY_TAILWIND_KEYWORDS)
             is_policy_hw = any(kw in text for kw in _POLICY_HEADWIND_KEYWORDS) and not (
@@ -1713,7 +1714,7 @@ def get_catalyst_insights(ticker: str, info: dict, stock) -> dict:
         "has_material_risk":     has_risk,
         "catalyst_labels":       catalyst_labels[:2],
         "risk_labels":           risk_labels[:2],
-        # Policy signals — separate from generic catalyst/risk so the UI
+        # Policy signals, separate from generic catalyst/risk so the UI
         # can show them as their own chips with sovereign-capital framing.
         "policy_tailwind":         bool(policy_tailwind_labels),
         "policy_tailwind_labels":  policy_tailwind_labels[:3],
@@ -1762,7 +1763,7 @@ def _analyst_divergence_note(iv, analyst_target, price, rev_growth_pct, forward_
                 "than the DCF growth-rate path implies"
             )
         text = (
-            f"Analyst consensus (${at:.2f}) is {abs(div):.0f}% above VALUS model IV (${iv:.2f}) — "
+            f"Analyst consensus (${at:.2f}) is {abs(div):.0f}% above VALUS model IV (${iv:.2f}), "
             + "; ".join(reasons) + "."
         )
         return {"type": "info", "text": text}
@@ -1770,7 +1771,7 @@ def _analyst_divergence_note(iv, analyst_target, price, rev_growth_pct, forward_
         # Model is materially above consensus
         text = (
             f"VALUS model IV (${iv:.2f}) exceeds analyst consensus (${at:.2f}) "
-            f"by {abs(div):.0f}% — DCF is highly sensitive to growth-rate assumptions. "
+            f"by {abs(div):.0f}%, DCF is highly sensitive to growth-rate assumptions. "
             "Verify Stage 1 growth and WACC inputs against updated guidance."
         )
         return {"type": "info", "text": text}
@@ -1795,9 +1796,9 @@ def _detect_structural_transformer(info: dict, sector: str, industry: str,
 
     Returns:
       (is_transformer: bool, capex_abs: float, capex_to_rev: float, addback_rate: float)
-      capex_abs     – absolute CapEx in reporting currency (positive)
-      capex_to_rev  – CapEx as fraction of revenue (e.g. 0.087 for Tesla)
-      addback_rate  – fraction of CapEx treated as growth investment (0.50 or 0.20)
+      capex_abs, absolute CapEx in reporting currency (positive)
+      capex_to_rev, CapEx as fraction of revenue (e.g. 0.087 for Tesla)
+      addback_rate, fraction of CapEx treated as growth investment (0.50 or 0.20)
     """
     s   = (sector   or "").lower()
     ind = (industry or "").lower()
@@ -1979,7 +1980,7 @@ def calc_multiples_val(info, sector, industry, fx_rate, ebitda_ttm=None, moat_pr
     if override_ev_ebitda is not None:
         base_ev = override_ev_ebitda
 
-    # Apply moat expansion — 20% above sector median for backbone companies
+    # Apply moat expansion, 20% above sector median for backbone companies
     fpe_mult      = round(base_fpe * moat_premium, 1) if base_fpe else None
     ev_ebitda_mult = round(base_ev  * moat_premium, 1) if base_ev  else None
     premium_tag   = f" +{round((moat_premium-1)*100):.0f}% moat" if moat_premium > 1.0 else ""
@@ -2012,7 +2013,7 @@ def calc_multiples_val(info, sector, industry, fx_rate, ebitda_ttm=None, moat_pr
 # Promotes the previous one-sided post-DCF clamp into a true bounded envelope:
 # floor at 5% of price (or $0.01), ceiling at 6× price OR 2.5× analyst target,
 # whichever is higher.  Catches both the "19,000% MOS" upper-tail nonsense and
-# the "IV = 0.01 on a healthy stock" lower-tail nonsense — a single function
+# the "IV = 0.01 on a healthy stock" lower-tail nonsense, a single function
 # every IV-generating path goes through, eliminating bypass routes.
 def _clamp_iv(iv, price, analyst_target=None):
     """
@@ -2035,27 +2036,27 @@ def _clamp_iv(iv, price, analyst_target=None):
 # response will fall back to price itself + a "data unavailable" note.
 #
 # Methods (highest preference first):
-#   1. Analyst Target — when analyst consensus exists, use it.  Defensible
+#   1. Analyst Target, when analyst consensus exists, use it.  Defensible
 #      because it represents real coverage opinion even if our model can't run.
-#   2. Cash-Only Distress Proxy — (cash - debt) / shares.  For deeply broken
+#   2. Cash-Only Distress Proxy, (cash - debt) / shares.  For deeply broken
 #      companies this is a liquidation-style anchor.
-#   3. Distressed P/B — 0.5× book value per share.  For banks and negative-
+#   3. Distressed P/B, 0.5× book value per share.  For banks and negative-
 #      equity names where book is the most stable available signal.
-#   4. P/Revenue — 1.0× sector-median EV/Revenue × TTM revenue / shares.
+#   4. P/Revenue, 1.0× sector-median EV/Revenue × TTM revenue / shares.
 #      Last resort for REITs / ADRs / BDCs where FCF and earnings both fail.
 def _emergency_iv(info, fx_rate, sector, industry, analyst_target_price=None):
     """
-    Returns (iv, label, confidence) — confidence always "low".
+    Returns (iv, label, confidence), confidence always "low".
     iv is clamped only at the call site via _clamp_iv (we don't know price here).
     Returns (None, None, None) if absolutely no signal can be produced.
     """
     shares = safe(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"), 0) or 0
 
-    # 1) Analyst target — most defensible last-resort
+    # 1) Analyst target, most defensible last-resort
     if analyst_target_price and analyst_target_price > 0:
         return float(analyst_target_price), "Analyst Target (last-resort)", "low"
 
-    # 2) Cash-only distress proxy — useful when book is impaired
+    # 2) Cash-only distress proxy, useful when book is impaired
     cash = (safe(info.get("totalCash"), 0) or 0) * fx_rate
     debt = (safe(info.get("totalDebt"), 0) or 0) * fx_rate
     if shares > 0:
@@ -2063,7 +2064,7 @@ def _emergency_iv(info, fx_rate, sector, industry, analyst_target_price=None):
         if cash_only > 0.01:
             return round(cash_only, 2), "Cash-Only (distress proxy)", "low"
 
-    # 3) Distressed P/B — for banks / neg-equity names
+    # 3) Distressed P/B, for banks / neg-equity names
     book_per_share = safe(info.get("bookValue"))
     if book_per_share and book_per_share > 0:
         # 0.4× for banks (more conservative), 0.5× for everything else
@@ -2073,11 +2074,11 @@ def _emergency_iv(info, fx_rate, sector, industry, analyst_target_price=None):
         mult = 0.4 if is_bank else 0.5
         return round(book_per_share * mult, 2), "Distressed P/B", "low"
 
-    # 4) Price/Revenue floor — sector median EV/Revenue × TTM revenue / shares
+    # 4) Price/Revenue floor, sector median EV/Revenue × TTM revenue / shares
     revenue_ttm = safe(info.get("totalRevenue"))
     if revenue_ttm and revenue_ttm > 0 and shares > 0:
         rev_usd = revenue_ttm * fx_rate
-        # Crude sector EV/Revenue median table.  Conservative — these are
+        # Crude sector EV/Revenue median table.  Conservative, these are
         # floors, not targets.  Tech ~3x, Energy ~1x, Banks N/A.
         s_lower = (sector or "").lower()
         if "technology" in s_lower or "communication" in s_lower:
@@ -2126,12 +2127,12 @@ def _bear_floor_iv(info, sector, industry, fx_rate, ebitda_ttm=None):
 
 def _calc_dcf_confidence(info, sector, industry, fcf_series, dcf_available, valuation_method):
     """
-    DCF Reliability Score — rates how trustworthy the model output is for this security.
+    DCF Reliability Score, rates how trustworthy the model output is for this security.
 
     Factors penalised:
       • FCF inconsistency (negative years in recent history)
-      • Thin FCF margin (< 5%) — small assumption changes swing IV wildly
-      • High financial leverage (D/E > 150%) — debt amplifies model error
+      • Thin FCF margin (< 5%), small assumption changes swing IV wildly
+      • High financial leverage (D/E > 150%), debt amplifies model error
       • Cyclical / commodity sectors with unpredictable cash flows
       • Shrinking revenue base
 
@@ -2143,16 +2144,16 @@ def _calc_dcf_confidence(info, sector, industry, fcf_series, dcf_available, valu
 
     # ── Not applicable ───────────────────────────────────────────────────────
     if valuation_method in ("banking", "biotech"):
-        reason = ("Banks and financial companies are valued via P/B + P/E — "
+        reason = ("Banks and financial companies are valued via P/B + P/E, "
                   "DCF is structurally inappropriate (interest is operating cost)."
                   if valuation_method == "banking"
-                  else "Biotech uses EV/Revenue + pipeline analysis — "
+                  else "Biotech uses EV/Revenue + pipeline analysis, "
                        "FCF-based DCF doesn't capture pipeline optionality.")
         return "not_applicable", "Specialist Method", [], [reason]
 
     if not dcf_available:
         return "not_applicable", "DCF N/A", [],  [
-            "No positive free cash flow — DCF intrinsic value cannot be computed. "
+            "No positive free cash flow, DCF intrinsic value cannot be computed. "
             "Multiples-based valuation is used instead."
         ]
 
@@ -2169,17 +2170,17 @@ def _calc_dcf_confidence(info, sector, industry, fcf_series, dcf_available, valu
         if ratio < 0.50:
             score -= 35
             warnings.append(
-                f"FCF negative in {n_neg} of last {n_tot} years — "
+                f"FCF negative in {n_neg} of last {n_tot} years, "
                 "model is extrapolating from an unstable earnings base"
             )
         elif ratio < 0.80:
             score -= 15
             warnings.append(
                 f"FCF inconsistent ({n_neg} negative year{'s' if n_neg > 1 else ''} "
-                f"in last {n_tot}) — projections carry elevated uncertainty"
+                f"in last {n_tot}), projections carry elevated uncertainty"
             )
         else:
-            strengths.append(f"FCF positive in {n_pos}/{n_tot} years — consistent cash generation")
+            strengths.append(f"FCF positive in {n_pos}/{n_tot} years, consistent cash generation")
 
     # ── 2. FCF margin (thin = high IV sensitivity) ────────────────────────────
     rev_v = safe(info.get("totalRevenue"))
@@ -2189,13 +2190,13 @@ def _calc_dcf_confidence(info, sector, industry, fcf_series, dcf_available, valu
         if fcf_pct < 3:
             score -= 25
             warnings.append(
-                f"Thin FCF margin ({fcf_pct:.1f}%) — a 1pp change in cost assumptions "
+                f"Thin FCF margin ({fcf_pct:.1f}%), a 1pp change in cost assumptions "
                 "can move IV by 20%+ ; treat output as a range, not a point estimate"
             )
         elif fcf_pct < 8:
             score -= 10
             warnings.append(
-                f"Moderate FCF margin ({fcf_pct:.1f}%) — cost structure adds model sensitivity"
+                f"Moderate FCF margin ({fcf_pct:.1f}%), cost structure adds model sensitivity"
             )
         else:
             strengths.append(f"Strong FCF margin ({fcf_pct:.1f}%)")
@@ -2206,12 +2207,12 @@ def _calc_dcf_confidence(info, sector, industry, fcf_series, dcf_available, valu
         if de > 250:
             score -= 20
             warnings.append(
-                f"High leverage ({de/100:.1f}× D/E) — large interest obligations "
+                f"High leverage ({de/100:.1f}× D/E), large interest obligations "
                 "make FCF projections fragile; EV/EBITDA is often more reliable here"
             )
         elif de > 130:
             score -= 8
-            warnings.append(f"Above-average leverage ({de/100:.1f}× D/E) — monitor debt service")
+            warnings.append(f"Above-average leverage ({de/100:.1f}× D/E), monitor debt service")
         else:
             strengths.append(f"Conservative balance sheet ({de/100:.1f}× D/E)")
 
@@ -2225,13 +2226,13 @@ def _calc_dcf_confidence(info, sector, industry, fcf_series, dcf_available, valu
     elif any(x in ind for x in ["auto", "automobile", "vehicle"]):
         score -= 14
         warnings.append(
-            "Autos: cyclical demand + high CapEx intensity — "
+            "Autos: cyclical demand + high CapEx intensity, "
             "DCF terminal value is highly sensitive to assumed peak-cycle margins"
         )
     elif any(x in s + ind for x in ["oil", "gas", "coal", "metal", "mining"]):
         score -= 12
         warnings.append(
-            "Commodities: FCF is correlated with spot prices — "
+            "Commodities: FCF is correlated with spot prices, "
             "terminal value embeds commodity-price risk not visible in the model"
         )
 
@@ -2240,7 +2241,7 @@ def _calc_dcf_confidence(info, sector, industry, fcf_series, dcf_available, valu
     if rev_g is not None and rev_g < -0.05:
         score -= 15
         warnings.append(
-            f"Revenue declining {rev_g*100:.1f}% YoY — "
+            f"Revenue declining {rev_g*100:.1f}% YoY, "
             "growth assumptions may be overstated relative to recent trajectory"
         )
 
@@ -2258,13 +2259,13 @@ def _detect_moat(net_margin, revenue_growth, earnings_growth, fcf_margin, roe,
     """
     Four-path moat classifier.  All percentage inputs are already in % form (e.g. 20 = 20%).
 
-    Path A — High-Growth Backbone:      Net margin > 20%  AND  Revenue growth > 15%
-    Path B — Mature Cash Machine:       Net margin > 25%  AND  Earnings growth > 15%
-    Path C — Capital-Light Compounder:  Net margin > 20%  AND  FCF margin > 20%  AND  ROE > 25%
-    Path D — Platform Scale Economy:    Revenue > $200B   AND  Revenue growth > 8%
+    Path A, High-Growth Backbone:      Net margin > 20%  AND  Revenue growth > 15%
+    Path B, Mature Cash Machine:       Net margin > 25%  AND  Earnings growth > 15%
+    Path C, Capital-Light Compounder:  Net margin > 20%  AND  FCF margin > 20%  AND  ROE > 25%
+    Path D, Platform Scale Economy:    Revenue > $200B   AND  Revenue growth > 8%
                                         AND  FCF margin > 2%
               (catches mega-cap platform cos like AMZN whose blended margins are low
-               because they reinvest aggressively — AWS/Advertising drive hidden economics)
+               because they reinvest aggressively, AWS/Advertising drive hidden economics)
 
     Returns (is_high_moat: bool, path_label: str | None, reasons: list[str])
     """
@@ -2284,7 +2285,7 @@ def _detect_moat(net_margin, revenue_growth, earnings_growth, fcf_margin, roe,
     if nm > 20 and fm > 20 and roe_v > 25:
         return True, "Capital-Light Compounder", [
             f"Net margin {nm:.1f}%", f"FCF margin {fm:.1f}%", f"ROE {roe_v:.1f}%"]
-    # Path D: Platform Scale Economy — massive revenue with profitable FCF and solid growth.
+    # Path D: Platform Scale Economy, massive revenue with profitable FCF and solid growth.
     # Low blended margins don't tell the full story for platform companies that run
     # high-margin digital segments (cloud, advertising) alongside capital-intensive logistics.
     if rev_b > 200 and rg > 8 and fm > 2:
@@ -2302,21 +2303,21 @@ def _get_valuation_method(sector: str, industry: str) -> str:
     s   = (sector   or "").lower()
     ind = (industry or "").lower()
 
-    # Biotech / early-stage pharma — negative FCF, pipeline drives value
+    # Biotech / early-stage pharma, negative FCF, pipeline drives value
     if "biotech" in ind or "biotechnology" in ind:
         return "biotech"
     if "biopharmaceutical" in ind or ("pharmaceutical" in ind and "specialty" in ind):
         return "biotech"
 
-    # Asset-light payment networks — network-effect moats; DCF is correct here.
+    # Asset-light payment networks, network-effect moats; DCF is correct here.
     # Must be checked BEFORE the broad "financial" catch-all below, because yfinance
     # puts Visa/Mastercard/AXP in "Financial Services / Credit Services" or
-    # "Financial Services / Payment Networks" — sectors that would otherwise fall into banking.
+    # "Financial Services / Payment Networks", sectors that would otherwise fall into banking.
     _PAYMENT_INDUSTRIES = ["credit service", "payment network", "payment processing"]
     if any(x in ind for x in _PAYMENT_INDUSTRIES):
         return "dcf"
 
-    # High-growth fintech / brokerage / capital markets — these companies earn from
+    # High-growth fintech / brokerage / capital markets, these companies earn from
     # transaction fees, AUM growth, and product expansion, NOT net interest margin.
     # P/B banking model systematically undervalues them; route to DCF instead.
     # Examples: Robinhood (HOOD), SoFi (SOFI), Coinbase (COIN), Affirm (AFRM),
@@ -2330,14 +2331,14 @@ def _get_valuation_method(sector: str, industry: str) -> str:
     if any(x in ind for x in _FINTECH_GROWTH_INDUSTRIES):
         return "dcf"
 
-    # Banking / Financial services — interest is operating cost; DCF structurally wrong
+    # Banking / Financial services, interest is operating cost; DCF structurally wrong
     if any(x in s for x in ["financial", "bank"]):
         return "banking"
     if any(x in ind for x in ["bank", "insurance",
                                "investment bank", "thrift", "mortgage", "diversified financials"]):
         return "banking"
 
-    # Energy / Mining / Commodities — finite reserves cap terminal growth at 1.5%
+    # Energy / Mining / Commodities, finite reserves cap terminal growth at 1.5%
     if ("energy" in s and "renewable" not in ind) or "mining" in ind or "metals" in ind:
         return "dcf_energy"
 
@@ -2381,7 +2382,7 @@ def calc_banking_val(info, fx_rate):
 def calc_biotech_val(info, fx_rate, rev_ttm=None, analyst_target=None):
     """
     EV/Revenue-based valuation for biotech / early-stage pharma.
-    Multiple range: 10x–15x (12x median). R&D > 30% of revenue adds +10% pipeline premium.
+    Multiple range: 10x, 15x (12x median). R&D > 30% of revenue adds +10% pipeline premium.
     Blends 50/50 with analyst consensus price target when available.
     Returns (value_per_share, method_label) or (None, None).
     """
@@ -2563,7 +2564,7 @@ def _qual_score_low(val, good, great):
 
 def _build_tape_signals(info, hist):
     """
-    Tape & float signals for the Lynch verdict — recent returns, distance
+    Tape & float signals for the Lynch verdict, recent returns, distance
     from 52w high/low, volume anomaly, short/float profile, and a regime
     classification. All inputs already in hand at the /ticker call site
     (yfinance info dict + 5y daily price history DataFrame). No new API.
@@ -2573,7 +2574,7 @@ def _build_tape_signals(info, hist):
     rather than emit "n/a" placeholders.
 
     Regime ∈ {momentum_runup, squeeze_risk, post_runup_pullback,
-              broken, stable}.  This is a hint — the LLM still gets the raw
+              broken, stable}.  This is a hint, the LLM still gets the raw
     numbers and is expected to reason.
     """
     if info is None and (hist is None or getattr(hist, "empty", True)):
@@ -2751,15 +2752,15 @@ def _build_quality_metrics(info, base_fcf, revenue_ttm):
 _QUAL_TIER_POINTS = {"elite": 100, "strong": 75, "ok": 50, "weak": 20}
 
 def _composite_quality_score(metrics):
-    """Single 0–100 quality score derived from the per-metric tier ladder.
+    """Single 0-100 quality score derived from the per-metric tier ladder.
 
     Weights:
-      ROE          0.20    — capital efficiency, the canonical Buffett metric
-      ROA          0.10    — debt-corrected return signal
-      Op Margin    0.20    — operating profitability
-      Net Margin   0.15    — bottom-line efficiency
-      FCF Margin   0.20    — cash conversion (harder to fake than EPS)
-      Debt/Equity  0.15    — leverage; low values get full credit
+      ROE          0.20, capital efficiency, the canonical Buffett metric
+      ROA          0.10, debt-corrected return signal
+      Op Margin    0.20, operating profitability
+      Net Margin   0.15, bottom-line efficiency
+      FCF Margin   0.20, cash conversion (harder to fake than EPS)
+      Debt/Equity  0.15, leverage; low values get full credit
 
     Grade thresholds match the per-metric tier ladder so the composite
     reads consistently with the individual chips.
@@ -2796,7 +2797,7 @@ def _composite_quality_score(metrics):
 def _moat_breakdown(net_margin_pct, rev_growth_pct, earn_growth_pct,
                     fcf_margin_pct, roe_pct, rev_ttm_bn):
     """Return all four moat categories with applies/why fields so the UI
-    can render checkmarks across the panel — not just the first match.
+    can render checkmarks across the panel, not just the first match.
 
     Inputs are the same percentage scalars `_detect_moat` consumes.
     Mirrors the existing thresholds so the composite "is_high_moat"
@@ -2814,33 +2815,33 @@ def _moat_breakdown(net_margin_pct, rev_growth_pct, earn_growth_pct,
             "key": "pricing_power",
             "label": "Pricing Power",
             "applies": (nm > 25),
-            "why": (f"Net margin {nm:.1f}% — keeps pricing despite competition."
+            "why": (f"Net margin {nm:.1f}%, keeps pricing despite competition."
                     if nm > 25
-                    else f"Net margin {nm:.1f}% — below the 25% pricing-power bar."),
+                    else f"Net margin {nm:.1f}%, below the 25% pricing-power bar."),
         },
         {
             "key": "switching_costs",
             "label": "Switching Costs",
             "applies": (nm > 20 and rg > 15),
-            "why": (f"Net margin {nm:.1f}% + revenue growth {rg:.1f}% — sticky customer base compounding."
+            "why": (f"Net margin {nm:.1f}% + revenue growth {rg:.1f}%, sticky customer base compounding."
                     if (nm > 20 and rg > 15)
-                    else f"Need >20% net margin and >15% revenue growth — current {nm:.1f}% / {rg:.1f}%."),
+                    else f"Need >20% net margin and >15% revenue growth, current {nm:.1f}% / {rg:.1f}%."),
         },
         {
             "key": "network_effects",
             "label": "Network Effects / Scale",
             "applies": (rb > 200 and rg > 8 and fm > 2),
-            "why": (f"${rb:.0f}B revenue at {rg:.1f}% growth + {fm:.1f}% FCF margin — platform scale flywheel."
+            "why": (f"${rb:.0f}B revenue at {rg:.1f}% growth + {fm:.1f}% FCF margin, platform scale flywheel."
                     if (rb > 200 and rg > 8 and fm > 2)
-                    else f"Need >$200B revenue + >8% growth + >2% FCF margin — current ${rb:.0f}B / {rg:.1f}% / {fm:.1f}%."),
+                    else f"Need >$200B revenue + >8% growth + >2% FCF margin, current ${rb:.0f}B / {rg:.1f}% / {fm:.1f}%."),
         },
         {
             "key": "cost_advantage",
             "label": "Cost Advantage / Capital-Light",
             "applies": (nm > 20 and fm > 20 and rv > 25),
-            "why": (f"Net margin {nm:.1f}% + FCF margin {fm:.1f}% + ROE {rv:.1f}% — capital-light compounder."
+            "why": (f"Net margin {nm:.1f}% + FCF margin {fm:.1f}% + ROE {rv:.1f}%, capital-light compounder."
                     if (nm > 20 and fm > 20 and rv > 25)
-                    else f"Need >20% net + >20% FCF + >25% ROE — current {nm:.1f}% / {fm:.1f}% / {rv:.1f}%."),
+                    else f"Need >20% net + >20% FCF + >25% ROE, current {nm:.1f}% / {fm:.1f}% / {rv:.1f}%."),
         },
     ]
     n_applies = sum(1 for c in cats if c["applies"])
@@ -2854,15 +2855,15 @@ def _moat_breakdown(net_margin_pct, rev_growth_pct, earn_growth_pct,
 def _sanity_check_vs_analyst(intrinsic_value, analyst_target, price):
     """Compare VALUS IV to Wall-Street consensus target.
 
-    Returns a structured payload the UI can render verbatim — alignment
+    Returns a structured payload the UI can render verbatim, alignment
     tier + gap percentage + a single-sentence reading.  None when either
     side is missing.
 
     Tiers:
-      aligned   — gap within ±10% (model and street agree)
-      below     — VALUS sees less upside than analysts (we're conservative)
-      above     — VALUS sees more upside than analysts (we're optimistic)
-      contrary  — model and analysts disagree on direction vs current price
+      aligned, gap within ±10% (model and street agree)
+      below, VALUS sees less upside than analysts (we're conservative)
+      above, VALUS sees more upside than analysts (we're optimistic)
+      contrary, model and analysts disagree on direction vs current price
     """
     if not intrinsic_value or not analyst_target or not price:
         return None
@@ -2890,20 +2891,20 @@ def _sanity_check_vs_analyst(intrinsic_value, analyst_target, price):
         label  = "Contrary to Wall Street"
         narrative = (f"VALUS sees fair value at ${iv:.2f} ({valus_mos:+.0f}% vs price); "
                      f"analysts target ${at:.2f} ({analyst_mos:+.0f}% vs price). "
-                     f"Model and consensus disagree on direction — worth a closer look.")
+                     f"Model and consensus disagree on direction, worth a closer look.")
     elif gap_pct > 0:
         tier   = "above"
         label  = "VALUS more bullish than consensus"
         narrative = (f"VALUS fair value ${iv:.2f} is {gap_pct:.0f}% above the analyst "
                      f"target ${at:.2f}. The model is more optimistic than the "
-                     f"street — usually because we credit a moat, sovereign backstop, "
+                     f"street, usually because we credit a moat, sovereign backstop, "
                      f"or growth runway analysts haven't priced in yet.")
     else:
         tier   = "below"
         label  = "VALUS more conservative than consensus"
         narrative = (f"VALUS fair value ${iv:.2f} is {abs(gap_pct):.0f}% below the analyst "
                      f"target ${at:.2f}. The model is more cautious than the "
-                     f"street — usually because we're not crediting a forward-EPS "
+                     f"street, usually because we're not crediting a forward-EPS "
                      f"spike, a transformative product cycle, or strategic re-rating "
                      f"that analysts are pricing in.")
 
@@ -2921,7 +2922,7 @@ def _sanity_check_vs_analyst(intrinsic_value, analyst_target, price):
 
 
 def _sector_wacc_band(sector: str, industry: str):
-    """Industry-standard WACC band for the given sector — surfaced so the
+    """Industry-standard WACC band for the given sector, surfaced so the
     user can sanity-check whether VALUS's computed WACC is in line with
     how real analysts discount this kind of business.
 
@@ -2931,37 +2932,37 @@ def _sector_wacc_band(sector: str, industry: str):
     ind = (industry or "").lower()
     if "biotech" in ind or "biotechnology" in ind:
         return {"sector_label": "Biotech", "low_pct": 12.0, "high_pct": 15.0,
-                "rationale": "High pipeline risk + binary clinical outcomes → 12–15%."}
+                "rationale": "High pipeline risk + binary clinical outcomes → 12-15%."}
     if "utilit" in s or "utilit" in ind:
         return {"sector_label": "Utilities", "low_pct": 5.0, "high_pct": 7.0,
-                "rationale": "Rate-base regulated cash flows + low equity beta → 5–7%."}
+                "rationale": "Rate-base regulated cash flows + low equity beta → 5-7%."}
     if "real estate" in s or "reit" in ind:
         return {"sector_label": "Real Estate / REIT", "low_pct": 6.0, "high_pct": 8.0,
-                "rationale": "Asset-backed rental cash flows → 6–8%."}
+                "rationale": "Asset-backed rental cash flows → 6-8%."}
     if "bank" in ind or "insurance" in ind:
         return {"sector_label": "Financials (banks)", "low_pct": 8.0, "high_pct": 11.0,
-                "rationale": "Cost of equity ≈ Tier-1 hurdle + regulatory capital → 8–11%."}
+                "rationale": "Cost of equity ≈ Tier-1 hurdle + regulatory capital → 8-11%."}
     if "energy" in s and "renewable" not in ind:
         return {"sector_label": "Energy / Oil & Gas", "low_pct": 9.0, "high_pct": 12.0,
-                "rationale": "Commodity cycle + reserves depletion → 9–12%."}
+                "rationale": "Commodity cycle + reserves depletion → 9-12%."}
     if "consumer staples" in s or "consumer defensive" in s:
         return {"sector_label": "Consumer Staples", "low_pct": 6.0, "high_pct": 8.0,
-                "rationale": "Recession-resistant brands + low beta → 6–8%."}
+                "rationale": "Recession-resistant brands + low beta → 6-8%."}
     if ("communication" in s or "media" in ind) and ("internet content" in ind or "interactive" in ind):
         return {"sector_label": "Internet / Media", "low_pct": 9.0, "high_pct": 12.0,
-                "rationale": "Platform monetization + ad-cycle exposure → 9–12%."}
+                "rationale": "Platform monetization + ad-cycle exposure → 9-12%."}
     if "technology" in s or "software" in ind or "semiconductor" in ind:
         return {"sector_label": "Technology / Software", "low_pct": 8.0, "high_pct": 12.0,
-                "rationale": "Higher growth + cyclical demand → 8–12%."}
+                "rationale": "Higher growth + cyclical demand → 8-12%."}
     if "industrial" in s or "aerospace" in ind or "defense" in ind:
         return {"sector_label": "Industrials", "low_pct": 8.0, "high_pct": 10.0,
-                "rationale": "Cyclical demand + multi-year backlogs → 8–10%."}
+                "rationale": "Cyclical demand + multi-year backlogs → 8-10%."}
     if "healthcare" in s and "biotech" not in ind:
         return {"sector_label": "Healthcare (ex-biotech)", "low_pct": 7.0, "high_pct": 10.0,
-                "rationale": "Stable demand + regulatory exposure → 7–10%."}
+                "rationale": "Stable demand + regulatory exposure → 7-10%."}
     # Default fall-back band.
     return {"sector_label": "Broad market", "low_pct": 8.0, "high_pct": 10.0,
-            "rationale": "Equity-market median WACC band → 8–10%."}
+            "rationale": "Equity-market median WACC band → 8-10%."}
 
 
 def _reverse_dcf_realism(implied_growth_pct, sector_ceiling_pct,
@@ -2969,10 +2970,10 @@ def _reverse_dcf_realism(implied_growth_pct, sector_ceiling_pct,
     """Verdict on whether the market-implied Stage-1 growth rate is realistic.
 
     Tiers (vs sector ceiling):
-      below      — market expects sub-ceiling growth (often: undervalued / pessimism)
-      in-line    — within 0–20% of the ceiling (priced for sector-typical)
-      stretched  — 20–40% above ceiling (aggressive)
-      unrealistic — >40% above ceiling, or > 25% absolute (almost always a miss)
+      below, market expects sub-ceiling growth (often: undervalued / pessimism)
+      in-line, within 0-20% of the ceiling (priced for sector-typical)
+      stretched, 20-40% above ceiling (aggressive)
+      unrealistic, >40% above ceiling, or > 25% absolute (almost always a miss)
     """
     if implied_growth_pct is None or sector_ceiling_pct is None:
         return None
@@ -2982,23 +2983,23 @@ def _reverse_dcf_realism(implied_growth_pct, sector_ceiling_pct,
 
     if ig <= 0:
         tier, label = "below", "Market expects decline"
-        narrative = (f"Market pricing implies negative growth of {ig:.1f}%/yr — "
+        narrative = (f"Market pricing implies negative growth of {ig:.1f}%/yr, "
                      "the price is consistent with a contracting business.")
     elif ig <= sc * 0.6:
         tier, label = "below", "Market expects below-trend growth"
-        narrative = (f"Market implies {ig:.1f}%/yr vs sector ceiling {sc:.0f}%/yr — "
+        narrative = (f"Market implies {ig:.1f}%/yr vs sector ceiling {sc:.0f}%/yr, "
                      f"meaningfully below {sec_lbl} norms.")
     elif ig <= sc * 1.2:
         tier, label = "in-line", "Market expects sector-typical growth"
-        narrative = (f"Market implies {ig:.1f}%/yr vs sector ceiling {sc:.0f}%/yr — "
+        narrative = (f"Market implies {ig:.1f}%/yr vs sector ceiling {sc:.0f}%/yr, "
                      f"squarely in {sec_lbl} norms.")
     elif ig <= sc * 1.4 or ig <= 25:
         tier, label = "stretched", "Market expects above-trend growth"
-        narrative = (f"Market implies {ig:.1f}%/yr vs sector ceiling {sc:.0f}%/yr — "
+        narrative = (f"Market implies {ig:.1f}%/yr vs sector ceiling {sc:.0f}%/yr, "
                      "aggressive but not impossible for a clear category leader.")
     else:
         tier, label = "unrealistic", "Market pricing assumes outlier growth"
-        narrative = (f"Market implies {ig:.1f}%/yr vs sector ceiling {sc:.0f}%/yr — "
+        narrative = (f"Market implies {ig:.1f}%/yr vs sector ceiling {sc:.0f}%/yr, "
                      "few companies sustain growth this far above their sector "
                      "ceiling for a full decade.")
 
@@ -3029,7 +3030,7 @@ def _buffett_checklist(info, quality_metrics, base_fcf, rev_ttm):
         "key": "roe", "label": "ROE > 15%",
         "value": (f"{roe*100:.1f}%" if roe is not None else None),
         "passes": (roe is not None and roe > 0.15),
-        "hint": "Capital efficiency — Buffett's first filter for a quality business.",
+        "hint": "Capital efficiency, Buffett's first filter for a quality business.",
     })
 
     # 2. Low debt (D/E < 1.0)
@@ -3039,7 +3040,7 @@ def _buffett_checklist(info, quality_metrics, base_fcf, rev_ttm):
         "key": "low_debt", "label": "Debt/Equity < 1.0",
         "value": (f"{de_ratio:.2f}x" if de_ratio is not None else None),
         "passes": (de_ratio is not None and de_ratio < 1.0),
-        "hint": "Conservative balance sheet — survives downturns.",
+        "hint": "Conservative balance sheet, survives downturns.",
     })
 
     # 3. Strong, consistent margins (op margin > 15%)
@@ -3048,7 +3049,7 @@ def _buffett_checklist(info, quality_metrics, base_fcf, rev_ttm):
         "key": "margins", "label": "Operating margin > 15%",
         "value": (f"{om*100:.1f}%" if om is not None else None),
         "passes": (om is not None and om > 0.15),
-        "hint": "Durable profitability — the kind that signals brand or moat.",
+        "hint": "Durable profitability, the kind that signals brand or moat.",
     })
 
     # 4. Cash conversion (FCF margin > 8%)
@@ -3059,19 +3060,19 @@ def _buffett_checklist(info, quality_metrics, base_fcf, rev_ttm):
         "key": "fcf_conversion", "label": "FCF margin > 8%",
         "value": (f"{fcfm*100:.1f}%" if fcfm is not None else None),
         "passes": (fcfm is not None and fcfm > 0.08),
-        "hint": "Cash actually hitting the bank — harder to fake than reported EPS.",
+        "hint": "Cash actually hitting the bank, harder to fake than reported EPS.",
     })
 
-    # 5. Simple, understandable business — proxy: sector ∉ {biotech, specialty financials}
+    # 5. Simple, understandable business, proxy: sector ∉ {biotech, specialty financials}
     sector = (info.get("sector") or "").lower()
     industry = (info.get("industry") or "").lower()
     is_complex = ("biotech" in industry or "specialty" in industry
                   or "asset management" in industry or "investment bank" in industry)
     out.append({
         "key": "simple_business", "label": "Simple, understandable business",
-        "value": info.get("sector") or "—",
+        "value": info.get("sector") or ", ",
         "passes": (not is_complex) if sector else None,
-        "hint": "Buffett's circle-of-competence test — can you explain this in one sentence?",
+        "hint": "Buffett's circle-of-competence test, can you explain this in one sentence?",
     })
 
     n_pass = sum(1 for r in out if r["passes"] is True)
@@ -3102,7 +3103,7 @@ def _earnings_quality_signal(info, base_fcf):
     # Use revenue growth as a proxy for "real" growth pace because TTM
     # FCF growth isn't directly exposed by yfinance.  When EPS grows
     # materially faster than revenue, the gap is being filled by margin
-    # expansion, share buybacks, or accounting tailwinds — flag it.
+    # expansion, share buybacks, or accounting tailwinds, flag it.
     if rev_growth is None:
         return None
 
@@ -3110,20 +3111,20 @@ def _earnings_quality_signal(info, base_fcf):
     if delta >= 15:
         tier  = "aggressive"
         label = "Aggressive earnings"
-        narrative = (f"EPS growing {eps_growth*100:+.0f}% vs revenue {rev_growth*100:+.0f}% — "
+        narrative = (f"EPS growing {eps_growth*100:+.0f}% vs revenue {rev_growth*100:+.0f}%, "
                      "the gap is being filled by margin expansion, buybacks, or accounting "
                      "tailwinds. Worth checking how durable the EPS growth really is.")
     elif delta <= -10:
         tier  = "high_quality"
         label = "High-quality growth"
-        narrative = (f"Revenue growing {rev_growth*100:+.0f}% while EPS grows {eps_growth*100:+.0f}% — "
+        narrative = (f"Revenue growing {rev_growth*100:+.0f}% while EPS grows {eps_growth*100:+.0f}%, "
                      "the company is reinvesting through the income statement (R&D, hiring) "
                      "rather than juicing reported earnings.")
     else:
         tier  = "in_line"
         label = "EPS in line with revenue"
         narrative = (f"EPS and revenue growth are tracking together "
-                     f"({eps_growth*100:+.0f}% vs {rev_growth*100:+.0f}%) — earnings are "
+                     f"({eps_growth*100:+.0f}% vs {rev_growth*100:+.0f}%), earnings are "
                      "moving with the underlying business, not financial engineering.")
 
     return {
@@ -3140,11 +3141,11 @@ def _momentum_overlay(hist):
     """50/200-day MA momentum read.  Returns {tier, label, ma50, ma200, ma_gap_pct}.
 
     Tiers:
-      strong_uptrend   — price > MA50 > MA200, MA50 above MA200 (Golden Cross territory)
-      uptrend          — price > MA200 only
-      sideways         — within ±2% of MA200
-      downtrend        — price < MA200, MA50 above MA200
-      strong_downtrend — price < MA50 < MA200, MA50 below MA200 (Death Cross territory)
+      strong_uptrend, price > MA50 > MA200, MA50 above MA200 (Golden Cross territory)
+      uptrend, price > MA200 only
+      sideways, within ±2% of MA200
+      downtrend, price < MA200, MA50 above MA200
+      strong_downtrend, price < MA50 < MA200, MA50 below MA200 (Death Cross territory)
     """
     if hist is None or getattr(hist, "empty", True) or "Close" not in hist.columns:
         return None
@@ -3156,7 +3157,7 @@ def _momentum_overlay(hist):
     ma200 = float(closes.iloc[-200:].mean()) if len(closes) >= 200 else None
 
     if ma200 is None:
-        # < 200 trading days of data — fall back to a 50-day-only read.
+        # < 200 trading days of data, fall back to a 50-day-only read.
         if last > ma50 * 1.02: tier, label = "uptrend", "Above 50-day MA"
         elif last < ma50 * 0.98: tier, label = "downtrend", "Below 50-day MA"
         else: tier, label = "sideways", "Trading around 50-day MA"
@@ -3217,7 +3218,7 @@ def _net_insider_sentiment(items):
     else:                  tier, label = "mixed",         "Insider activity is mixed"
 
     narrative = (f"{buys} buy{'s' if buys != 1 else ''} vs {sells} "
-                 f"sell{'s' if sells != 1 else ''} over the last 90 days — "
+                 f"sell{'s' if sells != 1 else ''} over the last 90 days, "
                  "Form 4 filings only (not options exercises).")
     return {
         "tier":      tier,
@@ -3440,7 +3441,7 @@ def _is_mag7(ticker):
 # subsidies, DPA Title III orders, or sovereign supply-chain mandates.
 #
 # Each entry carries a *per-ticker* reason string so the model isn't just
-# "you're on a list" — it's a transparent thesis the UI surfaces.
+# "you're on a list", it's a transparent thesis the UI surfaces.
 #
 # Tier deltas (applied downstream to WACC, sector ceiling, IV floor):
 #   wacc_delta:    subtracted from WACC (lower = higher IV)
@@ -3467,11 +3468,11 @@ STRATEGIC_ASSETS = {
     "LRCX": ("semi_sovereignty", "Etch/deposition stack; same export-control moat as AMAT/KLAC."),
 
     # ── Tier 2: Defense Primes ────────────────────────────────────────────
-    "LMT":  ("defense_prime", "F-35, missile defense, hypersonics — ~70% revenue from US gov; multi-decade contract backlog."),
+    "LMT":  ("defense_prime", "F-35, missile defense, hypersonics, ~70% revenue from US gov; multi-decade contract backlog."),
     "RTX":  ("defense_prime", "Patriot, NASAMS, hypersonics; record post-Ukraine restocking demand."),
-    "NOC":  ("defense_prime", "Sentinel ICBM, B-21 — sole-source on US strategic deterrent platforms."),
+    "NOC":  ("defense_prime", "Sentinel ICBM, B-21, sole-source on US strategic deterrent platforms."),
     "GD":   ("defense_prime", "Virginia/Columbia-class subs and combat systems; sovereign-supplier lock."),
-    "LHX":  ("defense_prime", "Tactical comms and EW — Pentagon ‘irreplaceable supplier’ tier."),
+    "LHX":  ("defense_prime", "Tactical comms and EW, Pentagon ‘irreplaceable supplier’ tier."),
     "HII":  ("defense_prime", "Sole US builder of nuclear aircraft carriers and Virginia-class submarines."),
 
     # ── Tier 3: Energy Sovereignty ────────────────────────────────────────
@@ -3481,13 +3482,13 @@ STRATEGIC_ASSETS = {
     "OXY":  ("energy_sovereignty", "Permian #1 + Direct Air Capture with DOE-backed Stratos plant; Buffett-aligned strategic stake."),
 
     # ── Tier 4: Critical Materials & Nuclear ──────────────────────────────
-    "MP":   ("critical_material", "Mountain Pass — only operating US rare-earth mine and processor · DPA Title III funded."),
+    "MP":   ("critical_material", "Mountain Pass, only operating US rare-earth mine and processor · DPA Title III funded."),
     "LEU":  ("critical_material", "Sole US uranium enrichment producer · DOE HALEU contracts for next-gen reactors."),
     "BWXT": ("critical_material", "Sole supplier of US Navy nuclear reactors and components."),
 
     # ── Tier 5: Urban Air Mobility (Pre-revenue / emerging franchises) ────
     # Smaller WACC delta + larger ceiling lift reflects the speculative
-    # nature — these are franchise bets, not mature cash flows.  IV floor
+    # nature, these are franchise bets, not mature cash flows.  IV floor
     # is lower (0.75) because pure DCF on pre-revenue eVTOL is meaningless;
     # the model leans on analyst targets + transformative catalysts.
     "JOBY": ("urban_air_mobility", "First eVTOL operator with FAA Part 135 air-carrier certificate · Toyota and Delta backing · NYC commercial launch · airworthiness criteria finalized."),
@@ -3495,7 +3496,7 @@ STRATEGIC_ASSETS = {
     "RKLB": ("urban_air_mobility", "Sole-source US small-launch alternative to SpaceX · DoD STP-S29 mission · Neutron rocket development · expanding government revenue mix."),
 }
 
-# Tier-level effects.  Strategic premium is meaningful but bounded — these
+# Tier-level effects.  Strategic premium is meaningful but bounded, these
 # numbers are deliberately conservative so the layer never single-handedly
 # flips a verdict; it just keeps the model from systematically penalizing
 # strategic assets for the wrong reasons.
@@ -3505,13 +3506,13 @@ _STRATEGIC_TIER_DELTAS = {
     "defense_prime":      (-0.005, 0.02, 0.90, "Defense Prime"),
     "energy_sovereignty": (-0.0075, 0.03, 0.88, "Energy Sovereignty"),
     "critical_material":  (-0.010, 0.05, 0.85, "Critical Materials"),
-    # UAM is speculative — smaller WACC delta but higher ceiling lift
+    # UAM is speculative, smaller WACC delta but higher ceiling lift
     # (these are pre-revenue franchises where growth is the whole thesis).
     # IV floor is lower because pure DCF on pre-revenue eVTOL is meaningless.
     "urban_air_mobility": (-0.0050, 0.08, 0.75, "Urban Air Mobility"),
 }
 
-# Tiers that trigger a "survival floor" — Lynch-style override that says
+# Tiers that trigger a "survival floor", Lynch-style override that says
 # pure DCF underestimates these names because government capital and policy
 # anchor survival probability.  Used by the strategic IV floor and verdict
 # phrasing below.
@@ -3546,13 +3547,13 @@ _STRATEGIC_BOOK_FLOOR_MULT = {
     "defense_prime":      2.0,
     "energy_sovereignty": 1.4,
     "critical_material":  1.5,
-    # UAM tier intentionally absent — pre-revenue eVTOL has no book anchor.
+    # UAM tier intentionally absent, pre-revenue eVTOL has no book anchor.
 }
 
 # Per-ticker book-floor overrides: CHIPS Act foundries the DoD has formally
 # designated as "trusted foundries" get the defense-grade 2.0× book multiplier
 # regardless of their semi_sovereignty tier classification.  Same logic as
-# defense primes — sole-source for strategic platforms.
+# defense primes, sole-source for strategic platforms.
 _STRATEGIC_BOOK_FLOOR_OVERRIDE = {
     "INTC": 2.0,  # CHIPS Act $19.5B + DoD trusted-foundry pivot under DPA Title III
     "MU":   2.0,  # CHIPS Act $6.1B + sole US producer of HBM (AI inference bottleneck)
@@ -3593,7 +3594,7 @@ def _strategic_classifier(ticker):
         "book_floor_mult":  _STRATEGIC_BOOK_FLOOR_OVERRIDE.get(
             ticker.upper(), _STRATEGIC_BOOK_FLOOR_MULT.get(tier)),
         "narrative": (
-            f"VALUS recognizes {ticker.upper()} as a strategic US asset — "
+            f"VALUS recognizes {ticker.upper()} as a strategic US asset, "
             f"{tier_label}.  Pure DCF systematically undervalues these names "
             "because the discount rate ignores government backstops and "
             "policy-driven capital flows."
@@ -3622,7 +3623,7 @@ def _compute_strategic_iv_floor(ticker, info, dcf_iv, base_fcf, fx_rate,
                                   net_debt, shares_out, strategic, peers_payload=None):
     """
     Returns dict {floor_iv, components, reasons, dcf_iv, applied} or None.
-    Conservative — only fires when at least one citable input is available.
+    Conservative, only fires when at least one citable input is available.
     """
     if not strategic or not strategic.get("survival_floor"):
         return None
@@ -3653,10 +3654,10 @@ def _compute_strategic_iv_floor(ticker, info, dcf_iv, base_fcf, fx_rate,
         components["book"] = book_iv
         reasons.append(
             f"Book floor: ${book_iv:.2f} (book value ${book_value_per_share:.2f}/sh × "
-            f"{book_mult:.1f}× — {strategic['strategic_label']} tier won't trade at distressed book)."
+            f"{book_mult:.1f}×, {strategic['strategic_label']} tier won't trade at distressed book)."
         )
 
-    # 3. Peer EV/Revenue floor (optional — populated by caller if peers known)
+    # 3. Peer EV/Revenue floor (optional, populated by caller if peers known)
     peer_iv = None
     if peers_payload and isinstance(peers_payload, dict):
         peer_ev_rev = peers_payload.get("peer_median_ev_rev")
@@ -3689,17 +3690,17 @@ def _compute_strategic_iv_floor(ticker, info, dcf_iv, base_fcf, fx_rate,
 # ── VALUS A-F grade (Phase 5) ───────────────────────────────────────────
 # Derives a simple letter grade from the margin-of-safety (% gap between
 # VALUS fair value and current price).  Surfaces alongside the existing
-# `priced_for` tier — both quantify the same underlying signal but the
+# `priced_for` tier, both quantify the same underlying signal but the
 # letter grade is the scannable, prominent version we put on stock cards
 # and detail headers; the tier is the longer-form label users see in the
 # verdict copy.
 #
 # Thresholds (margin_of_safety as a percent, where +% means undervalued):
-#   A  : MOS ≥ +30     — deeply undervalued
-#   B  : +15 ≤ MOS <  +30  — moderately undervalued
-#   C  : -15 <  MOS <  +15  — fairly priced
-#   D  : -30 < MOS ≤ -15  — moderately overvalued
-#   F  : MOS ≤ -30     — severely overvalued
+#   A  : MOS ≥ +30, deeply undervalued
+#   B  : +15 ≤ MOS <  +30, moderately undervalued
+#   C  : -15 <  MOS <  +15, fairly priced
+#   D  : -30 < MOS ≤ -15, moderately overvalued
+#   F  : MOS ≤ -30, severely overvalued
 # These match the ±15% / ±30% breakpoints the existing tier system uses;
 # A/B map to Discount/Fair-Value, D/F map to Growth/Excellence/Miracle.
 
@@ -3711,11 +3712,11 @@ _VALUS_GRADE_BANDS = {
     "F": "Severely overvalued",
 }
 _VALUS_GRADE_EXPLANATIONS = {
-    "A": "Market price is well below VALUS fair value — significant margin of safety.",
+    "A": "Market price is well below VALUS fair value, significant margin of safety.",
     "B": "Trading below VALUS fair value with a comfortable margin of safety.",
-    "C": "Market price tracks VALUS fair value — no obvious mispricing.",
-    "D": "Trading above VALUS fair value — investors are paying for above-trend growth.",
-    "F": "Market price is far above VALUS fair value — expectations look stretched.",
+    "C": "Market price tracks VALUS fair value, no obvious mispricing.",
+    "D": "Trading above VALUS fair value, investors are paying for above-trend growth.",
+    "F": "Market price is far above VALUS fair value, expectations look stretched.",
 }
 
 
@@ -3727,12 +3728,12 @@ def _reconcile_grade_with_tier(grade, priced_for):
     asset framework lifts the IV floor for CHIPS Act / sovereign-backstopped
     names; if despite that lift the price is still above the floor (negative
     MOS), the existing code further promotes the tier to "Strategic
-    Discount" based on a low forward P/E heuristic — the editorial call
+    Discount" based on a low forward P/E heuristic, the editorial call
     is "DCF underestimates this; the market is discounting a sovereign-
     moated franchise."
 
     Without reconciliation the user sees a green "Strategic Discount" tier
-    pill next to a "D — Moderately Overvalued" letter grade.  Both views
+    pill next to a "D, Moderately Overvalued" letter grade.  Both views
     derive from the same fair-value number; they shouldn't disagree on
     direction.  When the tier override fires, lift the grade to B with
     matching label + explanation so the badge, pill, and copy all align.
@@ -3749,7 +3750,7 @@ def _reconcile_grade_with_tier(grade, priced_for):
                 "strategic-asset framework adjusts for the franchise's "
                 "sovereign backstop (e.g. CHIPS Act, defense prime, sole-"
                 "US producer status).  The market is paying a lower-than-"
-                "warranted multiple — treat as opportunity, not a value trap."
+                "warranted multiple, treat as opportunity, not a value trap."
             ),
             "mos":         grade.get("mos"),
             "overridden":  True,    # flag for the explainer modal / debug
@@ -3766,7 +3767,7 @@ def compute_valus_grade(margin_of_safety_pct):
     badge cleanly rather than show "?".
 
     Boundaries land on the worse side (A captures exactly +30, F captures
-    exactly -30) — matches user intuition that "30% below fair value =
+    exactly -30), matches user intuition that "30% below fair value =
     deeply undervalued" rather than nudging into the next band.
     """
     if margin_of_safety_pct is None:
@@ -3794,7 +3795,7 @@ def compute_valus_grade(margin_of_safety_pct):
 
 def _priced_for_verdict(implied_g, sector_ceiling, price, iv, margin_of_safety=None):
     """
-    Tier the stock by margin of safety (IV vs price) — primary driver — with
+    Tier the stock by margin of safety (IV vs price), primary driver, with
     a sector-ceiling override that bumps anything beyond ceiling × 1.2 into
     the Miracle tier regardless of MOS.
 
@@ -3813,45 +3814,45 @@ def _priced_for_verdict(implied_g, sector_ceiling, price, iv, margin_of_safety=N
 
     mos = margin_of_safety   # +ve = undervalued; -ve = overvalued
 
-    # Sector ceiling override — only fires when DCF ALSO says overvalued.
+    # Sector ceiling override, only fires when DCF ALSO says overvalued.
     # When MOS is positive (model says undervalued) but implied growth happens
-    # to exceed the ceiling, we trust MOS — the implied-growth math can be
+    # to exceed the ceiling, we trust MOS, the implied-growth math can be
     # noisy on highly-leveraged or low-FCF stocks (e.g. Ford).
     if (mos < -10 and implied_g is not None and sector_ceiling
             and implied_g > sector_ceiling * 1.20):
         return {"tier": "miracle", "label": "Priced for Miracle", "color": "red",
-                "narrative": (f"Market implies {implied_g*100:.1f}% growth — exceeds sector "
+                "narrative": (f"Market implies {implied_g*100:.1f}% growth, exceeds sector "
                               f"ceiling × 1.2; speculative.")}
 
-    # Hard speculative override — independent of MOS sign.  When implied
+    # Hard speculative override, independent of MOS sign.  When implied
     # growth blows past ceiling × 1.5, the model is fragile regardless of
     # which direction MOS leans; surface it so investors don't see a
     # "Priced for Discount" tag on a moonshot.
     if (implied_g is not None and sector_ceiling
             and implied_g > sector_ceiling * 1.50):
         return {"tier": "miracle", "label": "Priced for Miracle", "color": "red",
-                "narrative": (f"Market implies {implied_g*100:.1f}% growth — far above sector "
+                "narrative": (f"Market implies {implied_g*100:.1f}% growth, far above sector "
                               f"ceiling; treat output as low-confidence.")}
 
     if mos >= 40:
         return {"tier": "deep_discount", "label": "Priced for Deep Discount", "color": "green",
-                "narrative": f"Trading {mos:.0f}% below VALUS fair value — market overly pessimistic."}
+                "narrative": f"Trading {mos:.0f}% below VALUS fair value, market overly pessimistic."}
     if mos >= 15:
         return {"tier": "discount", "label": "Priced for Discount", "color": "green",
-                "narrative": f"Trading {mos:.0f}% below VALUS fair value — undervalued."}
+                "narrative": f"Trading {mos:.0f}% below VALUS fair value, undervalued."}
     if mos >= -10:
         return {"tier": "fair_value", "label": "Priced for Fair Value", "color": "blue",
-                "narrative": "VALUS and market are aligned — fair value zone."}
+                "narrative": "VALUS and market are aligned, fair value zone."}
     if mos >= -25:
         return {"tier": "growth", "label": "Priced for Growth", "color": "amber",
-                "narrative": (f"Market paying a growth premium — VALUS sees stock as "
+                "narrative": (f"Market paying a growth premium, VALUS sees stock as "
                               f"overvalued by {abs(mos):.0f}%.")}
     if mos >= -50:
         return {"tier": "excellence", "label": "Priced for Excellence", "color": "amber",
-                "narrative": (f"Market expecting flawless execution — VALUS sees stock as "
+                "narrative": (f"Market expecting flawless execution, VALUS sees stock as "
                               f"overvalued by {abs(mos):.0f}%.")}
     return {"tier": "miracle", "label": "Priced for Miracle", "color": "red",
-            "narrative": (f"Market pricing in extraordinary outcomes — VALUS sees stock as "
+            "narrative": (f"Market pricing in extraordinary outcomes, VALUS sees stock as "
                           f"overvalued by {abs(mos):.0f}%.")}
 
 
@@ -3883,7 +3884,7 @@ def _sector_growth_ceiling(sector, industry, is_structural_transformer=False, mo
 def _debt_momentum_classifier(info, balance_sheet, fcf_series, price_history):
     """
     Classify leveraged stocks into:
-      - "Deleveraging Story":   debt falling, FCF positive, interest cov > 2× — apply uplift
+      - "Deleveraging Story":   debt falling, FCF positive, interest cov > 2×, apply uplift
       - "Speculative Distress": debt growing OR FCF negative, momentum without fundamentals
       - "Recovery Watch":       leverage high, mixed signals
       - "Healthy Leverage":     debt low or improving with stable cash flow
@@ -3939,13 +3940,13 @@ def _debt_momentum_classifier(info, balance_sheet, fcf_series, price_history):
     is_leveraged = (debt_to_ebitda is not None and debt_to_ebitda > 3.0)
     has_momentum = (price_1yr_pct is not None and price_1yr_pct > 0.20)
 
-    # Stable: low leverage — no classification needed
+    # Stable: low leverage, no classification needed
     if not is_leveraged and (debt_to_ebitda is None or debt_to_ebitda < 2.0):
         return {
             "classification": "stable",
             "label": "Stable Capital Structure",
             "color": "neutral",
-            "narrative": "Low-leverage profile — no debt-momentum signal.",
+            "narrative": "Low-leverage profile, no debt-momentum signal.",
             "premium_pct": 0.0,
             "flags": [],
             "debt_to_ebitda": round(debt_to_ebitda, 2) if debt_to_ebitda is not None else None,
@@ -3959,9 +3960,9 @@ def _debt_momentum_classifier(info, balance_sheet, fcf_series, price_history):
             "classification": "healthy_leverage",
             "label": "Healthy Leverage",
             "color": "blue",
-            "narrative": (f"Debt/EBITDA {debt_to_ebitda:.1f}× — high but covered by strong cash flow "
+            "narrative": (f"Debt/EBITDA {debt_to_ebitda:.1f}×, high but covered by strong cash flow "
                           f"(coverage {interest_cov:.1f}×)." if interest_cov else
-                          f"Debt/EBITDA {debt_to_ebitda:.1f}× — supported by positive FCF."),
+                          f"Debt/EBITDA {debt_to_ebitda:.1f}×, supported by positive FCF."),
             "premium_pct": 0.0,
             "flags": [],
             "debt_to_ebitda": round(debt_to_ebitda, 2),
@@ -3976,15 +3977,15 @@ def _debt_momentum_classifier(info, balance_sheet, fcf_series, price_history):
             and (interest_cov is None or interest_cov > 2.0)):
         # Deleveraging velocity → premium between 5% and 15%
         velocity = min(abs(debt_trend), 0.30)              # cap at 30% YoY paydown
-        premium_pct = round(0.05 + (velocity / 0.30) * 0.10, 3)   # 5–15% IV uplift
-        flags.append(f"Debt down {abs(debt_trend)*100:.1f}% YoY — equity rerating opportunity")
+        premium_pct = round(0.05 + (velocity / 0.30) * 0.10, 3)   # 5-15% IV uplift
+        flags.append(f"Debt down {abs(debt_trend)*100:.1f}% YoY, equity rerating opportunity")
         if interest_cov: flags.append(f"Interest coverage improving: {interest_cov:.1f}×")
         return {
             "classification": "deleveraging",
             "label": "Deleveraging Story",
             "color": "green",
             "narrative": (
-                f"Debt/EBITDA {debt_to_ebitda:.1f}× and falling — paying down debt while "
+                f"Debt/EBITDA {debt_to_ebitda:.1f}× and falling, paying down debt while "
                 f"FCF is positive.  Equity becomes safer (and more valuable) as leverage "
                 f"normalises.  Applying +{premium_pct*100:.1f}% rerating premium."
             ),
@@ -4003,7 +4004,7 @@ def _debt_momentum_classifier(info, balance_sheet, fcf_series, price_history):
         if not fcf_positive_recent:    flags.append("Free cash flow negative")
         if debt_trend and debt_trend > 0.05: flags.append(f"Debt growing {debt_trend*100:.1f}% YoY")
         if interest_cov and interest_cov < 1.5: flags.append(f"Interest coverage critically low: {interest_cov:.1f}×")
-        flags.append("Price momentum decoupled from fundamentals — high reversal risk")
+        flags.append("Price momentum decoupled from fundamentals, high reversal risk")
         return {
             "classification": "speculative_distress",
             "label": "Speculative Distress",
@@ -4011,7 +4012,7 @@ def _debt_momentum_classifier(info, balance_sheet, fcf_series, price_history):
             "narrative": (
                 f"Debt/EBITDA {debt_to_ebitda:.1f}× combined with weak fundamentals "
                 f"and price momentum.  Rally is not supported by improving cash flow "
-                f"or deleveraging — treat as momentum-driven, not fundamental."
+                f"or deleveraging, treat as momentum-driven, not fundamental."
             ),
             "premium_pct": 0.0,
             "flags": flags,
@@ -4027,7 +4028,7 @@ def _debt_momentum_classifier(info, balance_sheet, fcf_series, price_history):
             "label": "Recovery Watch",
             "color": "amber",
             "narrative": (
-                f"Debt/EBITDA {debt_to_ebitda:.1f}× — leveraged but signals mixed.  "
+                f"Debt/EBITDA {debt_to_ebitda:.1f}×, leveraged but signals mixed.  "
                 f"Watch for FCF stability and continued debt paydown."
             ),
             "premium_pct": 0.0,
@@ -4074,7 +4075,7 @@ def _build_verdict_summary(ticker, priced_for, implied_growth_pct, model_growth_
     color = priced_for.get("color", "blue")
     reasons = []
 
-    # Reason 1 — frame the price-vs-fundamentals story.  The CANONICAL signal
+    # Reason 1, frame the price-vs-fundamentals story.  The CANONICAL signal
     # is margin_of_safety (price vs IV); implied growth is an interesting
     # secondary signal but can be noisy on leveraged or capex-heavy stocks
     # where the reverse-DCF is non-monotonic.  When the two disagree, we
@@ -4085,7 +4086,7 @@ def _build_verdict_summary(ticker, priced_for, implied_growth_pct, model_growth_
     if has_growth and mos is not None:
         gap_pp = implied_growth_pct - model_growth_pct
         if mos > 5:
-            # MODEL SAYS UNDERVALUED — market is being conservative.
+            # MODEL SAYS UNDERVALUED, market is being conservative.
             # Two separate facts: (1) growth-rate gap, (2) price gap.  We
             # state them as distinct sentences so the reader doesn't try
             # to derive 2 from 1 with arithmetic that doesn't add up.
@@ -4102,10 +4103,10 @@ def _build_verdict_summary(ticker, priced_for, implied_growth_pct, model_growth_
                 f"next decade; VALUS forecasts {model_growth_pct:.1f}%/yr "
                 f"(~{abs(gap_pp):.0f}pp higher).  With that growth assumption, "
                 f"VALUS fair value of ${iv:.2f} sits {abs(mos):.0f}% above today's "
-                f"${price:.2f} — undervalued."
+                f"${price:.2f}, undervalued."
             )
         elif mos < -5:
-            # MODEL SAYS OVERVALUED — market paying for more growth than VALUS
+            # MODEL SAYS OVERVALUED, market paying for more growth than VALUS
             # expects, or optionality the model can't price.
             if implied_growth_pct > model_growth_pct + 1:
                 reasons.append(
@@ -4113,33 +4114,33 @@ def _build_verdict_summary(ticker, priced_for, implied_growth_pct, model_growth_
                     f"revenue growth for a decade; VALUS forecasts "
                     f"{model_growth_pct:.1f}%/yr (~{abs(gap_pp):.0f}pp gap).  With "
                     f"VALUS's lower growth assumption, fair value of ${iv:.2f} sits "
-                    f"{abs(mos):.0f}% below today's ${price:.2f} — overvalued."
+                    f"{abs(mos):.0f}% below today's ${price:.2f}, overvalued."
                 )
             else:
-                # Same/lower implied growth but still overvalued — capex, leverage,
+                # Same/lower implied growth but still overvalued, capex, leverage,
                 # or shareholder-dilution math is doing the work.  Use MOS framing.
                 reasons.append(
                     f"VALUS fair value of ${iv:.2f} sits {abs(mos):.0f}% below "
-                    f"today's price of ${price:.2f} — capital structure, capex "
+                    f"today's price of ${price:.2f}, capital structure, capex "
                     f"intensity, or share dilution explain more of the gap than growth."
                 )
         else:
             # Roughly fair value
             reasons.append(
-                f"At ${price:.2f}, market and VALUS are broadly aligned — both expect "
+                f"At ${price:.2f}, market and VALUS are broadly aligned, both expect "
                 f"~{model_growth_pct:.1f}% annual growth and the price reflects that."
             )
     elif iv and price and mos is not None:
-        # No reliable growth comparison — fall back to MOS-driven copy
+        # No reliable growth comparison, fall back to MOS-driven copy
         if mos > 5:
             reasons.append(
                 f"VALUS fair value of ${iv:.2f} sits {mos:.0f}% above today's "
-                f"price of ${price:.2f} — model sees the stock as underpriced."
+                f"price of ${price:.2f}, model sees the stock as underpriced."
             )
         elif mos < -5:
             reasons.append(
                 f"VALUS fair value of ${iv:.2f} sits {abs(mos):.0f}% below today's "
-                f"price of ${price:.2f} — model sees the stock as overpriced."
+                f"price of ${price:.2f}, model sees the stock as overpriced."
             )
         else:
             reasons.append(
@@ -4147,44 +4148,44 @@ def _build_verdict_summary(ticker, priced_for, implied_growth_pct, model_growth_
                 f"price of ${price:.2f}."
             )
 
-    # Reason 2 — sector credibility check
+    # Reason 2, sector credibility check
     if sector_ceiling_pct and implied_growth_pct is not None:
         ratio = implied_growth_pct / sector_ceiling_pct
         if ratio > 1.20:
             reasons.append(
                 f"That growth rate exceeds the {sector_ceiling_label} sector ceiling of "
-                f"{sector_ceiling_pct:.0f}% by {(ratio-1)*100:.0f}% — only ~1% of public "
+                f"{sector_ceiling_pct:.0f}% by {(ratio-1)*100:.0f}%, only ~1% of public "
                 f"companies have sustained this for a decade."
             )
         elif ratio > 1.00:
             reasons.append(
                 f"That growth rate sits at the {sector_ceiling_label} sector ceiling "
-                f"({sector_ceiling_pct:.0f}%) — execution must be flawless."
+                f"({sector_ceiling_pct:.0f}%), execution must be flawless."
             )
         elif ratio > 0.80:
             reasons.append(
                 f"That growth rate is in the upper band for the {sector_ceiling_label} "
-                f"sector (ceiling {sector_ceiling_pct:.0f}%) — credible but premium."
+                f"sector (ceiling {sector_ceiling_pct:.0f}%), credible but premium."
             )
         elif ratio > 0.40:
             reasons.append(
                 f"That growth rate is well within the {sector_ceiling_label} sector "
-                f"ceiling of {sector_ceiling_pct:.0f}% — comfortable assumption."
+                f"ceiling of {sector_ceiling_pct:.0f}%, comfortable assumption."
             )
         else:
             reasons.append(
                 f"That growth rate is significantly below the {sector_ceiling_label} "
-                f"sector ceiling of {sector_ceiling_pct:.0f}% — the market is being conservative."
+                f"sector ceiling of {sector_ceiling_pct:.0f}%, the market is being conservative."
             )
 
-    # Reason 3 — capital structure / cash position / analyst alignment
+    # Reason 3, capital structure / cash position / analyst alignment
     # Priority order: cash-rich (most differentiated) → debt classification →
     # structural transformer → analyst alignment → Mag 7
     third_reason = None
 
     if is_cash_rich and cash_pct_of_mcap and cash_pct_of_mcap >= 15:
         third_reason = (
-            f"Cash-loaded balance sheet — net cash is {cash_pct_of_mcap:.0f}% of market cap, "
+            f"Cash-loaded balance sheet, net cash is {cash_pct_of_mcap:.0f}% of market cap, "
             f"providing strategic optionality (buybacks, M&A, R&D) and recession resilience "
             f"not fully captured by DCF."
         )
@@ -4194,7 +4195,7 @@ def _build_verdict_summary(ticker, priced_for, implied_growth_pct, model_growth_
             direction = "above" if at_gap > 0 else "below"
             third_reason = (
                 f"Sell-side analysts target ${analyst_target:.2f} ({abs(at_gap):.0f}% "
-                f"{direction} current price) — they {'see further upside' if at_gap > 0 else 'see downside ahead'}."
+                f"{direction} current price), they {'see further upside' if at_gap > 0 else 'see downside ahead'}."
             )
 
     if third_reason is None and debt_momentum:
@@ -4202,47 +4203,47 @@ def _build_verdict_summary(ticker, priced_for, implied_growth_pct, model_growth_
         if dm_class == "deleveraging":
             third_reason = (
                 f"Debt is being paid down ({debt_momentum.get('debt_trend_pct', 0):.0f}% YoY) "
-                f"while FCF stays positive — equity rerating opportunity (already priced into IV)."
+                f"while FCF stays positive, equity rerating opportunity (already priced into IV)."
             )
         elif dm_class == "speculative_distress":
             third_reason = (
                 f"Capital structure is stressed (Debt/EBITDA "
                 f"{debt_momentum.get('debt_to_ebitda', 0):.1f}×) and price momentum is "
-                f"not supported by improving fundamentals — high reversal risk."
+                f"not supported by improving fundamentals, high reversal risk."
             )
         elif dm_class == "healthy_leverage":
             third_reason = (
                 f"Despite Debt/EBITDA {debt_momentum.get('debt_to_ebitda', 0):.1f}×, "
-                f"interest coverage is strong — leverage is not a downside risk."
+                f"interest coverage is strong, leverage is not a downside risk."
             )
 
     if third_reason is None and is_structural_transformer:
         third_reason = (
             f"Structural Transformer status: market is pricing platform "
-            f"optionality (AI/robotics/autonomy) on top of base business — "
+            f"optionality (AI/robotics/autonomy) on top of base business, "
             f"requires belief in long-tail upside scenarios."
         )
 
     if third_reason is None and is_mag7:
         third_reason = (
             f"As a Mag 7 member, this name moves with the broader AI productivity "
-            f"thesis — concentrated exposure in your portfolio amplifies that risk."
+            f"thesis, concentrated exposure in your portfolio amplifies that risk."
         )
 
     if third_reason:
         reasons.append(third_reason)
 
-    # Verdict line — always matches the sign of margin_of_safety so it's
+    # Verdict line, always matches the sign of margin_of_safety so it's
     # consistent with the OVERVALUED/UNDERVALUED tag at the top of the page.
     mos = margin_of_safety or 0
-    # Survival-floor names get distinct phrasing — Prof Shelton's note that
+    # Survival-floor names get distinct phrasing, Prof Shelton's note that
     # strategically-anchored stocks shouldn't be tagged "overvalued" in the
     # standard sense even when MOS is negative; the strategic backstop is
     # what's missing from the DCF, not value to be skeptical of.
     if survival_floor and mos < 0:
         floor_applied = bool(strategic_floor and strategic_floor.get("applied"))
         if floor_applied and mos > -10:
-            verdict = (f"Strategic re-rating opportunity — government-backed tier; "
+            verdict = (f"Strategic re-rating opportunity, government-backed tier; "
                        f"DCF lifts ${strategic_floor.get('dcf_iv'):.2f} → "
                        f"${strategic_floor.get('floor_iv'):.2f} via subsidy, "
                        f"book floor, and peer multiples.")
@@ -4250,7 +4251,7 @@ def _build_verdict_summary(ticker, priced_for, implied_growth_pct, model_growth_
             # Honest framing: even with the strategic floor lifting IV
             # toward sovereign-backstopped levels, the market price is
             # *still* well above. This is the "Intel at $109 ATH" case
-            # where math is math — strategic backing matters but doesn't
+            # where math is math, strategic backing matters but doesn't
             # justify any price.
             verdict = (f"Market is paying {abs(mos):.0f}% above the strategic "
                        f"floor. DCF says ${strategic_floor.get('dcf_iv'):.2f}; "
@@ -4260,25 +4261,25 @@ def _build_verdict_summary(ticker, priced_for, implied_growth_pct, model_growth_
                        f"backing, this is priced for outcomes most companies "
                        f"don't deliver.")
         else:
-            verdict = (f"Premium for strategic floor — pure DCF undercounts the "
+            verdict = (f"Premium for strategic floor, pure DCF undercounts the "
                        f"government backstop on this name; survival probability "
                        f"is anchored, not market-driven.")
     elif tier == "deep_discount":
-        verdict = (f"VALUS sees this stock as undervalued by {abs(mos):.0f}% — market is "
+        verdict = (f"VALUS sees this stock as undervalued by {abs(mos):.0f}%, market is "
                    f"overly pessimistic; meaningful upside if fundamentals hold.")
     elif tier == "discount":
-        verdict = (f"VALUS sees this stock as undervalued by {abs(mos):.0f}% — trading "
+        verdict = (f"VALUS sees this stock as undervalued by {abs(mos):.0f}%, trading "
                    f"below fundamental value.")
     elif tier == "fair_value":
-        verdict = "VALUS and market are aligned — fair value zone, no clear edge."
+        verdict = "VALUS and market are aligned, fair value zone, no clear edge."
     elif tier == "growth":
-        verdict = (f"VALUS sees this stock as overvalued by {abs(mos):.0f}% — market is "
+        verdict = (f"VALUS sees this stock as overvalued by {abs(mos):.0f}%, market is "
                    f"paying a growth premium.")
     elif tier == "excellence":
-        verdict = (f"VALUS sees this stock as overvalued by {abs(mos):.0f}% — market "
+        verdict = (f"VALUS sees this stock as overvalued by {abs(mos):.0f}%, market "
                    f"expects flawless execution; limited margin of error if growth slows.")
     elif tier == "miracle":
-        verdict = (f"VALUS sees this stock as overvalued by {abs(mos):.0f}% — market is "
+        verdict = (f"VALUS sees this stock as overvalued by {abs(mos):.0f}%, market is "
                    f"paying for outcomes very few companies achieve.")
     else:
         verdict = label or "Verdict pending."
@@ -4298,14 +4299,14 @@ def _build_verdict_summary(ticker, priced_for, implied_growth_pct, model_growth_
 def _cash_rich_premium(info, fx_rate, market_cap, base_fcf=None,
                         sector=None, industry=None):
     """
-    Cash-rich detection — three independent signals, take the maximum.
+    Cash-rich detection, three independent signals, take the maximum.
 
-    Signal A — NET CASH (existing): rewards companies with positive
+    Signal A, NET CASH (existing): rewards companies with positive
         net cash position; scaled to market cap.
-    Signal B — ABSOLUTE CASH HOARD (new): rewards mega-caps with $50B+
+    Signal B, ABSOLUTE CASH HOARD (new): rewards mega-caps with $50B+
         cash piles regardless of debt.  Captures AAPL/MSFT/GOOGL strategic
         optionality that simple net-cash misses.
-    Signal C — FCF-COVERED DEBT (new): if FCF can clear all debt in
+    Signal C, FCF-COVERED DEBT (new): if FCF can clear all debt in
         less than 2 years, the debt is "strategic" rather than distress.
         We treat gross cash as effective net cash for premium calc.
 
@@ -4318,7 +4319,7 @@ def _cash_rich_premium(info, fx_rate, market_cap, base_fcf=None,
     Returns (premium_pct, is_cash_rich, cash_pct_of_mcap, narrative).
     """
     # Exclude depository banks, asset managers, brokerages, and capital
-    # markets — their balance-sheet cash includes deposits / float / AUM,
+    # markets, their balance-sheet cash includes deposits / float / AUM,
     # not strategic optionality.  We DO include conglomerate holding
     # companies (Berkshire-class) where the cash is genuine optionality.
     s_lower = (sector or "").lower()
@@ -4347,20 +4348,20 @@ def _cash_rich_premium(info, fx_rate, market_cap, base_fcf=None,
 
     cash_b_abs = total_cash / 1e9   # gross cash in $B
 
-    # ── Signal A — Net cash as % of market cap ───────────────────────────
+    # ── Signal A, Net cash as % of market cap ───────────────────────────
     pct_net = (net_cash / market_cap * 100) if net_cash > 0 else 0.0
     if   pct_net >= 35: prem_a = 0.10
     elif pct_net >= 20: prem_a = 0.06
     elif pct_net >= 10: prem_a = 0.03
     else:               prem_a = 0.0
 
-    # ── Signal B — Absolute cash hoard (catches AAPL/MSFT/GOOGL/BRK) ─────
+    # ── Signal B, Absolute cash hoard (catches AAPL/MSFT/GOOGL/BRK) ─────
     if   cash_b_abs >= 200: prem_b = 0.06
     elif cash_b_abs >= 100: prem_b = 0.04
     elif cash_b_abs >=  50: prem_b = 0.02
     else:                   prem_b = 0.0
 
-    # ── Signal C — FCF coverage of debt (strategic vs distressed leverage) ─
+    # ── Signal C, FCF coverage of debt (strategic vs distressed leverage) ─
     prem_c = 0.0
     years_to_payoff = None
     if fcf > 0 and total_debt > 0:
@@ -4391,7 +4392,7 @@ def _cash_rich_premium(info, fx_rate, market_cap, base_fcf=None,
     why = " · ".join(parts) if parts else f"cash position is {pct:.0f}% of market cap"
 
     narrative = (
-        f"Cash-loaded balance sheet — {why}.  Strategic optionality "
+        f"Cash-loaded balance sheet, {why}.  Strategic optionality "
         f"(buybacks, M&A, R&D) and recession resilience justify a "
         f"+{int(premium*100)}% IV premium not captured by raw FCF."
     )
@@ -4415,8 +4416,7 @@ def _enforce_scenario_coherence(scenarios, base_iv, price):
       - Strict: Bear < Base < Bull, always.
 
     If the model's natural numbers fall in the band, keep them.  If they don't,
-    clamp into the band.  Bear is allowed to sit above current price now —
-    bear means "downside vs fair value", not "downside vs market price".
+    clamp into the band.  Bear is allowed to sit above current price now, bear means "downside vs fair value", not "downside vs market price".
 
     Mutates scenarios in place.
     """
@@ -4470,7 +4470,7 @@ def _enforce_scenario_coherence(scenarios, base_iv, price):
 def _reality_reconciliation(iv, price, analyst_target, implied_g, sector, industry,
                              is_structural_transformer=False, moat_detected=False):
     """
-    Reality Reconciliation Layer — when the model is materially off from market
+    Reality Reconciliation Layer, when the model is materially off from market
     price AND the sell-side consensus aligns with market (not the model), the
     model is likely missing something the simple DCF cannot capture: growth
     optionality, contract pipelines, network effects, AI / robotics platform
@@ -4480,10 +4480,10 @@ def _reality_reconciliation(iv, price, analyst_target, implied_g, sector, indust
       1. Significant gap?  |IV − price| / price > 0.25  (else: skip, model is fine)
       2. Analyst alignment? analyst target on the price side, not the model side
       3. Credibility check: implied growth from reverse-DCF must be ≤ sector
-         ceiling × 1.2.  If yes, blend.  If no, the gap is speculative — leave
+         ceiling × 1.2.  If yes, blend.  If no, the gap is speculative, leave
          model alone but flag it.
 
-    Blend formula (conservative — model still dominates):
+    Blend formula (conservative, model still dominates):
         new_IV = 0.55 × model_IV + 0.25 × analyst_target + 0.20 × current_price
 
     Sector ceilings (max sustainable Stage-1 growth):
@@ -4507,7 +4507,7 @@ def _reality_reconciliation(iv, price, analyst_target, implied_g, sector, indust
     if abs(gap_pct) <= 0.25:
         return iv, False, pre_iv, None
 
-    # Skip when no analyst target available — can't validate the gap
+    # Skip when no analyst target available, can't validate the gap
     if not analyst_target or float(analyst_target) <= 0:
         return iv, False, pre_iv, None
     at = float(analyst_target)
@@ -4523,8 +4523,8 @@ def _reality_reconciliation(iv, price, analyst_target, implied_g, sector, indust
         analyst_aligned_with_market = at <= price * 1.08
 
     if not analyst_aligned_with_market:
-        # Analysts agree with our model — the divergence is genuine, don't blend
-        return iv, False, pre_iv, "Analyst consensus agrees with VALUS model — divergence trusted"
+        # Analysts agree with our model, the divergence is genuine, don't blend
+        return iv, False, pre_iv, "Analyst consensus agrees with VALUS model, divergence trusted"
 
     # Sector growth ceiling
     s_lower   = (sector   or "").lower()
@@ -4561,14 +4561,14 @@ def _reality_reconciliation(iv, price, analyst_target, implied_g, sector, indust
     if implied_g is not None:
         if implied_g > ceiling * 1.2:
             # Market is pricing in growth that exceeds the credible sector ceiling.
-            # Don't blend — flag the speculation but trust the model.
+            # Don't blend, flag the speculation but trust the model.
             return (iv, False, pre_iv,
-                    f"Market implies {implied_g*100:.1f}% growth — exceeds {ceiling_label} "
+                    f"Market implies {implied_g*100:.1f}% growth, exceeds {ceiling_label} "
                     f"ceiling × 1.2; speculative gap left unblended")
         if implied_g < -0.05:
-            # Market pricing in contraction below -5% — distress signal, trust model
+            # Market pricing in contraction below -5%, distress signal, trust model
             return (iv, False, pre_iv,
-                    f"Market implies {implied_g*100:.1f}% (contraction) — distress signal, "
+                    f"Market implies {implied_g*100:.1f}% (contraction), distress signal, "
                     f"model trusted")
 
     # ── Reconcile: blend model 55%, analyst 25%, market 20% ──────────────────
@@ -4588,14 +4588,14 @@ def build_expectation_gap(implied_g, model_g, price, model_iv_pre_sultan,
                            analyst_growth, sector, yrs=10):
     """
     Given implied and model growth rates, produce the full Expectation Gap
-    payload: narrative sentences, disagreement score (0–10), and flags.
+    payload: narrative sentences, disagreement score (0-10), and flags.
 
-    implied_g           — rate market is pricing in (from reverse DCF)
-    model_g             — VALUS Stage-1 forecast (s1)
-    price               — current market price
-    model_iv_pre_sultan — VALUS IV before Sultan Split (consensus_anchor_pre_iv)
-    analyst_growth      — sell-side consensus growth (or None)
-    sector              — for industry benchmark comparisons
+    implied_g, rate market is pricing in (from reverse DCF)
+    model_g, VALUS Stage-1 forecast (s1)
+    price, current market price
+    model_iv_pre_sultan, VALUS IV before Sultan Split (consensus_anchor_pre_iv)
+    analyst_growth, sell-side consensus growth (or None)
+    sector, for industry benchmark comparisons
     """
     if implied_g is None or model_g is None or model_g <= 0:
         return None
@@ -4611,7 +4611,7 @@ def build_expectation_gap(implied_g, model_g, price, model_iv_pre_sultan,
     if model_iv_pre_sultan and price and price > 0:
         model_disagrees_pct = round((model_iv_pre_sultan - price) / price * 100, 1)
 
-    # ── Expectation Gap Score (0–10) ────────────────────────────────────────
+    # ── Expectation Gap Score (0-10) ────────────────────────────────────────
     # 0 = market and model fully agree | 10 = massive disagreement
     raw_score = min(abs(gap_pp) / 3.0, 10.0)   # every 3pp of gap = 1 point
     score = round(raw_score, 1)
@@ -4622,7 +4622,7 @@ def build_expectation_gap(implied_g, model_g, price, model_iv_pre_sultan,
 
     primary = (
         f"To justify today's price, revenue must grow ~{ig_pct}% for {yrs} years. "
-        f"Our model forecasts {mg_pct}% — a {abs(gap_pp)}pp expectation gap."
+        f"Our model forecasts {mg_pct}%, a {abs(gap_pp)}pp expectation gap."
     )
 
     if gap_pp > 0:
@@ -4632,7 +4632,7 @@ def build_expectation_gap(implied_g, model_g, price, model_iv_pre_sultan,
         )
     else:
         verdict = (
-            f"The market demands {abs(gap_pp)}pp less growth than VALUS forecasts — "
+            f"The market demands {abs(gap_pp)}pp less growth than VALUS forecasts, "
             f"our model sees significant upside the market has not priced in."
         )
 
@@ -4640,30 +4640,30 @@ def build_expectation_gap(implied_g, model_g, price, model_iv_pre_sultan,
     flags = []
 
     if implied_g > 0.50:
-        flags.append(f"Market implies {ig_pct}% sustained growth — fewer than 1% of public companies have achieved this over 10 years.")
+        flags.append(f"Market implies {ig_pct}% sustained growth, fewer than 1% of public companies have achieved this over 10 years.")
 
     elif implied_g > 0.35:
-        flags.append(f"Market implies {ig_pct}% growth — historically achieved only by hyper-scalers in early expansion phases.")
+        flags.append(f"Market implies {ig_pct}% growth, historically achieved only by hyper-scalers in early expansion phases.")
 
     elif implied_g > 0.25:
-        flags.append(f"Market implies {ig_pct}% growth — above the top-decile long-run growth rate for S&P 500 companies.")
+        flags.append(f"Market implies {ig_pct}% growth, above the top-decile long-run growth rate for S&P 500 companies.")
 
     if analyst_growth and implied_g > analyst_growth * 2.0:
         cons_pct = round(analyst_growth * 100, 1)
-        flags.append(f"Market prices in {ig_pct}% growth vs sell-side consensus of {cons_pct}% — a 2× premium above analyst expectations.")
+        flags.append(f"Market prices in {ig_pct}% growth vs sell-side consensus of {cons_pct}%, a 2× premium above analyst expectations.")
 
     if implied_g < 0:
-        flags.append("Market is pricing in negative growth — the stock is discounting a contraction scenario.")
+        flags.append("Market is pricing in negative growth, the stock is discounting a contraction scenario.")
 
     if abs(gap_pp) < 5 and score < 2:
-        flags.append("Market and model are broadly aligned — no major expectation mismatch detected.")
+        flags.append("Market and model are broadly aligned, no major expectation mismatch detected.")
 
     return {
         "implied_growth_pct":    ig_pct,
         "model_growth_pct":      mg_pct,
         "gap_pp":                gap_pp,
         "gap_pct":               gap_pct,
-        "score":                 score,               # 0–10
+        "score":                 score,               # 0-10
         "primary_narrative":     primary,
         "verdict_narrative":     verdict,
         "flags":                 flags,
@@ -4675,24 +4675,24 @@ def build_expectation_gap(implied_g, model_g, price, model_iv_pre_sultan,
 # ── FIN 415 FCFE Model ─────────────────────────────────────────────────────────
 # Implements the exact bottom-up FCFE formula from the FIN 415 DCF Equity Analyst
 # Template (Spring 2026). Discount rate = Cost of Equity (Ke), not WACC.
-# No net-debt bridge needed — FCFE is already an equity cash flow.
+# No net-debt bridge needed, FCFE is already an equity cash flow.
 
 def run_fin415_fcfe(
     revenue_base, cogs_base, fixed_costs_base, da_base, amort_base,
     ppe_base, ltd_base, interest_rate, tax_rate, shares,
-    rev_growths,      # list[float] length=yrs — one rate per year
-    cogs_growth,      # float — applied uniformly (COGS/rev margin management)
-    fc_growth,        # float — operating leverage: fixed costs grow slower than rev
-    da_growth,        # float — D&A tracks capex intensity
-    amort_growth,     # float — amortization (usually slow/flat)
-    ppe_growth,       # float — net PPE asset base growth
-    ltd_growth,       # float — LTD growth (negative = debt paydown)
-    ke,               # float — cost of equity (CAPM discount rate)
-    tgr,              # float — terminal growth rate
+    rev_growths,      # list[float] length=yrs, one rate per year
+    cogs_growth,      # float, applied uniformly (COGS/rev margin management)
+    fc_growth,        # float, operating leverage: fixed costs grow slower than rev
+    da_growth,        # float, D&A tracks capex intensity
+    amort_growth,     # float, amortization (usually slow/flat)
+    ppe_growth,       # float, net PPE asset base growth
+    ltd_growth,       # float, LTD growth (negative = debt paydown)
+    ke,               # float, cost of equity (CAPM discount rate)
+    tgr,              # float, terminal growth rate
     yrs=10,
 ):
     """
-    FIN 415 bottom-up FCFE DCF — exact cell-by-cell logic from the Excel NPV tab.
+    FIN 415 bottom-up FCFE DCF, exact cell-by-cell logic from the Excel NPV tab.
 
     FCFE[y] = EBIT − NetCapex + D&A + Amort − Interest×(1−Tax) + ΔDebt
     TV      = FCFE[10] × (1+TGR) / (Ke − TGR) / (1+Ke)^10
@@ -4740,7 +4740,7 @@ def run_fin415_fcfe(
         ltd        = ltd * (1 + ltd_growth)
         delta_debt = ltd - beg_ltd                # positive = new borrowing
 
-        # FCFE — FIN 415 NPV tab formula (row 25)
+        # FCFE, FIN 415 NPV tab formula (row 25)
         fcfe = (ebit
                 - net_capex
                 + da
@@ -4760,7 +4760,7 @@ def run_fin415_fcfe(
             "op_margin": round(ebit / rev * 100, 2) if rev > 0 else 0.0,
         })
 
-    # Terminal value — Gordon Growth on Year-N FCFE, discounted back N years
+    # Terminal value, Gordon Growth on Year-N FCFE, discounted back N years
     tv_fcfe      = fcfe_rows[-1]["fcfe"] * (1 + tgr)
     terminal_val = tv_fcfe / (ke - tgr)
     pv_terminal  = terminal_val / ((1 + ke) ** yrs)
@@ -4852,7 +4852,7 @@ def run_banking_fcfe(info, fx_rate, ke, tg, yrs=10, growth=None):
     """
     Bank-appropriate Dividend-Adjusted FCFE.
 
-    Banks have no meaningful CapEx or working-capital cycle — their economics
+    Banks have no meaningful CapEx or working-capital cycle, their economics
     are: Net Income → retained earnings (regulatory capital) → dividends to
     equity.  For an equity-DCF, FCFE collapses to Net Income (the cash
     available to equity holders, since regulatory reinvestment is a
@@ -4878,7 +4878,7 @@ def run_banking_fcfe(info, fx_rate, ke, tg, yrs=10, growth=None):
         safe(info.get("earningsGrowth")) or
         safe(info.get("revenueGrowth")) or 0.06
     )
-    g1 = min(max(float(g1), 0.02), 0.20)   # banking earnings growth: 2–20%
+    g1 = min(max(float(g1), 0.02), 0.20)   # banking earnings growth: 2-20%
 
     ni_curr  = float(ni) * fx_rate
     pv_total = 0.0
@@ -4907,7 +4907,7 @@ def run_dcf_single(base_fcf, s1, s2, tg, wacc, yrs, info, fx_rate,
     """
     Run one DCF scenario. base_fcf must already be in trading currency.
     net_debt_override: pass pre-computed net debt (e.g. from quarterly balance sheet)
-    to bypass the info-dict lookup — important for mega-caps where cash is material.
+    to bypass the info-dict lookup, important for mega-caps where cash is material.
     stage1_years: how many years to use s1 growth (default: yrs // 2).
       Pass yrs to keep Stage 1 growth for the full projection horizon (Backbone moat).
     shares_override: skip info-dict lookup for shares outstanding.  Used by the
@@ -5050,10 +5050,10 @@ def get_base_fcf(info, stock):
 # 8%, and never allowed to exceed Stage-2 minus 0.5pp.
 
 _FINVIZ_GROWTH_CACHE = {}        # {ticker: (timestamp, growth_or_none)}
-_FINVIZ_GROWTH_CACHE_TTL = 6 * 3600   # 6h — Finviz updates daily at most
+_FINVIZ_GROWTH_CACHE_TTL = 6 * 3600   # 6h, Finviz updates daily at most
 
 # Long-history income statement cache. Sources data from SEC EDGAR's
-# companyfacts API — 25+ years of annual revenue/net income, free, no key.
+# companyfacts API, 25+ years of annual revenue/net income, free, no key.
 # Two-tier cache: ticker→CIK map (refreshed weekly), per-ticker facts (24h).
 _LONG_INCOME_CACHE = {}          # {ticker: (timestamp, {"revenue":[...], "net_income":[...]})}
 _LONG_INCOME_CACHE_TTL = 24 * 3600
@@ -5147,7 +5147,7 @@ def _get_long_income_history(ticker):
                                 if year and val is not None:
                                     # Several filings can refer to the same FY
                                     # (e.g. amended). Keep the largest absolute
-                                    # value — usually the original full-year.
+                                    # value, usually the original full-year.
                                     prev = by_year.get(year)
                                     if prev is None or abs(val) > abs(prev):
                                         by_year[year] = val
@@ -5369,7 +5369,7 @@ def get_valuation_history(ticker, info, fx_rate=1.0, sector=None, industry=None)
     monthly close prices.
 
     Uses deterministic growth assumptions (point-in-time trailing CAGR with
-    sector guardrails) — no Claude calls, no analyst estimates of the future.
+    sector guardrails), no Claude calls, no analyst estimates of the future.
     Cached 12h per ticker.
 
     Returns dict:
@@ -5585,7 +5585,7 @@ def compute_blended_growth(stock, info, fcf_series, income_stmt,
 
     # Long-history extension: yfinance free tier returns ~4 years of annual
     # data; stockanalysis.com serves ~10y free with no API-key throttle.
-    # Prefer it when it gives a strictly longer series — falling back
+    # Prefer it when it gives a strictly longer series, falling back
     # silently to yfinance when the scrape fails or returns nothing.
     av = _get_long_income_history(ticker)
     if av:
@@ -5635,7 +5635,7 @@ def compute_blended_growth(stock, info, fcf_series, income_stmt,
     # mid-cycle "average mature company in this industry" growth rate.
     industry_proxy = ind_params["max_s1"] * 0.70
 
-    # Sparseness/volatility detection — if both rev and fcf history are
+    # Sparseness/volatility detection, if both rev and fcf history are
     # too short or whipsawing, and we have no forward signals, fall back.
     rev_ok = len(rev) >= 3 and not _is_volatile(rev)
     fcf_ok = len(fcf_series or []) >= 3 and not _is_volatile(fcf_series or [])
@@ -5671,13 +5671,13 @@ def compute_blended_growth(stock, info, fcf_series, income_stmt,
     # Cap Stage 1 at industry ceiling, floor at 0.
     s1 = max(min(s1, ind_params["max_s1"]), 0.0)
 
-    # Stage 2 (years 6–10): mean-reversion. Weighted toward historical CAGR
+    # Stage 2 (years 6-10): mean-reversion. Weighted toward historical CAGR
     # and a mature-industry rate, with a small Finviz contribution if present.
     s2_pairs = []
     if hist_growth is not None:
         s2_pairs.append((hist_growth, 0.55))
     if finviz_growth is not None:
-        s2_pairs.append((finviz_growth * 0.7, 0.25))   # discount: years 6–10 is past Finviz horizon
+        s2_pairs.append((finviz_growth * 0.7, 0.25))   # discount: years 6-10 is past Finviz horizon
     s2_pairs.append((industry_proxy * 0.5, 0.20))      # mature-rate anchor
     s2 = sum(v * w for v, w in s2_pairs) / sum(w for _, w in s2_pairs)
     # Cap Stage 2 at 65% of industry max_s1 (matches existing convention),
@@ -5703,7 +5703,7 @@ def compute_blended_growth(stock, info, fcf_series, income_stmt,
 # ── Comparables-Based Profitability Model ────────────────────────────────────
 # For early-stage / volatile-margin companies (e.g. Cava, Toast, Reddit) the
 # DCF base FCF is misleading because the company is choosing growth over
-# profit. This model picks 2–3 mature peers (e.g. Cava → Chipotle), pulls
+# profit. This model picks 2-3 mature peers (e.g. Cava → Chipotle), pulls
 # their operating margins, assigns a probability the target reaches those
 # margins, and produces a probability-weighted base FCF.
 #
@@ -5711,7 +5711,7 @@ def compute_blended_growth(stock, info, fcf_series, income_stmt,
 # (yfinance peer lists are noisy and often include unrelated names), so
 # we curate the obvious analogues and gracefully no-op for everything else.
 COMPARABLES_MAP = {
-    # Restaurants — fast-casual / QSR / coffee
+    # Restaurants, fast-casual / QSR / coffee
     "CAVA":  ["CMG", "SHAK", "QSR"],
     "SG":    ["CMG", "SHAK"],
     "WING":  ["CMG", "DPZ"],
@@ -5756,7 +5756,7 @@ COMPARABLES_MAP = {
     "NIO":   ["TSLA"],
     "XPEV":  ["TSLA"],
     "LI":    ["TSLA"],
-    "CHPT":  ["EBAY"],                   # speculative — charging network
+    "CHPT":  ["EBAY"],                   # speculative, charging network
     "ENPH":  ["FSLR"],
     "RUN":   ["FSLR"],
     "PLUG":  ["FSLR"],
@@ -5823,15 +5823,15 @@ _SHARE_CLASS_PAIRS = {
 
 
 def _mos_unreliable(mos, iv_confidence, ticker):
-    """True only when a margin of safety is almost certainly a DATA ERROR — not
+    """True only when a margin of safety is almost certainly a DATA ERROR, not
     merely large. A high-confidence DCF that says a beaten-down growth name is
     150-250% undervalued is a real (if aggressive) model output and MUST be
     shown; the earlier blanket `|MOS| > 100` rule wrongly hid those (e.g. FIVN,
     a high-confidence DCF, was rendering as "N/A · data issue"). We only
     suppress the verdict when:
       • the ticker has a known share-class sibling (Yahoo share-count
-        misalignment — BRK.B vs BRK.A, GOOG/GOOGL, etc.),
-      • the gap is absurd (> 300%) — almost always a forward-earnings spike,
+        misalignment, BRK.B vs BRK.A, GOOG/GOOGL, etc.),
+      • the gap is absurd (> 300%), almost always a forward-earnings spike,
         unit error, or stale/split-adjusted price even when labeled "DCF", or
       • the gap is large (> 100%) AND the IV is NOT a high-confidence DCF
         (i.e. it leaned on a fallback/emergency method, so the number is shaky).
@@ -5858,7 +5858,7 @@ def _diagnose_low_confidence(info, ticker, mos, intrinsic_value, price):
     if mos is None or abs(mos) <= 100:
         return flags
 
-    # 1) Share-class mismatch — the named ticker has a sibling class that
+    # 1) Share-class mismatch, the named ticker has a sibling class that
     # often diverges in Yahoo's share-count / market-cap data.
     t_norm = (ticker or "").upper().replace("-", ".")
     sibling = _SHARE_CLASS_PAIRS.get(t_norm) or _SHARE_CLASS_PAIRS.get(t_norm.replace(".", "-"))
@@ -5867,13 +5867,13 @@ def _diagnose_low_confidence(info, ticker, mos, intrinsic_value, price):
             "factor": "share_class_mismatch",
             "message": (
                 f"{ticker} has a sibling share class ({sibling}). Yahoo's share-count "
-                f"and price feeds for multi-class stocks frequently misalign — "
+                f"and price feeds for multi-class stocks frequently misalign, "
                 f"the IV may be using one class's shares against the other's price. "
                 f"Cross-check on the sibling ticker before relying on this number."
             ),
         })
 
-    # 2) Forward-earnings spike — analyst +1y EPS growth above 50% almost
+    # 2) Forward-earnings spike, analyst +1y EPS growth above 50% almost
     # always means a base-rate-warped forecast (post-pandemic recovery, AI
     # revenue ramp). The Stage-1 cap will already trim it, but the signal
     # is usually unreliable on its own and skews the IV.
@@ -5900,7 +5900,7 @@ def _diagnose_low_confidence(info, ticker, mos, intrinsic_value, price):
             ),
         })
 
-    # 3) Stale price — currentPrice diverging materially from previousClose,
+    # 3) Stale price, currentPrice diverging materially from previousClose,
     # or the regular session marker being stuck on a past close, suggests
     # a quote feed problem rather than a real mispricing.
     cur_price = safe(info.get("currentPrice"))
@@ -5913,14 +5913,14 @@ def _diagnose_low_confidence(info, ticker, mos, intrinsic_value, price):
                 "message": (
                     f"Current price (${cur_price:.2f}) gaps {gap*100:.0f}% from "
                     f"previous close (${prev_close:.2f}). This usually indicates "
-                    f"a stale quote, a halt/resumption, or a corporate action — "
+                    f"a stale quote, a halt/resumption, or a corporate action, "
                     f"not a real price move. IV may not reflect the live market."
                 ),
             })
     market_state = info.get("marketState")
     if market_state in ("CLOSED", "PREPRE", "POSTPOST") and cur_price and intrinsic_value:
         # Closed-market quote is fine, but the spread could be old enough to
-        # matter if it's been a long weekend / holiday — flag conservatively.
+        # matter if it's been a long weekend / holiday, flag conservatively.
         if abs(mos) > 150:
             flags.append({
                 "factor": "stale_price_data",
@@ -5941,8 +5941,7 @@ def _company_age_years(info, stock=None):
     """
     if not info:
         info = {}
-    # Yahoo sometimes returns this in seconds, sometimes milliseconds —
-    # detect by magnitude (anything > year 3000 in seconds is ms).
+    # Yahoo sometimes returns this in seconds, sometimes milliseconds, # detect by magnitude (anything > year 3000 in seconds is ms).
     for key in ("firstTradeDateEpochUtc", "firstTradeDate"):
         v = info.get(key)
         if v:
@@ -6002,14 +6001,14 @@ def _attainment_probability(age_years, rev_growth, current_op_margin,
                              peer_op_margin):
     """
     Probability the target company reaches the peer-average operating margin.
-    Heuristic — calibrated for fast-growing companies that haven't yet
+    Heuristic, calibrated for fast-growing companies that haven't yet
     optimised for profit. Returns float in [0.25, 0.85].
 
     Inputs (any may be None):
-      age_years        — years since IPO
-      rev_growth       — TTM revenue growth (decimal, e.g. 0.32)
-      current_op_margin — TTM operating margin
-      peer_op_margin   — peer-average operating margin (target)
+      age_years, years since IPO
+      rev_growth, TTM revenue growth (decimal, e.g. 0.32)
+      current_op_margin, TTM operating margin
+      peer_op_margin, peer-average operating margin (target)
     """
     p = 0.55  # base rate
 
@@ -6056,7 +6055,7 @@ def compute_comparables_model(stock, info, ticker, base_fcf, tax_rate, fx_rate):
     """
     Probability-weighted FCF for early-stage / volatile-margin companies.
 
-    Returns dict (always — caller checks `used`):
+    Returns dict (always, caller checks `used`):
       {
         "used":              bool,
         "reason":            str,        # why triggered or skipped
@@ -6103,7 +6102,7 @@ def compute_comparables_model(stock, info, ticker, base_fcf, tax_rate, fx_rate):
         op_m < 0.05 and rev_g > 0.15
     )
     if not (young or grow_over_profit):
-        out["reason"] = "mature with positive margins — comparables not needed"
+        out["reason"] = "mature with positive margins, comparables not needed"
         return out
 
     peers = COMPARABLES_MAP.get(ticker.upper())
@@ -6133,7 +6132,7 @@ def compute_comparables_model(stock, info, ticker, base_fcf, tax_rate, fx_rate):
     # Peer-implied FCF: revenue × peer-avg EBIT margin × (1 − tax).
     rev_ttm = safe(info.get("totalRevenue"))
     if not rev_ttm or rev_ttm <= 0:
-        out["reason"] = "missing revenue — cannot compute peer-implied FCF"
+        out["reason"] = "missing revenue, cannot compute peer-implied FCF"
         return out
     rev_ttm = float(rev_ttm) * fx_rate
     peer_implied_fcf = rev_ttm * avg_margin * (1 - tax_rate)
@@ -6147,7 +6146,7 @@ def compute_comparables_model(stock, info, ticker, base_fcf, tax_rate, fx_rate):
     weighted = p_attain * peer_implied_fcf + (1 - p_attain) * current_floor
 
     if weighted <= (base_fcf or 0):
-        out["reason"] = "peer-implied FCF below current — model would lower IV, skipping"
+        out["reason"] = "peer-implied FCF below current, model would lower IV, skipping"
         return out
 
     out["used"]              = True
@@ -6177,12 +6176,12 @@ def get_forward_growth(stock, info, fcf_series):
         ee = stock.earnings_estimate
         if ee is not None and not ee.empty and '+1y' in ee.index:
             v = safe(ee.loc['+1y', 'growth'])
-            if v is not None and 0.02 < v < 0.35:          # was 0.50 — too permissive
+            if v is not None and 0.02 < v < 0.35:          # was 0.50, too permissive
                 return float(v), "Analyst EPS est. (+1y)"
     except Exception:
         pass
 
-    # 2. Growth estimates dataframe — use stockTrend only, not indexTrend
+    # 2. Growth estimates dataframe, use stockTrend only, not indexTrend
     # (indexTrend reflects the sector/index benchmark, not the individual company)
     try:
         ge = stock.growth_estimates
@@ -6195,13 +6194,13 @@ def get_forward_growth(stock, info, fcf_series):
     except Exception:
         pass
 
-    # 3. Trailing earnings growth (YoY) — bounded conservatively
+    # 3. Trailing earnings growth (YoY), bounded conservatively
     # Cap at 25%: a single-year spike in earnings is not a sustainable run-rate
     ag = safe(info.get("earningsGrowth"))
     if ag is not None and 0.02 < ag < 0.25:
         return float(ag), "Trailing EPS growth (YoY)"
 
-    # 4. Conservative historical FCF CAGR — take the LOWER of 3-year and 5-year CAGR
+    # 4. Conservative historical FCF CAGR, take the LOWER of 3-year and 5-year CAGR
     # so that a recent strong year doesn't inflate the long-run projection.
     positives = [f for f in fcf_series if f > 0]
     if len(positives) >= 3:
@@ -6220,13 +6219,13 @@ def get_forward_growth(stock, info, fcf_series):
         label = "Historical FCF CAGR (3yr)" if len(cagr_candidates) == 1 else "Historical FCF CAGR (min 3yr/5yr)"
         return hg, label
 
-    # 5. Revenue growth proxy — discount to 75% (FCF grows slower than revenue when
+    # 5. Revenue growth proxy, discount to 75% (FCF grows slower than revenue when
     # margins are compressing), cap at 25%
     rev_g = safe(info.get("revenueGrowth"))
     if rev_g and 0.02 < rev_g < 0.40:
         return float(min(rev_g * 0.75, 0.25)), "Revenue growth proxy"
 
-    return 0.06, "Default (6%)"     # lowered from 7% — more conservative baseline
+    return 0.06, "Default (6%)"     # lowered from 7%, more conservative baseline
 
 
 # ── Sector / P/E context ───────────────────────────────────────────────────────
@@ -6239,7 +6238,7 @@ def get_dcf_notes(sector, industry, pe, fcf_available):
 
     # Sector-specific DCF reliability
     # Payment networks (credit service / payment network / payment processing) are
-    # asset-light, fee-based businesses — the banking interest-cost warning does NOT apply.
+    # asset-light, fee-based businesses, the banking interest-cost warning does NOT apply.
     _is_payment_net = any(x in ind for x in ["credit service", "payment network", "payment processing"])
     if not _is_payment_net and (
         any(x in s for x in ["financial", "bank"]) or
@@ -6260,12 +6259,12 @@ def get_dcf_notes(sector, industry, pe, fcf_available):
         notes.append({
             "type": "warn",
             "text": "REIT: GAAP earnings are depressed by non-cash depreciation. "
-                    "Funds From Operations (FFO) and AFFO are the standard valuation metrics — not FCF or EPS."
+                    "Funds From Operations (FFO) and AFFO are the standard valuation metrics, not FCF or EPS."
         })
     elif "utilities" in s:
         notes.append({
             "type": "info",
-            "text": "Utilities: Regulated rate-of-return constrains growth. Terminal growth of 2–2.5% is typical. "
+            "text": "Utilities: Regulated rate-of-return constrains growth. Terminal growth of 2-2.5% is typical. "
                     "EV/EBITDA and dividend yield are widely used alongside DCF."
         })
     elif "energy" in s:
@@ -6301,7 +6300,7 @@ def get_dcf_notes(sector, industry, pe, fcf_available):
             notes.append({
                 "type": "warn",
                 "text": "Negative P/E: Company is currently loss-making. "
-                        "P/E is not meaningful — use EV/Revenue or EV/EBITDA."
+                        "P/E is not meaningful, use EV/Revenue or EV/EBITDA."
             })
         elif pe > 80:
             notes.append({
@@ -6344,12 +6343,12 @@ LABEL_MAP = {
     "Pretax Income":                       "Pre-Tax Income",
     "Tax Provision":                       "Income Tax Expense",
     "Net Income":                          "Net Income",
-    "Diluted EPS":                         "EPS — Diluted",
-    "Basic EPS":                           "EPS — Basic",
+    "Diluted EPS":                         "EPS, Diluted",
+    "Basic EPS":                           "EPS, Basic",
     "EBITDA":                              "EBITDA",
     "Normalized EBITDA":                   "Normalized EBITDA",
     "Reconciled Depreciation":             "D&A (Reconciled)",
-    # Balance Sheet — Assets
+    # Balance Sheet, Assets
     "Cash And Cash Equivalents":                        "Cash & Equivalents",
     "Cash Cash Equivalents And Short Term Investments": "Cash & Short-term Investments",
     "Accounts Receivable":                              "Accounts Receivable",
@@ -6364,7 +6363,7 @@ LABEL_MAP = {
     "Other Non Current Assets":                         "Other Non-Current Assets",
     "Total Non Current Assets":                         "Total Non-Current Assets",
     "Total Assets":                                     "Total Assets",
-    # Balance Sheet — Liabilities
+    # Balance Sheet, Liabilities
     "Accounts Payable":                                 "Accounts Payable",
     "Current Debt":                                     "Short-term Debt",
     "Current Deferred Revenue":                         "Deferred Revenue",
@@ -6376,7 +6375,7 @@ LABEL_MAP = {
     "Other Non Current Liabilities":                    "Other Non-Current Liabilities",
     "Total Non Current Liabilities Net Minority Interest": "Total Non-Current Liabilities",
     "Total Liabilities Net Minority Interest":          "Total Liabilities",
-    # Balance Sheet — Equity
+    # Balance Sheet, Equity
     "Common Stock":                                     "Common Stock & APIC",
     "Retained Earnings":                                "Retained Earnings",
     "Gains Losses Not Affecting Retained Earnings":     "Other Comprehensive Income",
@@ -6386,7 +6385,7 @@ LABEL_MAP = {
     "Net Debt":                                         "Net Debt / (Cash)",
     "Working Capital":                                  "Working Capital",
     "Tangible Book Value":                              "Tangible Book Value",
-    # Cash Flow — Operating
+    # Cash Flow, Operating
     "Net Income From Continuing Operations":  "Net Income",
     "Depreciation And Amortization":          "Depreciation & Amortization",
     "Depreciation Amortization Depletion":    "D&A (Gross)",
@@ -6398,7 +6397,7 @@ LABEL_MAP = {
     "Change In Working Capital":              "Δ Working Capital (Net)",
     "Other Non Cash Items":                   "Other Non-Cash Items",
     "Operating Cash Flow":                    "Cash from Operations (CFO)",
-    # Cash Flow — Investing
+    # Cash Flow, Investing
     "Purchase Of PPE":                        "Capital Expenditures (CapEx)",
     "Capital Expenditure":                    "Capital Expenditures (CapEx)",
     "Purchase Of Investment":                 "Purchases of Securities",
@@ -6407,7 +6406,7 @@ LABEL_MAP = {
     "Net Business Purchase And Sale":         "Net Acquisitions / Disposals",
     "Net Other Investing Changes":            "Other Investing Activities",
     "Investing Cash Flow":                    "Cash from Investing (CFI)",
-    # Cash Flow — Financing
+    # Cash Flow, Financing
     "Common Stock Payments":                  "Share Repurchases",
     "Common Stock Issuance":                  "Proceeds from Share Issuance",
     "Cash Dividends Paid":                    "Dividends Paid",
@@ -6560,7 +6559,7 @@ def robots_txt():
 @app.route("/docs")
 def docs():
     """
-    Public-facing explainer for VALUS — what DCF / FCF / MOS / WACC mean,
+    Public-facing explainer for VALUS, what DCF / FCF / MOS / WACC mean,
     how to read the verdict tiers, and how the strategic-asset + news
     layers shape the IV.  No JS dependencies; deliberately readable on
     any device with no auth required.
@@ -6593,7 +6592,7 @@ def methodology():
 def stocks_index():
     """
     Index of every ticker VALUS covers. Each link is a server-rendered
-    landing page with unique title/meta/JSON-LD — the main lever for
+    landing page with unique title/meta/JSON-LD, the main lever for
     long-tail SEO ("AAPL fair value", "MSFT DCF", etc.).
     """
     tickers = sorted(DISCOVERY_TICKERS)
@@ -6613,7 +6612,7 @@ def stock_page(ticker):
         return redirect("/stocks", code=302)
 
     # Try the warm analyze cache first so we render with real numbers when
-    # available — but never block the page render on a slow yfinance call.
+    # available, but never block the page render on a slow yfinance call.
     company_name = t
     sector = ""
     price = None
@@ -6667,25 +6666,25 @@ def stock_page(ticker):
     )
 
 
-# Educational concept pages — each one is a unique URL Google can rank for.
+# Educational concept pages, each one is a unique URL Google can rank for.
 _LEARN_PAGES = {
     "dcf-valuation": {
         "title": "What Is a DCF Valuation? · VALUS",
         "h1":    "What is a DCF valuation?",
         "desc":  "A discounted cash flow (DCF) valuation estimates a company's intrinsic value by projecting its future free cash flows and discounting them to today using a required rate of return.",
         "body": [
-            "A discounted cash flow valuation answers a simple question: if I owned this entire business, how much cash would it generate for me over the next decade and beyond — and what is that stream of cash worth in today's dollars?",
+            "A discounted cash flow valuation answers a simple question: if I owned this entire business, how much cash would it generate for me over the next decade and beyond, and what is that stream of cash worth in today's dollars?",
             "The model has three pieces. First, project free cash flow (operating cash flow minus capital expenditure) for ten years, growing at a plausible rate. Second, calculate a terminal value capturing everything beyond year 10 using a perpetuity growth formula. Third, discount every future cash flow back to today using the weighted average cost of capital (WACC), which represents the return investors require to bear the risk of owning the business.",
             "The total present value, divided by shares outstanding, gives you a per-share intrinsic value. Compare it to the current price to get your margin of safety. If intrinsic value is meaningfully above price, the stock may be undervalued; if it's below, the market is pricing in growth or quality the cash flows don't yet justify.",
-            "DCF models are powerful but sensitive to inputs — small changes in growth or discount rate produce large swings in fair value. That's why VALUS shows you every assumption transparently and lets you adjust them.",
+            "DCF models are powerful but sensitive to inputs, small changes in growth or discount rate produce large swings in fair value. That's why VALUS shows you every assumption transparently and lets you adjust them.",
         ],
     },
     "intrinsic-value": {
         "title": "What Does Intrinsic Value Mean? · VALUS",
         "h1":    "What does intrinsic value mean?",
-        "desc":  "Intrinsic value is the present value of all the cash a business will generate for its owners over its lifetime — the price a rational investor would pay if they could see the future perfectly.",
+        "desc":  "Intrinsic value is the present value of all the cash a business will generate for its owners over its lifetime, the price a rational investor would pay if they could see the future perfectly.",
         "body": [
-            "Intrinsic value is the price an asset is actually worth based on its underlying fundamentals — what it produces, owns, and earns — independent of where the market happens to price it today. For a stock, intrinsic value is the present value of all future cash the business will generate for its owners.",
+            "Intrinsic value is the price an asset is actually worth based on its underlying fundamentals, what it produces, owns, and earns, independent of where the market happens to price it today. For a stock, intrinsic value is the present value of all future cash the business will generate for its owners.",
             "Benjamin Graham, the father of value investing, framed intrinsic value as a range rather than a single number. Two careful analysts looking at the same company will produce different intrinsic values because they make different assumptions about growth, margins, and risk. The point isn't to be exactly right; it's to be approximately right and to leave a margin of safety so that being wrong doesn't ruin you.",
             "VALUS estimates intrinsic value with a 10-year DCF model, then sanity-checks the result against analyst consensus and a reverse-DCF that solves for the implied growth rate the current price requires.",
         ],
@@ -6693,7 +6692,7 @@ _LEARN_PAGES = {
     "margin-of-safety": {
         "title": "What Is Margin of Safety? · VALUS",
         "h1":    "What is margin of safety?",
-        "desc":  "Margin of safety is the gap between a stock's intrinsic value and its current market price — the buffer that protects you if your valuation assumptions turn out to be too optimistic.",
+        "desc":  "Margin of safety is the gap between a stock's intrinsic value and its current market price, the buffer that protects you if your valuation assumptions turn out to be too optimistic.",
         "body": [
             "Margin of safety is the difference between what a stock is worth and what it costs, expressed as a percentage. If intrinsic value is $100 and the price is $70, the margin of safety is +30%. If intrinsic value is $100 and the price is $130, the margin of safety is −30%.",
             "The concept comes from Benjamin Graham, who argued that because all valuation depends on uncertain forecasts, you should only buy when the price is meaningfully below your estimate of fair value. The bigger the discount, the more your investment is protected if the business underperforms or your assumptions were too rosy.",
@@ -6703,20 +6702,20 @@ _LEARN_PAGES = {
     "free-cash-flow": {
         "title": "What Is Free Cash Flow? · VALUS",
         "h1":    "What is free cash flow?",
-        "desc":  "Free cash flow is the cash a business generates from operations after paying for the capital expenditure needed to maintain and grow the business — the cash actually available to shareholders.",
+        "desc":  "Free cash flow is the cash a business generates from operations after paying for the capital expenditure needed to maintain and grow the business, the cash actually available to shareholders.",
         "body": [
             "Free cash flow (FCF) is operating cash flow minus capital expenditure. It's the cash the business actually generates for its owners after funding the investments needed to keep operating and growing.",
-            "Why FCF and not earnings? Earnings include non-cash items like depreciation and can be massaged through accounting choices. FCF is harder to fake because it tracks the actual movement of money. Warren Buffett's preferred valuation metric — owner earnings — is a refinement of free cash flow.",
+            "Why FCF and not earnings? Earnings include non-cash items like depreciation and can be massaged through accounting choices. FCF is harder to fake because it tracks the actual movement of money. Warren Buffett's preferred valuation metric, owner earnings, is a refinement of free cash flow.",
             "VALUS uses trailing free cash flow as the input to its DCF model, smoothed across multiple years for companies with volatile FCF profiles.",
         ],
     },
     "wacc": {
         "title": "What Is WACC? · VALUS",
         "h1":    "What is WACC (weighted average cost of capital)?",
-        "desc":  "WACC is the blended cost of all the capital a company uses — debt and equity — weighted by how much of each it has on its balance sheet. It's the discount rate used in DCF valuation.",
+        "desc":  "WACC is the blended cost of all the capital a company uses, debt and equity, weighted by how much of each it has on its balance sheet. It's the discount rate used in DCF valuation.",
         "body": [
             "Weighted average cost of capital is the return investors require to fund a business, blending the cost of debt (after-tax interest) and the cost of equity (typically estimated via the Capital Asset Pricing Model). Each is weighted by its share of the company's total capital.",
-            "WACC is the discount rate in a DCF model — it's how you translate future cash flows into today's dollars. A higher WACC means cash arriving in year 10 is worth less today; a lower WACC means it's worth more. WACC is the single most sensitive lever in any DCF.",
+            "WACC is the discount rate in a DCF model, it's how you translate future cash flows into today's dollars. A higher WACC means cash arriving in year 10 is worth less today; a lower WACC means it's worth more. WACC is the single most sensitive lever in any DCF.",
             "Higher-risk companies (early-stage, leveraged, cyclical) have higher WACCs; mature, predictable businesses have lower ones. VALUS estimates WACC from the company's balance sheet and equity beta, with a sector-typical fallback.",
         ],
     },
@@ -6735,7 +6734,7 @@ def learn_page(slug):
 def sitemap():
     """
     XML sitemap for crawlers. Lists every static SEO page plus the full
-    DISCOVERY_TICKERS universe of /stocks/<ticker> pages — that's the
+    DISCOVERY_TICKERS universe of /stocks/<ticker> pages, that's the
     long-tail surface area Google can index.
     """
     base = (request.url_root or "/").rstrip("/")
@@ -6757,7 +6756,7 @@ def sitemap():
 
 
 # ════════════════════════════════════════════════════════════════════════
-# Auth — Google OAuth (optional, gracefully disabled if env vars missing)
+# Auth, Google OAuth (optional, gracefully disabled if env vars missing)
 # ════════════════════════════════════════════════════════════════════════
 
 def require_user():
@@ -6826,7 +6825,7 @@ def api_me():
             None if (plus or unlimited)
             else (SIGNED_IN_SEARCH_LIMIT if user else ANON_SEARCH_LIMIT)
         ),
-        # True when Vercel KV / Upstash is connected — portfolios written
+        # True when Vercel KV / Upstash is connected, portfolios written
         # by /api/portfolio actually persist across cold starts and across
         # devices for the same Google account.  When False, writes hit
         # ephemeral memory only and signing in on another device will see
@@ -6867,7 +6866,7 @@ def _keep_session_alive():
     """Renew the 30-day rolling window on every request from a signed-in user.
 
     Without this, the session expires 30 days after sign-in regardless of
-    activity. With it, an active user's login persists indefinitely — they
+    activity. With it, an active user's login persists indefinitely, they
     only get bumped out after a full month of zero use.
     """
     if session.get("user"):
@@ -6880,7 +6879,7 @@ def auth_login():
         return jsonify({
             "error": "Google OAuth not configured on this deployment.",
         }), 503
-    # Preserve where to land after OAuth — defaults to root
+    # Preserve where to land after OAuth, defaults to root
     next_url = request.args.get("next", "/")
     session["auth_next"] = next_url
     redirect_uri = url_for("auth_callback", _external=True)
@@ -6950,9 +6949,8 @@ def auth_logout():
 @app.route("/api/account/delete", methods=["POST"])
 def account_delete():
     """Right to erasure (GDPR Art. 17 / CCPA): permanently delete every
-    piece of data we hold for the signed-in user — portfolios, watchlist,
-    recent tickers, subscription record, and any public leaderboard rows —
-    cancel any active Stripe subscription so billing stops, then clear the
+    piece of data we hold for the signed-in user, portfolios, watchlist,
+    recent tickers, subscription record, and any public leaderboard rows, cancel any active Stripe subscription so billing stops, then clear the
     session.
     """
     user, err = require_user()
@@ -7019,7 +7017,7 @@ def account_delete():
     except Exception as e:
         print(f"[valus] account_delete leaderboard purge failed: {e}")
 
-    # 5. End the session — the account is gone.
+    # 5. End the session, the account is gone.
     session.pop("user", None)
     session.pop("auth_next", None)
 
@@ -7027,7 +7025,7 @@ def account_delete():
 
 
 # ════════════════════════════════════════════════════════════════════════
-# Stripe — VALUS+ $2/month subscription
+# Stripe, VALUS+ $2/month subscription
 # ════════════════════════════════════════════════════════════════════════
 # Three routes:
 #   GET  /subscribe              → create Checkout Session, redirect to Stripe
@@ -7117,9 +7115,9 @@ def stripe_webhook():
 
     The webhook secret is non-optional: an unsigned POST is rejected.  We
     handle three events:
-      checkout.session.completed     — user just paid; grant VALUS+
-      customer.subscription.updated  — renew / status change / period end
-      customer.subscription.deleted  — fully ended; revoke VALUS+
+      checkout.session.completed, user just paid; grant VALUS+
+      customer.subscription.updated, renew / status change / period end
+      customer.subscription.deleted, fully ended; revoke VALUS+
     """
     if not _STRIPE_CONFIGURED or not _stripe:
         return jsonify({"error": "stripe not configured"}), 503
@@ -7179,7 +7177,7 @@ def stripe_webhook():
                         "since":              int(time.time()),
                     })
                 except Exception:
-                    # Stripe API blip — still grant access for now; the
+                    # Stripe API blip, still grant access for now; the
                     # next subscription.updated webhook will reconcile.
                     _write_subscription(user_sub, {
                         "status":             "active",
@@ -7193,7 +7191,7 @@ def stripe_webhook():
             md = obj.get("metadata") or {}
             user_sub = md.get("user_sub")
             if not user_sub:
-                # Look up via customer_id reverse-map (search KV — small N).
+                # Look up via customer_id reverse-map (search KV, small N).
                 cust_id = obj.get("customer")
                 user_sub = _find_user_by_customer(cust_id) if cust_id else None
             if user_sub:
@@ -7265,7 +7263,7 @@ def subscription_status():
 def subscription_cancel():
     """Cancel the user's active subscription at the end of the current period.
 
-    We don't immediately void — they keep access until the period_end so the
+    We don't immediately void, they keep access until the period_end so the
     $2 they already paid for the current month isn't wasted.
     """
     if not _STRIPE_CONFIGURED or not _stripe:
@@ -7657,7 +7655,7 @@ def valuation_history():
         if not payload:
             return jsonify({
                 "available": False,
-                "reason": "Historical data unavailable — non-US filer or insufficient EDGAR coverage.",
+                "reason": "Historical data unavailable, non-US filer or insufficient EDGAR coverage.",
             })
         payload["available"] = True
         return jsonify(payload)
@@ -7666,14 +7664,14 @@ def valuation_history():
         return jsonify({"error": "Couldn't build valuation history. Try again."}), 500
 
 
-# ── Live quote endpoint (fast tier — price ticks only) ─────────────────────
+# ── Live quote endpoint (fast tier, price ticks only) ─────────────────────
 # Lightweight companion to /api/analyze.  Uses yfinance fast_info["lastPrice"]
 # which is dramatically cheaper than a full info dict pull (no DCF, no news,
 # no balance sheet).  Designed for 30s polling on the heatmap and analyze
 # view so investor demos look alive.  Multi-ticker via comma-separated query
 # string; parallelized with the same ThreadPoolExecutor pattern as discover.
 _QUOTE_CACHE = {}        # {ticker: (timestamp, payload)}
-_QUOTE_CACHE_TTL_S = 30  # short TTL — this is a live-tick endpoint
+_QUOTE_CACHE_TTL_S = 30  # short TTL, this is a live-tick endpoint
 
 @app.route("/api/trending")
 @limiter.limit(limit_light)
@@ -7764,10 +7762,10 @@ def statements():
 _ANALYZE_CACHE = {}      # {(ticker, params_str): (timestamp, response_dict)}
 _ANALYZE_CACHE_TTL_S = 3600        # 1 hour default during market hours; market-aware TTL extends overnight to next 9:30 AM ET
 _ANALYZE_CACHE_TTL_POPULAR_S = 7200  # 2 hours for popular mega-caps
-_ANALYZE_CACHE_TTL_DISCOVERY_S = 93600  # 26 hours — bridges daily cron cycles
+_ANALYZE_CACHE_TTL_DISCOVERY_S = 93600  # 26 hours, bridges daily cron cycles
 _ANALYZE_CACHE_MAX = 500     # cap to bound memory
 
-# Mega-cap tickers that get cached longer — fundamentals barely move intraday
+# Mega-cap tickers that get cached longer, fundamentals barely move intraday
 # and these account for the bulk of search traffic.
 _POPULAR_TICKERS = {
     "AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "META", "TSLA", "NVDA",
@@ -7782,7 +7780,7 @@ def _et_now():
     return datetime.now(ZoneInfo("America/New_York"))
 
 def _seconds_until_next_market_open() -> int:
-    # Holidays not handled — extra cache lifetime over a holiday is harmless.
+    # Holidays not handled, extra cache lifetime over a holiday is harmless.
     now_et = _et_now()
     open_today = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
     if now_et < open_today and now_et.weekday() < 5:
@@ -7851,13 +7849,13 @@ def _check_anon_search_limit(req, ticker: str):
       • VALUS+ subscriber:      unlimited.
       • Internal callers (Discover treemap, hourly cron warm-up): bypass.
 
-    Counts are keyed to unique TICKERS per day — re-fetching the same ticker
+    Counts are keyed to unique TICKERS per day, re-fetching the same ticker
     multiple times in one day is free.  Quota resets at midnight ET.
     """
     if req.headers.get("X-Valus-Internal") == "1":
         return None
 
-    # Team access code (you + your board) — unlimited, no account needed.
+    # Team access code (you + your board), unlimited, no account needed.
     if session.get("valus_unlimited"):
         return None
 
@@ -7873,7 +7871,7 @@ def _check_anon_search_limit(req, ticker: str):
         error_code = "search_limit_signed_in"
         message = (
             f"You've used your {SIGNED_IN_SEARCH_LIMIT} free searches today. "
-            f"Upgrade to VALUS+ for unlimited — $2/month."
+            f"Upgrade to VALUS+ for unlimited, $2/month."
         )
     else:
         scope = "anon"
@@ -7883,7 +7881,7 @@ def _check_anon_search_limit(req, ticker: str):
         message = (
             f"You've used your {ANON_SEARCH_LIMIT} free searches today. "
             f"Sign in for {SIGNED_IN_SEARCH_LIMIT}/day or upgrade to "
-            f"VALUS+ for unlimited — $2/month."
+            f"VALUS+ for unlimited, $2/month."
         )
 
     seen = _searches_today(scope, ident)
@@ -7904,7 +7902,7 @@ def _check_anon_search_limit(req, ticker: str):
 
 # ── Search popularity tracking ────────────────────────────────────────────
 # Per-ticker daily counter for the public "Trending today" chip row + your
-# private analytics.  No PII, no cookies — just (ticker, ET-date) → count.
+# private analytics.  No PII, no cookies, just (ticker, ET-date) → count.
 # 8-day TTL covers a full week + buffer for weekend rollovers.
 _TREND_TTL_S = 8 * 86400
 _TREND_MEM: dict = {}  # in-memory fallback when _kv unavailable
@@ -8090,7 +8088,7 @@ def api_watchlist_movers():
 
     Reads the user's KV portfolio, fetches a fast quote for each ticker, and
     returns up to `limit` rows sorted by |daily_change_pct| desc.  No external
-    /api/analyze cost — uses the lightweight /api/quote path (yfinance fast_info).
+    /api/analyze cost, uses the lightweight /api/quote path (yfinance fast_info).
     """
     user, err = require_user()
     if err: return err
@@ -8161,7 +8159,7 @@ def _market_aware_ttl(base_ttl: int) -> int:
 
 def _ttl_for_ticker(ticker):
     t = (ticker or "").upper()
-    # Discovery tickers cache the longest — the daily cron rebuilds them, and
+    # Discovery tickers cache the longest, the daily cron rebuilds them, and
     # we want every viewer of the heatmap to hit the cache, not pay for compute.
     if t in globals().get("DISCOVERY_TICKERS_SET", set()):
         return _market_aware_ttl(_ANALYZE_CACHE_TTL_DISCOVERY_S)
@@ -8221,7 +8219,7 @@ def _analyze_cache_set(key, payload):
 # /api/discover endpoint is hit, each ticker is run through the cached
 # analyze pipeline and a thin summary is returned.
 DISCOVERY_TICKERS = [
-    # ── Tech — mega + semis + software ────────────────────────────────────
+    # ── Tech, mega + semis + software ────────────────────────────────────
     "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA",
     "ORCL", "CRM", "ADBE", "AMD", "AVGO", "QCOM", "TXN",
     "MU", "ARM", "NOW", "PLTR", "PANW", "CRWD", "DDOG",
@@ -8229,12 +8227,12 @@ DISCOVERY_TICKERS = [
     "ABNB", "RBLX", "INTU", "ADP", "IBM", "CSCO",
     # ── Strategic semis ───────────────────────────────────────────────────
     "AMAT", "KLAC", "LRCX", "ASML", "MRVL", "TSM",
-    # ── Financials — banks, payments, brokers ─────────────────────────────
+    # ── Financials, banks, payments, brokers ─────────────────────────────
     "JPM", "BAC", "WFC", "GS", "MS", "C",
     "BRK-B", "V", "MA", "AXP",
     "SCHW", "BLK", "SPGI", "ICE", "CME",
     "COIN", "HOOD",
-    # ── Healthcare — pharma + medtech ─────────────────────────────────────
+    # ── Healthcare, pharma + medtech ─────────────────────────────────────
     "JNJ", "UNH", "LLY", "PFE", "ABBV", "MRK", "TMO", "ABT",
     "ISRG", "VRTX", "AMGN", "GILD", "BMY",
     "ELV", "CVS", "MDT", "SYK",
@@ -8287,7 +8285,7 @@ TOP_PICKS_UNIVERSE = [
 def top_picks():
     """Thin summaries for every ticker in TOP_PICKS_UNIVERSE.
 
-    Anonymous-allowed — the homepage Top Picks card row needs this even
+    Anonymous-allowed, the homepage Top Picks card row needs this even
     before sign-in.  Internal callers (the daily warm cron) bypass any
     auth via X-Valus-Internal.
     """
@@ -8395,8 +8393,7 @@ def cron_refresh_top_picks():
     def _force_refresh(t):
         try:
             ck = _analyze_cache_key(t, {})
-            # Evict any existing cache entry (both in-memory AND Redis) —
-            # the cron IS the freshness guarantee, so we don't trust stale.
+            # Evict any existing cache entry (both in-memory AND Redis), # the cron IS the freshness guarantee, so we don't trust stale.
             _ANALYZE_CACHE.pop(ck, None)
             if _kv:
                 try: _kv.delete(ck)
@@ -8468,7 +8465,7 @@ def _write_leaderboard(entries):
     global _LEADERBOARD_MEM
     _LEADERBOARD_MEM = list(entries)
     serialized = _json.dumps(entries)
-    # KV first — write-through
+    # KV first, write-through
     kv_set(LEADERBOARD_KEY, serialized)
     # /tmp mirror so local dev still works without KV
     try:
@@ -8480,7 +8477,7 @@ def _write_leaderboard(entries):
 
 # Max simultaneous leaderboard entries a single user can keep alive.
 # Once they hit this, publishing a new portfolio displaces their oldest
-# entry instead of being rejected — power users still get a smooth UX,
+# entry instead of being rejected, power users still get a smooth UX,
 # but nobody hogs the global cap.
 MAX_LB_ENTRIES_PER_USER = 10
 
@@ -8599,7 +8596,7 @@ def leaderboard_delete():
     return jsonify({"ok": True, "removed": before - len(entries)})
 
 
-# ── Portfolio storage (schema v3 — multi-named portfolios) ──────────────
+# ── Portfolio storage (schema v3, multi-named portfolios) ──────────────
 # KV remains the authoritative source of truth when configured.  One key
 # per user (`valus:portfolio:{user_sub}`) holds the user's full collection
 # in a single document:
@@ -8617,11 +8614,11 @@ def leaderboard_delete():
 #     }
 #   }
 #
-# A single document keeps create/rename/delete atomic — no orphaned
+# A single document keeps create/rename/delete atomic, no orphaned
 # portfolios on a partial write.  Migration from v2 ({items, updated_at})
 # and the very-old v1 shared dict happens on first read and is persisted
 # back so subsequent reads are pure v3.  KV read/write failures still
-# surface as 503 — we never silently fall back to ephemeral storage and
+# surface as 503, we never silently fall back to ephemeral storage and
 # overwrite durable data with an empty snapshot.
 #
 # When KV is NOT configured (local dev), we mirror the same record shape
@@ -8754,7 +8751,7 @@ def _read_portfolio_record(user_sub):
                 except Exception as e:
                     raise KVUnavailable(f"kv_set({key}) v2 migration failed: {e}")
                 return record
-        # Per-user key miss — try the very-old v1 shared dict.
+        # Per-user key miss, try the very-old v1 shared dict.
         try:
             legacy_raw = _kv.get(PORTFOLIO_LEGACY_KEY)
         except Exception as e:
@@ -8775,7 +8772,7 @@ def _read_portfolio_record(user_sub):
                 raise
             except Exception:
                 pass
-        # First-ever read for this user — seed an empty default so the rest
+        # First-ever read for this user, seed an empty default so the rest
         # of the code never has to handle a missing record.
         record = _pf_default_record()
         try:
@@ -8783,7 +8780,7 @@ def _read_portfolio_record(user_sub):
         except Exception as e:
             raise KVUnavailable(f"kv_set({key}) seed failed: {e}")
         return record
-    # Local-dev path (no KV) — same shape, mirrored to /tmp.
+    # Local-dev path (no KV), same shape, mirrored to /tmp.
     if not _PORTFOLIOS_MEM and os.path.exists(PORTFOLIO_FILE):
         try:
             with open(PORTFOLIO_FILE) as f:
@@ -8836,7 +8833,7 @@ def _write_portfolio_record(user_sub, record):
 def _resolve_pid(record, pid):
     """Return a valid pid: the requested one if it exists in the record,
     else default_pid, else any pid (defensive).  May return None only if
-    the record has zero portfolios — _repair_record prevents that."""
+    the record has zero portfolios, _repair_record prevents that."""
     portfolios = record.get("portfolios") or {}
     if pid and pid in portfolios:
         return pid
@@ -9124,12 +9121,11 @@ def portfolios_set_default():
 # ── Watchlist storage ────────────────────────────────────────────────────
 # Conceptually separate from portfolios: a watchlist is what you're WATCHING
 # (no holding semantics, no allocation), a portfolio is what you OWN.  We
-# keep them in distinct KV records so the two surfaces stay independent —
-# users can have a 50-ticker watchlist and a 5-name portfolio without those
+# keep them in distinct KV records so the two surfaces stay independent, # users can have a 50-ticker watchlist and a 5-name portfolio without those
 # 50 tickers cluttering their allocation chart or their movers feed.
 #
 # One watchlist per user (no naming / no multi-watchlist).  Free for
-# everyone — no plan gating.
+# everyone, no plan gating.
 WATCHLIST_FILE      = "/tmp/.valus_watchlists.json"
 WATCHLIST_KEY_FMT   = "valus:watchlist:{sub}"
 WATCHLIST_MAX_ITEMS = 200
@@ -9155,7 +9151,7 @@ def _read_user_watchlist(user_sub):
             except Exception:
                 return {"items": [], "updated_at": None}
         return {"items": [], "updated_at": None}
-    # Local-dev mirror — same shape, persisted to /tmp.
+    # Local-dev mirror, same shape, persisted to /tmp.
     if not _WATCHLISTS_MEM and os.path.exists(WATCHLIST_FILE):
         try:
             with open(WATCHLIST_FILE) as f:
@@ -9227,7 +9223,7 @@ def watchlist_get():
 def watchlist_save():
     """Replace the watchlist.  Body: {items: [{ticker,name,sector,addedAt}, ...]}.
     Server dedupes by ticker, caps at WATCHLIST_MAX_ITEMS, trims strings to
-    safe sizes — same hygiene applied to the portfolio save endpoint."""
+    safe sizes, same hygiene applied to the portfolio save endpoint."""
     user, err = require_user()
     if err: return err
     body = request.get_json(silent=True) or {}
@@ -9270,9 +9266,9 @@ INVESTOR_REGISTRY = [
     {"cik": 1067983, "name": "Berkshire Hathaway",       "manager": "Warren Buffett",
      "blurb": "Concentrated, long-duration value with a quality bias."},
     {"cik": 1697748, "name": "ARK Investment Management","manager": "Cathie Wood",
-     "blurb": "Disruptive innovation — genomics, AI, robotics, fintech, crypto."},
+     "blurb": "Disruptive innovation, genomics, AI, robotics, fintech, crypto."},
     {"cik": 1336528, "name": "Pershing Square",          "manager": "Bill Ackman",
-     "blurb": "High-conviction activism — typically 8–12 names."},
+     "blurb": "High-conviction activism, typically 8-12 names."},
     {"cik": 1649339, "name": "Scion Asset Management",   "manager": "Michael Burry",
      "blurb": "Contrarian deep-value, often hedged or short-biased."},
     {"cik": 1061165, "name": "Baupost Group",            "manager": "Seth Klarman",
@@ -9280,17 +9276,17 @@ INVESTOR_REGISTRY = [
     {"cik": 1079114, "name": "Greenlight Capital",       "manager": "David Einhorn",
      "blurb": "Long/short value with rigorous fundamental research."},
     {"cik": 1173334, "name": "Pabrai Investment Funds",  "manager": "Mohnish Pabrai",
-     "blurb": "Few bets, big bets, infrequent bets — Buffett-school value."},
+     "blurb": "Few bets, big bets, infrequent bets, Buffett-school value."},
     {"cik": 1656456, "name": "Appaloosa LP",             "manager": "David Tepper",
      "blurb": "Macro-aware distressed and event-driven equities."},
     {"cik": 1040273, "name": "Third Point",              "manager": "Dan Loeb",
-     "blurb": "Activist + event-driven — pushes for catalysts."},
+     "blurb": "Activist + event-driven, pushes for catalysts."},
     {"cik": 1167483, "name": "Tiger Global Management",  "manager": "Chase Coleman",
      "blurb": "Tech-heavy growth, public + private crossover."},
     {"cik": 1037045, "name": "Tudor Investment Corp",    "manager": "Paul Tudor Jones",
-     "blurb": "Macro discretionary — equities, rates, currencies."},
+     "blurb": "Macro discretionary, equities, rates, currencies."},
     {"cik": 1536411, "name": "Duquesne Family Office",   "manager": "Stanley Druckenmiller",
-     "blurb": "Concentrated macro — early on AI and obesity drugs."},
+     "blurb": "Concentrated macro, early on AI and obesity drugs."},
     {"cik": 1029160, "name": "Soros Fund Management",    "manager": "George Soros",
      "blurb": "Reflexivity-driven macro and equity positioning."},
 ]
@@ -9558,7 +9554,7 @@ def _resolve_cusip_to_ticker(cusip, name_hint=None):
 
 # Lazy-validated investor registry. On first call we hit each CIK's
 # submissions endpoint in parallel and drop any that don't have a recent
-# 13F-HR or 13F-HR/A filing — catches mistyped CIKs and family offices
+# 13F-HR or 13F-HR/A filing, catches mistyped CIKs and family offices
 # below the 13F filing threshold (which would otherwise error on click).
 # Cached for 24h.
 _REGISTRY_VALIDATED_TTL = 24 * 3600
@@ -9611,7 +9607,7 @@ def templates_13f(cik):
 
     filing = _fetch_latest_13f_accession(cik)
     if not filing:
-        # Serve any stale cache if available — better than a hard error.
+        # Serve any stale cache if available, better than a hard error.
         if kv_cached:
             return jsonify(kv_cached)
         return jsonify({"error": "No recent 13F-HR filing found"}), 404
@@ -9685,7 +9681,7 @@ def leaderboard_claim():
 def leaderboard():
     """
     Returns top portfolios with computed MOS metrics.  Heavy lifting is
-    cached — each portfolio entry computes avg_mos / undervalued_count
+    cached, each portfolio entry computes avg_mos / undervalued_count
     by re-using the analyze cache for each ticker.  Sorted by score
     (avg_mos by default, can be tweaked via ?sort=).
     """
@@ -9737,7 +9733,7 @@ def leaderboard():
 @limiter.limit(limit_medium)
 def api_valuations():
     """Current IV / MOS / tier for a set of tickers, read from the SHARED
-    analyze cache so the same ticker resolves identically everywhere — e.g.
+    analyze cache so the same ticker resolves identically everywhere, e.g.
     the same stock held in two different portfolios now shows the SAME margin
     of safety (the prior bug was each portfolio rendering its own stale
     add-time snapshot). Extreme / unreliable valuations return mos=null +
@@ -9798,7 +9794,7 @@ def dcf_recompute():
         basis:    { base_fcf, net_debt, shares, yrs, stage1_years,
                     base_s1, base_s2, base_wacc, base_tg, base_iv },
         override: { s1, s2, wacc, tg },   # each in percent (e.g. 9.5 not 0.095)
-        price:    <current price, optional — used to compute MOS>
+        price:    <current price, optional, used to compute MOS>
       }
     Returns: { iv, mos, base_iv }
 
@@ -9884,7 +9880,7 @@ def analyze():
             _record_recent_ticker(_current_user["sub"], ticker)
 
     # Cache lookup. VALUS+ subscribers may pass ?fresh=1 to bypass cache
-    # and force a fresh pull (free users can't — would exhaust upstream
+    # and force a fresh pull (free users can't, would exhaust upstream
     # rate-limit headroom for everyone else).
     _ck = _analyze_cache_key(ticker, dict(request.args))
     _force_fresh = (
@@ -9921,7 +9917,7 @@ def analyze():
             }), 404
 
         # ── ETF / Index detection ─────────────────────────────────────────────
-        # ETFs and indexes don't have FCF/DCF — return a structured "ETF view"
+        # ETFs and indexes don't have FCF/DCF, return a structured "ETF view"
         # response with metadata + price history that the frontend can display
         # nicely, instead of failing silently with a blank IV.
         quote_type = (info.get("quoteType") or "").upper()
@@ -9949,7 +9945,7 @@ def analyze():
                 "asset_class":   "ETF" if quote_type == "ETF" else quote_type.title(),
                 "price_history": ph,
                 "etf_message":   ("DCF valuation does not apply to ETFs. ETFs hold a "
-                                  "basket of assets — to value an ETF, look at the "
+                                  "basket of assets, to value an ETF, look at the "
                                   "weighted intrinsic value of its underlying holdings."),
             }
             _analyze_cache_set(_ck, etf_payload)
@@ -9957,7 +9953,7 @@ def analyze():
 
         cashflow      = stock.cashflow
         income_stmt   = stock.income_stmt
-        balance_sheet = stock.balance_sheet    # annual — for FIN 415 PPE lookup
+        balance_sheet = stock.balance_sheet    # annual, for FIN 415 PPE lookup
 
         # ── Currency handling ─────────────────────────────────────────────────
         # yfinance returns financial statements in the company's REPORTING currency
@@ -9967,7 +9963,7 @@ def analyze():
         trading_ccy   = info.get("currency") or "USD"
         fx_rate = get_fx_rate(financial_ccy, trading_ccy)   # e.g. EUR→USD ≈ 1.09
 
-        # Sector / industry — needed early for industry guardrails
+        # Sector / industry, needed early for industry guardrails
         sector   = info.get("sector",   "")
         industry = info.get("industry", "")
 
@@ -9991,8 +9987,8 @@ def analyze():
         policy_tailwind_labels  = catalyst.get("policy_tailwind_labels", [])
         policy_headwind         = catalyst.get("policy_headwind", False)
         policy_headwind_labels  = catalyst.get("policy_headwind_labels", [])
-        # Transformative-catalyst growth lift — Stage-1 growth bump (in pp,
-        # 0.0–3.0) when a durable industry-specific milestone fires.
+        # Transformative-catalyst growth lift, Stage-1 growth bump (in pp,
+        # 0.0-3.0) when a durable industry-specific milestone fires.
         growth_catalyst_lift_pp = catalyst.get("growth_catalyst_lift_pp", 0.0)
         transformative_labels   = catalyst.get("transformative_labels", [])
         news_interpretation     = catalyst.get("news_interpretation", [])
@@ -10005,7 +10001,7 @@ def analyze():
         # non-strategic tickers.  Effects are wired in later when WACC and
         # sector ceiling are computed.
         strategic = _strategic_classifier(ticker)
-        # Live policy tailwinds further deepen the strategic effect — a
+        # Live policy tailwinds further deepen the strategic effect, a
         # CHIPS Act announcement on a strategic name is a stronger signal
         # than the curation alone.
         if strategic and policy_tailwind:
@@ -10013,7 +10009,7 @@ def analyze():
             strategic["wacc_delta"] -= 0.0025      # extra 25bp reduction
             strategic["live_policy_amplifier"] = True
 
-        # ── Price history (5Y daily — frontend filters to 3M/6M/YTD/1Y/2Y/5Y) ──
+        # ── Price history (5Y daily, frontend filters to 3M/6M/YTD/1Y/2Y/5Y) ──
         hist = stock.history(period="5y", interval="1d")
         price_history = []
         if not hist.empty:
@@ -10059,7 +10055,7 @@ def analyze():
 
         # ── Structural Transformer detection ──────────────────────────────────
         # Must run after rev_ttm is known; rev_ttm is computed below in the
-        # income-statement block so we defer the call — state vars initialised here.
+        # income-statement block so we defer the call, state vars initialised here.
         is_structural_transformer  = False
         st_capex_abs               = 0.0
         st_capex_to_rev            = 0.0
@@ -10069,7 +10065,7 @@ def analyze():
         # ── Tax rate ──────────────────────────────────────────────────────────
         tax_rate = calc_tax_rate(info, income_stmt)
 
-        # ── Dividend yield (use trailingAnnualDividendYield — Yahoo's dividendYield can be erroneous) ──
+        # ── Dividend yield (use trailingAnnualDividendYield, Yahoo's dividendYield can be erroneous) ──
         raw_yield = safe(info.get("trailingAnnualDividendYield")) or safe(info.get("dividendYield"))
         if raw_yield is not None:
             # Guard against Yahoo returning yield as a percentage (e.g. 37 instead of 0.37)
@@ -10099,8 +10095,8 @@ def analyze():
             _detect_structural_transformer(info, sector, industry, cashflow, rev_ttm)
 
         # Apply CapEx normalization for:
-        #   a) Full structural transformers (TSLA) — 50% addback
-        #   b) Partial platform normalization (AMZN) — 20% logistics addback
+        #   a) Full structural transformers (TSLA), 50% addback
+        #   b) Partial platform normalization (AMZN), 20% logistics addback
         # The addback runs whenever st_capex_abs > 0, regardless of is_structural_transformer.
         if st_capex_abs > 0 and st_capex_addback_rate > 0:
             st_capex_addback = st_capex_addback_rate * st_capex_abs * fx_rate
@@ -10111,7 +10107,7 @@ def analyze():
         # ── High-growth fintech FCF normalization ─────────────────────────────
         # Companies like SOFI, HOOD, COIN, AFRM often have negative TTM FCF
         # because they are reinvesting aggressively in growth.  Their true
-        # earnings power is best approximated from forward EPS × shares — the
+        # earnings power is best approximated from forward EPS × shares, the
         # market values them on forward earnings, not trailing cash flow.
         # Runs AFTER structural transformer detection so we can exclude TST-type
         # companies that already have their own capex normalisation.
@@ -10120,12 +10116,12 @@ def analyze():
             _shares_nrm = (safe(info.get("sharesOutstanding") or
                                 info.get("impliedSharesOutstanding"), 0) or 0)
             _rev_nrm    = (safe(info.get("totalRevenue"), 0) or 0) * fx_rate
-            # Strategy A: forward earnings proxy (preferred — analyst-grounded)
+            # Strategy A: forward earnings proxy (preferred, analyst-grounded)
             if _fwd_eps and _fwd_eps > 0 and _shares_nrm > 0:
                 _norm_fcf = _fwd_eps * _shares_nrm * fx_rate * 0.80  # 80% earnings→FCF
                 if _norm_fcf > 0:
                     base_fcf      = _norm_fcf
-                    fcf_source    = "Fwd earnings proxy (TTM FCF negative — normalized)"
+                    fcf_source    = "Fwd earnings proxy (TTM FCF negative, normalized)"
                     dcf_available = True
             # Strategy B: revenue × sector-typical FCF margin (any non-bank sector)
             elif _rev_nrm > 0:
@@ -10140,7 +10136,7 @@ def analyze():
                 if _norm_fcf > 0:
                     base_fcf      = _norm_fcf
                     fcf_source    = (f"Revenue×{int(_fcf_margin_proxy*100)}% proxy "
-                                     "(TTM FCF negative — sector margin normalization)")
+                                     "(TTM FCF negative, sector margin normalization)")
                     dcf_available = True
             # Strategy C: EBITDA × 0.60 fallback (last-resort for EBITDA-positive cos)
             if not dcf_available:
@@ -10149,13 +10145,13 @@ def analyze():
                     _norm_fcf = float(_ebitda_nrm) * fx_rate * 0.60
                     if _norm_fcf > 0:
                         base_fcf      = _norm_fcf
-                        fcf_source    = "EBITDA×60% proxy (TTM FCF negative — EBITDA fallback)"
+                        fcf_source    = "EBITDA×60% proxy (TTM FCF negative, EBITDA fallback)"
                         dcf_available = True
 
         # ── FCF Volatility Normalization ──────────────────────────────────────
         # When TTM FCF is 2× or more above the recent 3-year positive average,
         # the number likely reflects a one-off working-capital release, asset sale,
-        # or timing difference — not a sustainable run rate.  Normalize to
+        # or timing difference, not a sustainable run rate.  Normalize to
         # 60% TTM + 40% 3-year mean so the DCF doesn't extrapolate an outlier.
         # Structural Transformer and partial logistics add-backs are exempt because
         # their base_fcf has already been deliberately adjusted upward.
@@ -10218,11 +10214,11 @@ def analyze():
         st_robotaxi_s2_applied   = False  # set inside DCF block for structural transformer
         strategic_wacc_delta     = 0.0    # set inside DCF block for strategic asset
         strategic_floor_applied  = False  # set after DCF when strategic floor lifts IV
-        # IV provenance — overwritten as the pipeline progresses to higher-fidelity methods.
+        # IV provenance, overwritten as the pipeline progresses to higher-fidelity methods.
         iv_source_label          = "DCF"  # default; downgraded to "Multiples", "Sultan Split", or emergency labels
         iv_confidence            = "high" # downgraded to "medium" / "low" by lower-fidelity paths
         net_debt         = ((safe(info.get("totalDebt"), 0) or 0) - (safe(info.get("totalCash"), 0) or 0)) * fx_rate
-        # FIN 415 defaults — overridden inside DCF block when data is available
+        # FIN 415 defaults, overridden inside DCF block when data is available
         fin415_used         = False
         fin415_price        = None
         fin415_fcfe_rows    = None
@@ -10233,11 +10229,11 @@ def analyze():
         ke                  = 0.0
 
         # Banking: force DCF off unconditionally (whether or not FCF happens to be
-        # positive in a given period) — interest is a core operating cost for banks,
+        # positive in a given period), interest is a core operating cost for banks,
         # not a financing item, so FCF-based DCF systematically misprices them.
         if valuation_method == "banking":
             dcf_available = False
-            dcf_warning   = ("Traditional DCF is not applicable for banks — "
+            dcf_warning   = ("Traditional DCF is not applicable for banks, "
                              "interest income/expense are core operating costs, not financing items. "
                              "Value derived from sector-specific capital efficiency: "
                              "Price-to-Book (P/B) and Return on Equity (ROE).")
@@ -10248,8 +10244,7 @@ def analyze():
         # are priced with technology-platform parameters instead.
         if is_structural_transformer:
             ind_class = "structural_transformer"
-        # Payment networks (Visa, Mastercard, AXP) use their own parameter set —
-        # asset-light moat businesses with structurally higher terminal growth ceilings.
+        # Payment networks (Visa, Mastercard, AXP) use their own parameter set, # asset-light moat businesses with structurally higher terminal growth ceilings.
         _ind_lower = (industry or "").lower()
         is_payment_network = any(x in _ind_lower for x in
                                  ["credit service", "payment network", "payment processing"])
@@ -10258,7 +10253,7 @@ def analyze():
         ind_params = INDUSTRY_PARAMS[ind_class]
         user_tg_override = request.args.get("terminal") is not None
 
-        # Default — populated inside the `else` branch when a DCF actually runs.
+        # Default, populated inside the `else` branch when a DCF actually runs.
         # Surfaced in the response so /api/dcf/recompute can replay the formula
         # with user-overridden assumptions; null when DCF isn't applicable.
         dcf_recompute_basis = None
@@ -10267,24 +10262,24 @@ def analyze():
             # Banking warning already set above; set generic message for all other cases
             if valuation_method != "banking":
                 if not fcf_series:
-                    dcf_warning = "No Free Cash Flow data available — DCF not computed."
+                    dcf_warning = "No Free Cash Flow data available, DCF not computed."
                 else:
                     most_recent = fcf_series[0] if fcf_series else 0
                     dcf_warning = (
-                        f"Most recent FCF is negative (${most_recent/1e9:.1f}B) — "
+                        f"Most recent FCF is negative (${most_recent/1e9:.1f}B), "
                         "DCF intrinsic value is unreliable. Showing multiples-based analysis only."
                     )
         else:
             # ── Growth rate ───────────────────────────────────────────────────
             # Backbone moat companies (High-Growth / Mature Cash Machine) get a
-            # lifted max_s1 cap — their analyst estimates legitimately exceed 25%.
+            # lifted max_s1 cap, their analyst estimates legitimately exceed 25%.
             is_backbone_moat = (
                 moat_detected and
                 moat_path in ("High-Growth Backbone", "Mature Cash Machine")
             )
             effective_max_s1 = max(ind_params["max_s1"], 0.35) if is_backbone_moat else ind_params["max_s1"]
 
-            # Blended growth calculator — produces s1, s2, and a tg seed by
+            # Blended growth calculator, produces s1, s2, and a tg seed by
             # combining historical revenue/earnings/FCF, next-2y analyst
             # estimates, and Finviz 5-year EPS growth, with industry-proxy
             # fallback when data is sparse or volatile. User overrides on the
@@ -10313,7 +10308,7 @@ def analyze():
                 # industry-specific milestone fired in the news scan
                 # (eVTOL Part 135, semi tape-out, biotech BLA approval,
                 # etc.), the model lifts Stage-1 growth in addition to
-                # the IV multiplier — reflects 2-3 years of accelerating
+                # the IV multiplier, reflects 2-3 years of accelerating
                 # revenue, not just a sentiment pop.  Capped at the
                 # sector ceiling so it never produces nonsensical growth.
                 if growth_catalyst_lift_pp > 0:
@@ -10327,7 +10322,7 @@ def analyze():
 
             if s2_ov:
                 _s2_raw = float(s2_ov) / 100 if float(s2_ov) > 1 else float(s2_ov)
-                # Stage-2 ceiling is 65% of Stage-1 ceiling — same logic the
+                # Stage-2 ceiling is 65% of Stage-1 ceiling, same logic the
                 # auto path uses to keep mid-period growth credible.
                 s2 = max(min(_s2_raw, effective_max_s1 * 0.65), tg)
             else:
@@ -10362,7 +10357,7 @@ def analyze():
                 tg = min(tg, ind_params["max_tg"])
 
             # ── Moat Premium adjustments ─────────────────────────────────────
-            # Applied after industry guardrails — moat premium is a reward on top,
+            # Applied after industry guardrails, moat premium is a reward on top,
             # not a way to bypass sector-specific safety floors.
             if moat_detected:
                 _wacc_pre  = wacc
@@ -10390,7 +10385,7 @@ def analyze():
 
             # ── Structural Transformer WACC ceiling ───────────────────────────
             # High-beta auto/industrial tickers get a market beta that reflects
-            # legacy cyclical risk — not appropriate for an AI-platform company.
+            # legacy cyclical risk, not appropriate for an AI-platform company.
             # Cap at 11.5% so the discount rate reflects a diversified tech business.
             if is_structural_transformer and wacc > 0.115:
                 wacc = 0.115
@@ -10416,12 +10411,12 @@ def analyze():
                 wacc_data["wacc"] = wacc
 
             # ── Speculative / High-Growth WACC band (auto-calibration) ───────
-            # For pre-profit names — comparables-flagged growth-over-profit
+            # For pre-profit names, comparables-flagged growth-over-profit
             # companies, very young high-growth IPOs, and deeply-negative
-            # operating margins — capital-structure WACC understates the
+            # operating margins, capital-structure WACC understates the
             # true cost of equity (these stocks behave like venture-stage
             # bets, not Russell 1000 index components). Force WACC into a
-            # 20–25% band so the DCF reflects the actual risk premium that
+            # 20-25% band so the DCF reflects the actual risk premium that
             # institutional investors charge for these profiles.
             wacc_speculative_applied = False
             try:
@@ -10449,10 +10444,10 @@ def analyze():
 
             # ── Asset-Light Payment Network: WACC + TG hard pin ───────────────
             # Visa / Mastercard / AXP have near-zero marginal cost per transaction,
-            # global duopoly pricing power, and secular cashless tailwinds — a profile
+            # global duopoly pricing power, and secular cashless tailwinds, a profile
             # that capital-structure WACC math systematically over-discounts.
             # WACC pinned at 7.5% (low institutional risk for a global network duopoly).
-            # TG pinned at 3.5% — a meaningful premium above the 2.5% default that
+            # TG pinned at 3.5%, a meaningful premium above the 2.5% default that
             # reflects cashless penetration tailwinds without triggering the 42× Gordon
             # Growth explosion that a 5% TG / 7.5% WACC combination would cause.
             # Backbone stage-1 extension is intentionally suppressed: the TG premium
@@ -10471,7 +10466,7 @@ def analyze():
             # ── Backbone moat: forward-revenue growth source enrichment ──────
             # For backbone moat companies, try to fetch the analyst forward revenue
             # estimate and log it for transparency.  We do NOT scale base_fcf here
-            # because Stage 1 growth already projects forward revenue growth — scaling
+            # because Stage 1 growth already projects forward revenue growth, scaling
             # base_fcf on top of s1 would double-count the same expected uplift.
             fwd_base_fcf  = base_fcf   # always equal to base_fcf
             if is_backbone_moat and not s1_ov:
@@ -10492,7 +10487,7 @@ def analyze():
 
             # ── Extended Stage 1 for Backbone moat / Structural Transformer ─────
             # Both backbone moat and structural transformer companies sustain high
-            # growth for a full decade — run the entire projection at the Stage 1
+            # growth for a full decade, run the entire projection at the Stage 1
             # rate.  S2 still applies in bear/bull scenario runs for extra caution.
             # Payment networks are excluded: their 3.5% TG premium already encodes
             # the structural advantage; extending Stage 1 to 10 years would double-
@@ -10514,7 +10509,7 @@ def analyze():
             # Snapshot the pure DCF output + every input needed to replay it.
             # The `/api/dcf/recompute` endpoint uses this so user-moved sliders
             # produce numbers from the SAME formula that generated the base
-            # case — no drift between pristine and the first slider tick.
+            # case, no drift between pristine and the first slider tick.
             # Captured here, BEFORE bull/bear blending, sector overlays
             # (biotech/banking) and consensus anchoring mutate intrinsic_value.
             _pure_dcf_iv = round(intrinsic_value, 2) if intrinsic_value else None
@@ -10545,7 +10540,7 @@ def analyze():
             # ── FIN 415 FCFE bottom-up model ──────────────────────────────────
             # Runs alongside the FCFF base case.  When data is available, the
             # FIN 415 Conservative Target (60/20/20 blend) replaces the primary IV.
-            # Ke (cost of equity) is used as the discount rate — no net-debt bridge.
+            # Ke (cost of equity) is used as the discount rate, no net-debt bridge.
             fin415_inputs   = _extract_fin415_inputs(
                 info, income_stmt, cashflow, balance_sheet, fx_rate)
             fin415_price        = None
@@ -10795,13 +10790,13 @@ def analyze():
             intrinsic_value = round(iv_weighted, 2) if iv_weighted else intrinsic_value
 
             # Negative equity value: net debt exceeds DCF enterprise value.
-            # Don't blank the card — fall through to emergency_iv so the user
+            # Don't blank the card, fall through to emergency_iv so the user
             # gets a defensible distress-anchored IV (analyst target, distressed
             # P/B, or cash-only proxy) instead of an empty verdict.
             if equity_value is not None and equity_value < 0:
                 dcf_warning = (
                     f"Net debt (${abs(net_debt)/1e9:.1f}B) exceeds DCF enterprise value "
-                    f"(${enterprise_value/1e9:.1f}B) — DCF equity value is negative. "
+                    f"(${enterprise_value/1e9:.1f}B), DCF equity value is negative. "
                     "Showing distress-anchored valuation instead."
                 )
                 _e_iv, _e_lbl, _e_conf = _emergency_iv(
@@ -10879,7 +10874,7 @@ def analyze():
         # Base → synced to the final intrinsic_value (anchored weighted IV)
         # Bull → individually anchored (almost always above the 30% threshold)
         # Bear → individually anchored only if it too exceeds the threshold
-        #        (conservative bear cases typically fall below it — left intact)
+        #        (conservative bear cases typically fall below it, left intact)
         if analyst_adjusted and scenarios and analyst_target_price:
             _at = float(analyst_target_price)
 
@@ -10965,7 +10960,7 @@ def analyze():
                         yrs                  = yrs,
                     )
             except Exception:
-                pass   # silent — never break the main response
+                pass   # silent, never break the main response
 
         # ── Reality Reconciliation Layer ──────────────────────────────────────
         # When the model is materially off from market price AND the sell-side
@@ -11044,7 +11039,7 @@ def analyze():
 
         # ── Multiples fallback when DCF is unavailable ───────────────────────
         # Triggered when: (a) no positive FCF, or (b) net debt exceeds DCF enterprise value.
-        # Never leaves the user without a value — industry multiples serve as the primary metric.
+        # Never leaves the user without a value, industry multiples serve as the primary metric.
         multiples_val    = None
         multiples_method = None
         multiples_reason = None
@@ -11068,7 +11063,7 @@ def analyze():
             else:
                 multiples_mos = None
             if _mult_v is not None:
-                # Multiples is now the primary signal — downgrade confidence
+                # Multiples is now the primary signal, downgrade confidence
                 iv_source_label = f"Multiples ({_mult_m})" if _mult_m else "Multiples"
                 iv_confidence   = "medium"
         else:
@@ -11121,7 +11116,7 @@ def analyze():
         # Last resort: when DCF, multiples, and Sultan Split have all failed,
         # try the four-tier cascade (analyst target → cash-only → distressed
         # P/B → sector EV/Revenue).  Guarantees a defensible IV exists for
-        # every analyzed ticker that has a price — pre-revenue biotech, deep
+        # every analyzed ticker that has a price, pre-revenue biotech, deep
         # distress, ADRs with no FCF, etc.  Confidence is "low" by design.
         if intrinsic_value is None:
             _e_iv, _e_lbl, _e_conf = _emergency_iv(
@@ -11172,7 +11167,7 @@ def analyze():
             }
 
         # ══════════════════════════════════════════════════════════════════════
-        # FINAL POLISH LAYERS — run on whatever the model has now (DCF, multiples,
+        # FINAL POLISH LAYERS, run on whatever the model has now (DCF, multiples,
         # banking, biotech, anything).  Order: Cash-Rich → Debt → Coherence →
         # Priced-For → Verdict Summary.
         # ══════════════════════════════════════════════════════════════════════
@@ -11222,14 +11217,14 @@ def analyze():
         # 5% of price (or $0.01); ceiling at max(6× price, 2.5× analyst target).
         # Catches nonsense in both directions: 19,000% MOS upper-tail bugs
         # AND $0.01 IVs from a broken multiples calc on the lower-tail.
-        # Applied AFTER emergency_iv too — it's the universal sanity envelope.
+        # Applied AFTER emergency_iv too, it's the universal sanity envelope.
         _iv_collapsed = False   # True when the pre-clamp DCF produced 0/negative IV
         if intrinsic_value is not None and price and price > 0:
             _iv_pre_clamp = intrinsic_value
             # A 0 or negative pre-clamp IV means the DCF/multiples genuinely failed to
             # produce a value (ADRs like BABA, pre-revenue names like SMR). The clamp
             # floors it to price×0.05, which would otherwise masquerade as a confident
-            # "−95% overvalued" — flag it so the UI shows "can't value reliably" instead.
+            # "−95% overvalued", flag it so the UI shows "can't value reliably" instead.
             _iv_collapsed = (_iv_pre_clamp is not None and _iv_pre_clamp <= 0)
             intrinsic_value = _clamp_iv(intrinsic_value, price, analyst_target_price)
             if intrinsic_value != _iv_pre_clamp:
@@ -11237,7 +11232,7 @@ def analyze():
                 if scenarios:
                     # Only rescale scenarios proportionally when the pre-clamp IV is a
                     # usable positive number. When it's 0 or negative (broken multiples
-                    # / emergency cascade — e.g. SMR, BABA, FLY) the scenario values are
+                    # / emergency cascade, e.g. SMR, BABA, FLY) the scenario values are
                     # meaningless, so drop them rather than (a) dividing by zero, which
                     # used to crash the WHOLE analysis, or (b) showing $0 bull/base/bear.
                     if _iv_pre_clamp and _iv_pre_clamp > 0:
@@ -11253,7 +11248,7 @@ def analyze():
                     else:
                         scenarios = None
 
-        # A collapsed (0/negative pre-clamp) IV is not a confident verdict — the model
+        # A collapsed (0/negative pre-clamp) IV is not a confident verdict, the model
         # couldn't value the name. Downgrade confidence so the UI suppresses the
         # misleading "−95% overvalued" and shows a data-quality note instead.
         if _iv_collapsed:
@@ -11269,13 +11264,13 @@ def analyze():
             is_structural_transformer=is_structural_transformer,
             moat_detected=moat_detected,
         )
-        # Strategic asset ceiling lift — sovereign capital lets these names
+        # Strategic asset ceiling lift, sovereign capital lets these names
         # plausibly grow above their nominal sector ceiling.
         if strategic and _ceiling is not None:
             _ceiling = _ceiling + strategic["ceiling_lift"]
             _ceiling_label = f"{_ceiling_label} + Strategic"
 
-        # Strategic IV floor — when DCF says the stock is meaningfully
+        # Strategic IV floor, when DCF says the stock is meaningfully
         # overvalued but the company is a curated strategic asset AND the
         # market's forward multiple is below its sector average (the MU
         # case: "lowest forward P/E in S&P"), the model raises IV toward
@@ -11290,7 +11285,7 @@ def analyze():
                 (forward_pe is not None and forward_pe > 0 and forward_pe < 20) or
                 (analyst_target_price and analyst_target_price > price * 1.05)
             )
-            # New: substantive floor for survival_floor tiers — combines
+            # New: substantive floor for survival_floor tiers, combines
             # subsidy-adjusted DCF, book-value floor, and (when peers
             # available) peer EV/Revenue floor.  Surfaces the math.
             _shares_for_floor = safe(bal_data.get("shares"), 0) if bal_data else 0
@@ -11303,7 +11298,7 @@ def analyze():
             # IV becomes the MAX of: DCF, new subsidy/book/peer floor, AND
             # the legacy price-multiple floor (which still gates on
             # cheap_signal).  Taking max guarantees this commit can never
-            # *lower* IV vs. the pre-commit behavior — strategic floors
+            # *lower* IV vs. the pre-commit behavior, strategic floors
             # only ever lift the number.
             floor_candidates = [intrinsic_value]
             if strategic_floor_payload and strategic_floor_payload.get("floor_iv"):
@@ -11320,7 +11315,7 @@ def analyze():
                 strategic_floor_payload["components"]["legacy_price_mult"] = round(legacy_floor, 2)
                 strategic_floor_payload["reasons"].append(
                     f"Legacy price-multiple floor: ${legacy_floor:.2f} "
-                    f"(price ${price:.2f} × {strategic['iv_floor_mult']:.2f} — "
+                    f"(price ${price:.2f} × {strategic['iv_floor_mult']:.2f}, "
                     f"protects against distress verdicts on cheap-multiple sovereign names)."
                 )
                 strategic_floor_payload["applied"] = new_floor > (intrinsic_value or 0)
@@ -11348,16 +11343,16 @@ def analyze():
             margin_of_safety = margin_of_safety,
         )
 
-        # Strategic Discount override — when a strategic asset prints a
+        # Strategic Discount override, when a strategic asset prints a
         # negative MOS but the market signal says "discount, not warning,"
         # the standard "Priced for Growth/Excellence/Miracle" tier mislabels
         # it.  Promote to a "Strategic Discount" tier (green) with narrative.
         #
         # Two trigger paths:
-        #   1. Mature strategic names (MU, INTC, LMT) — low forward P/E
+        #   1. Mature strategic names (MU, INTC, LMT), low forward P/E
         #      relative to peers signals the market is discounting a
         #      sovereign-backstopped franchise.
-        #   2. Pre-revenue strategic names (JOBY, ACHR, RKLB) — forward P/E
+        #   2. Pre-revenue strategic names (JOBY, ACHR, RKLB), forward P/E
         #      is negative or missing because there's no positive earnings
         #      yet; the franchise thesis is the whole story.  Trigger when
         #      the strategic floor was applied AND analyst target sits
@@ -11368,7 +11363,7 @@ def analyze():
             mature_trigger = (forward_pe is not None and 0 < forward_pe < 20)
             # Pre-revenue: negative or extreme forward P/E (= no positive
             # earnings yet) + analyst sees meaningful upside.  Independent
-            # of whether the IV floor mechanically fired — that's a
+            # of whether the IV floor mechanically fired, that's a
             # different mechanism (downside protection on IV magnitude),
             # not a signal of how the market is pricing the franchise.
             pre_rev_trigger = (
@@ -11380,14 +11375,14 @@ def analyze():
             if mature_trigger or pre_rev_trigger:
                 if mature_trigger:
                     narrative = (
-                        f"Forward P/E {forward_pe:.1f} on a {strategic['strategic_label']} asset — "
+                        f"Forward P/E {forward_pe:.1f} on a {strategic['strategic_label']} asset, "
                         "market discounting a sovereign-backstopped franchise.  Pure DCF underestimates "
                         "value here; treat as opportunity, not value trap."
                     )
                 else:
                     pct = ((analyst_target_price - price) / price * 100)
                     narrative = (
-                        f"Pre-revenue {strategic['strategic_label']} franchise — pure DCF undervalues "
+                        f"Pre-revenue {strategic['strategic_label']} franchise, pure DCF undervalues "
                         f"these names because earnings haven't materialised yet.  Analyst consensus "
                         f"sees {pct:+.0f}% upside; sovereign-backstop thesis intact."
                     )
@@ -11427,11 +11422,11 @@ def analyze():
         # Always best-effort: a Haiku outage must NEVER break the valuation.
         # Built from data already on hand (no extra yfinance calls).
         #
-        # Token-burn protection — skip the Haiku call entirely when the request
+        # Token-burn protection, skip the Haiku call entirely when the request
         # looks like a scraper / AI agent / headless tool.  Real browsers send
         # standard "Mozilla/..." User-Agents; bots commonly send curl, python-
         # requests, Go-http-client, scrapy, bot/crawler/spider strings, or no
-        # UA at all.  The rest of /api/analyze still works for them — they
+        # UA at all.  The rest of /api/analyze still works for them, they
         # just don't get a free Lynch verdict that would burn API credits.
         _ua = (request.headers.get("User-Agent") or "").lower()
         _BOT_UA_SUBSTR = (
@@ -11444,7 +11439,7 @@ def analyze():
         )
         _ua_is_bot = (not _ua) or any(s in _ua for s in _BOT_UA_SUBSTR)
         # Internal warmup hits set X-Valus-Internal so the discovery cache
-        # still gets primed — those are safe and rate-limited at the source.
+        # still gets primed, those are safe and rate-limited at the source.
         _is_internal = bool(request.headers.get("X-Valus-Internal"))
         lynch_verdict = None
         _tape_for_lynch = None
@@ -11509,7 +11504,7 @@ def analyze():
                     stage1_years=backbone_stage1_years,
                 )
                 if ai_iv_raw is not None and ai_iv_raw > 0:
-                    # +50% sanity cap relative to base DCF IV — industry
+                    # +50% sanity cap relative to base DCF IV, industry
                     # guardrails should keep us inside this, but defends
                     # against pathological inputs.
                     cap = intrinsic_value * 1.50
@@ -11535,7 +11530,7 @@ def analyze():
         # ── Methodology Steps (for the new "How VALUS calculated this" panel)
         # Each step is a row showing the actual numbers used for THIS stock.
         # Steps that didn't fire are emitted as `active: False` so the UI can
-        # grey them out instead of hiding them — users see the full menu.
+        # grey them out instead of hiding them, users see the full menu.
         try:
             _shares = safe(bal_data.get("shares"), 0) if bal_data else 0
             methodology_steps = [
@@ -11557,7 +11552,7 @@ def analyze():
                                f"Stage 2 (yrs 6-10): {s2*100:.1f}% · "
                                f"Terminal: {tg*100:.1f}%")
                               if (s1 and s2 and s1 > 0.005) else
-                              "Growth assumptions unavailable — DCF used multiples-based or sector-specific path.",
+                              "Growth assumptions unavailable, DCF used multiples-based or sector-specific path.",
                     "extra": {
                         "stage1_pct": round(s1*100, 1) if s1 and s1 > 0.005 else None,
                         "stage2_pct": round(s2*100, 1) if s2 and s2 > 0.005 else None,
@@ -11573,7 +11568,7 @@ def analyze():
                     "active": bool(wacc_data and wacc_data.get("wacc")),
                     "detail": (f"Cost of Equity {wacc_data.get('coe', 0)*100:.1f}% · "
                                f"Cost of Debt {wacc_data.get('cod', 0)*100:.1f}%"
-                               if wacc_data else "—"),
+                               if wacc_data else ", "),
                 },
                 {
                     "step": 4,
@@ -11583,7 +11578,7 @@ def analyze():
                     "active": bool(enterprise_value),
                     "detail": (f"Stage PV: ${(total_pv_fcf or 0)/1e9:.1f}B · "
                                f"Terminal PV: ${(pv_terminal or 0)/1e9:.1f}B"
-                               if (total_pv_fcf or pv_terminal) else "—"),
+                               if (total_pv_fcf or pv_terminal) else ", "),
                 },
                 {
                     "step": 5,
@@ -11600,7 +11595,7 @@ def analyze():
                     "value": consensus_anchor_pre_iv,
                     "format": "currency",
                     "active": bool(consensus_anchor_pre_iv),
-                    "detail": f"Equity value ÷ {_shares/1e9:.2f}B shares" if _shares else "—",
+                    "detail": f"Equity value ÷ {_shares/1e9:.2f}B shares" if _shares else ", ",
                 },
                 {
                     "step": 7,
@@ -11609,7 +11604,7 @@ def analyze():
                     "format": "delta_pct",
                     "active": reality_reconciled,
                     "detail": (reality_reason or
-                               "Gap below 25% threshold or analyst agrees with model — no blend applied."),
+                               "Gap below 25% threshold or analyst agrees with model, no blend applied."),
                     "extra": {"pre_iv": reality_pre_iv} if reality_reconciled else None,
                 },
                 {
@@ -11618,7 +11613,7 @@ def analyze():
                     "value": _cr_prem * 100 if _cr_prem else 0,
                     "format": "delta_pct",
                     "active": bool(_cr_prem and _cr_prem > 0),
-                    "detail": cash_rich_narrative or "Below 10% net cash threshold — no premium applied.",
+                    "detail": cash_rich_narrative or "Below 10% net cash threshold, no premium applied.",
                 },
                 {
                     "step": 9,
@@ -11638,7 +11633,7 @@ def analyze():
                     "detail": (f"Pre-blend: ${consensus_anchor_pre_iv:.2f} · "
                                f"Analyst target: ${analyst_target_price:.2f}"
                                if (consensus_anchor_pre_iv and analyst_target_price)
-                               else "No analyst target available — split skipped."),
+                               else "No analyst target available, split skipped."),
                 },
             ]
         except Exception:
@@ -11691,7 +11686,7 @@ def analyze():
                 "type": "warn",
                 "text": (
                     f"Terminal value accounts for {tv_pct_val}% of enterprise value. "
-                    "The valuation is highly sensitive to WACC and terminal growth assumptions — "
+                    "The valuation is highly sensitive to WACC and terminal growth assumptions, "
                     "small changes in either can materially shift the fair value estimate."
                 ),
             })
@@ -11702,7 +11697,7 @@ def analyze():
                 "type": "info",
                 "text": (
                     "No analyst coverage or historical FCF trend was available. "
-                    "Stage 1 growth defaulted to 6% — treat this estimate with extra caution."
+                    "Stage 1 growth defaulted to 6%, treat this estimate with extra caution."
                 ),
             })
 
@@ -11805,7 +11800,7 @@ def analyze():
                                   if margin_of_safety is not None else None),
             "margin_of_safety_raw": (round(margin_of_safety, 1)
                                      if margin_of_safety is not None else None),
-            # Low-confidence diagnostics — populated when |MoS| > 100% to
+            # Low-confidence diagnostics, populated when |MoS| > 100% to
             # explain *why* the IV may not be trustworthy (share-class
             # mismatch, forward-earnings spike, stale price feed).
             "low_confidence_diagnostics": _diagnose_low_confidence(
@@ -11890,7 +11885,7 @@ def analyze():
             "pb_ratio":      f2(info.get("priceToBook")),
             "ev_ebitda":     f2(info.get("enterpriseToEbitda")),
             "ev_revenue":    f2(info.get("enterpriseToRevenue")),
-            # Financials card — use TTM from quarterly for accuracy (esp. foreign cos)
+            # Financials card, use TTM from quarterly for accuracy (esp. foreign cos)
             "revenue":           rev_total,  # keep as number, js will format
             "ebitda":            ebitda_ttm,  # keep as number, js will format
             "gross_margin":      gross_margin_ttm or pct(info.get("grossMargins")),
@@ -11901,7 +11896,7 @@ def analyze():
             "roe":               pct(info.get("returnOnEquity")),
             "roa":               pct(info.get("returnOnAssets")),
             "div_yield":         dividend_yield,
-            # Health card — use most recent quarterly balance sheet data
+            # Health card, use most recent quarterly balance sheet data
             "total_cash":    f2(bal_data["total_cash"]),
             "total_debt":    f2(bal_data["total_debt"]),
             "current_ratio": f2(info.get("currentRatio")),
@@ -11932,7 +11927,7 @@ def analyze():
             # ── Data-error flag (suppresses the verdict in the UI) ─────────
             # Only set when the MOS is almost certainly a DATA ERROR (share-class
             # misalignment, absurd >300% gap, or a large gap on a non-high-
-            # confidence/fallback IV) — NOT merely large. A high-confidence DCF
+            # confidence/fallback IV), NOT merely large. A high-confidence DCF
             # with a big margin of safety (e.g. FIVN) is a legitimate result and
             # is shown normally. See _mos_unreliable for the full rule.
             "extreme_mos_flag":  _iv_collapsed or _mos_unreliable(margin_of_safety, iv_confidence, ticker),
@@ -11940,7 +11935,7 @@ def analyze():
             "priced_for":              priced_for,
             # ── VALUS A-F letter grade (derived from MOS, then reconciled
             #    with the priced_for tier so a "Strategic Discount" pill
-            #    can't end up paired with a "D" badge — see
+            #    can't end up paired with a "D" badge, see
             #    _reconcile_grade_with_tier for the full rationale) ─────
             "valus_grade":             _reconcile_grade_with_tier(
                                            compute_valus_grade(margin_of_safety),
@@ -11969,7 +11964,7 @@ def analyze():
             "dcf_confidence_label":      dcf_conf_label,
             "dcf_confidence_strengths":  dcf_conf_strengths,
             "dcf_confidence_warnings":   dcf_conf_warnings,
-            # Discovery Layer — catalyst research
+            # Discovery Layer, catalyst research
             "catalyst_insights":         catalyst_insights,
             "has_positive_catalyst":     has_positive_catalyst,
             "has_material_risk":         has_material_risk,
@@ -12019,7 +12014,7 @@ def analyze():
             "fifty_two_week_low":        safe(info.get("fiftyTwoWeekLow")),
             "quality_metrics": _build_quality_metrics(info, base_fcf, rev_ttm),
             # ── New intelligence overlays (Phase 1+2 additions) ───────────
-            # Each is null-safe — the UI skips the card when data is missing.
+            # Each is null-safe, the UI skips the card when data is missing.
             "quality_score":      _composite_quality_score(
                 _build_quality_metrics(info, base_fcf, rev_ttm)
             ),

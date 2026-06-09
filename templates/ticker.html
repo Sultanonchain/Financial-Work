@@ -4,7 +4,7 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
   <title>{{ ticker }} Stock Valuation · DCF Intrinsic Value & Margin of Safety · VALUS</title>
-  <meta name="description" content="{{ ticker }} ({{ company_name }}) DCF valuation: 10-year intrinsic value model, margin of safety, and reverse-DCF implied growth. Free educational stock research from VALUS — not investment advice."/>
+  <meta name="description" content="{{ ticker }} ({{ company_name }}) DCF valuation: 10-year intrinsic value model, margin of safety, and reverse-DCF implied growth. Free educational stock research from VALUS, not investment advice."/>
   <link rel="canonical" href="/stocks/{{ ticker_lower }}"/>
   <link rel="stylesheet" href="/static/css/style.css?v={{ asset_v }}"/>
   <link rel="manifest" href="/static/manifest.webmanifest"/>
@@ -60,10 +60,10 @@
   </nav>
 
   <h1 style="font-size:32px;font-weight:700;line-height:1.2;margin:0 0 8px;">
-    {{ company_name }} ({{ ticker }}) — DCF Valuation
+    {{ company_name }} ({{ ticker }}), DCF Valuation
   </h1>
   <p style="color:var(--ink-muted);margin:0 0 28px;font-size:15px;line-height:1.55;">
-    {% if sector %}{{ sector }} · {% endif %}10-year discounted cash flow model with intrinsic value estimate, margin of safety, and reverse-DCF sanity check. Educational only — not investment advice.
+    {% if sector %}{{ sector }} · {% endif %}10-year discounted cash flow model with intrinsic value estimate, margin of safety, and reverse-DCF sanity check. Educational only, not investment advice.
   </p>
 
   {% if has_valuation %}
@@ -112,7 +112,7 @@
   <section style="margin:36px 0;">
     <h2 style="font-size:20px;font-weight:600;margin:0 0 12px;">How VALUS values {{ ticker }}</h2>
     <p style="color:var(--ink-secondary);line-height:1.65;font-size:14px;">
-      Every {{ ticker }} valuation begins with the company's reported free cash flow, then projects ten years of growth using a sector-aware ceiling so highflyers can't compound forever. A WACC discount brings those flows back to today, a terminal value caps long-run growth, and a reverse-DCF tells you what growth rate the current price would require — a sanity check on whether the market is paying for execution that's actually plausible.
+      Every {{ ticker }} valuation begins with the company's reported free cash flow, then projects ten years of growth using a sector-aware ceiling so highflyers can't compound forever. A WACC discount brings those flows back to today, a terminal value caps long-run growth, and a reverse-DCF tells you what growth rate the current price would require, a sanity check on whether the market is paying for execution that's actually plausible.
     </p>
     <p style="color:var(--ink-secondary);line-height:1.65;font-size:14px;">
       The verdict tier (Discount, Fair Value, Growth, Excellence, Miracle) reflects the gap between intrinsic value and price, not a buy/sell signal. <a href="/methodology" style="color:#5eead4;">Read the full methodology →</a>

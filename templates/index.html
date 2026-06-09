@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
-  <meta name="description" content="VALUS — Free educational stock valuation tool. Search any ticker for a 10-year DCF model, intrinsic value estimate, and margin of safety. Educational only — not investment advice."/>
-  <title>VALUS — Educational Stock Valuation Tool · Free DCF & Intrinsic Value</title>
+  <meta name="description" content="VALUS, Free educational stock valuation tool. Search any ticker for a 10-year DCF model, intrinsic value estimate, and margin of safety. Educational only, not investment advice."/>
+  <title>VALUS, Educational Stock Valuation Tool · Free DCF & Intrinsic Value</title>
   <link rel="canonical" href="/"/>
   <link rel="stylesheet" href="/static/css/style.css?v={{ asset_v }}"/>
 
-  <!-- PWA — Add to Home Screen support -->
+  <!-- PWA, Add to Home Screen support -->
   <link rel="manifest" href="/static/manifest.webmanifest"/>
   <meta name="theme-color" content="#0b0e14"/>
   <meta name="color-scheme" content="dark"/>
@@ -33,14 +33,14 @@
 <!-- ── HEADER ─────────────────────────────────────────────────────────── -->
 <header class="site-header">
   <div class="container site-header__inner">
-    <button class="brand" id="brandHomeBtn" type="button" aria-label="VALUS — go to home">
+    <button class="brand" id="brandHomeBtn" type="button" aria-label="VALUS, go to home">
       <div class="brand-mark" aria-hidden="true">V</div>
       <span class="brand-name">VALUS</span>
       <span class="brand-divider"></span>
       <span class="brand-tag">Educational Stock Valuation Tool</span>
     </button>
     <div class="header-actions">
-      <!-- Watchlist — what you're WATCHING (no holdings).  Separate from
+      <!-- Watchlist, what you're WATCHING (no holdings).  Separate from
            portfolios; free for everyone.  Signed-out users keep using it
            via localStorage; sign-in pulls/merges. -->
       <button class="header-btn" id="watchlistBtn" type="button" aria-label="Open watchlist">
@@ -81,7 +81,7 @@
       <span class="disclaimer-pill" title="VALUS is an educational research tool. Not investment advice.">⚠ Not financial advice</span>
       <!-- Shown when the visitor has full access via a redeemed team code or
            an active VALUS+ subscription. Visible even when not signed in. -->
-      <span class="access-badge hidden" id="accessBadge" title="Full access — unlimited"></span>
+      <span class="access-badge hidden" id="accessBadge" title="Full access, unlimited"></span>
       <!-- Auth control sits at the far right when signed in: a circular
            avatar to the right of the disclaimer pill.  When signed out,
            shows a "Sign in" button in the same slot. -->
@@ -100,7 +100,7 @@
           <div class="auth-menu__tier hidden" id="authMenuTier"></div>
           <button class="auth-menu__btn auth-menu__btn--neutral" id="authPremiumBtn" type="button">
             <span class="auth-menu__icon">★</span>
-            <span class="auth-menu__label" id="authPremiumLabel">VALUS+ — Unlimited for $2/month</span>
+            <span class="auth-menu__label" id="authPremiumLabel">VALUS+, Unlimited for $2/month</span>
             <span class="auth-menu__hint" id="authPremiumHint"></span>
           </button>
           <button class="auth-menu__btn auth-menu__btn--neutral" id="authSettingsBtn" type="button">
@@ -118,6 +118,10 @@
           <a class="auth-menu__btn auth-menu__btn--neutral" href="/terms">
             <span class="auth-menu__icon">📄</span>
             <span class="auth-menu__label">Terms of Service</span>
+          </a>
+          <a class="auth-menu__btn auth-menu__btn--neutral" href="mailto:contact@valusfinancial.com">
+            <span class="auth-menu__icon">✉</span>
+            <span class="auth-menu__label">Contact &amp; support</span>
           </a>
           <button class="auth-menu__btn auth-menu__btn--neutral" id="authCodeBtn" type="button">
             <span class="auth-menu__icon">🔑</span>
@@ -157,7 +161,7 @@
       </div>
     </div>
     <div class="pf-shared-banner hidden" id="pfSharedBanner">
-      ★ <strong>Shared portfolio</strong> — read-only view. Found something interesting? <a href="/" id="pfSharedHome">Build your own.</a>
+      ★ <strong>Shared portfolio</strong>, read-only view. Found something interesting? <a href="/" id="pfSharedHome">Build your own.</a>
     </div>
     <!-- Shown when the deploy has no durable storage (no Vercel KV).  Portfolios
          live only in this browser; signing in on another device won't surface
@@ -166,7 +170,7 @@
       <span class="pf-storage-warn__icon" aria-hidden="true">⚠</span>
       <div class="pf-storage-warn__body">
         <strong>Cross-device sync isn't enabled on this deploy.</strong>
-        Your portfolios are saved in this browser only — signing in on another device won't show them.
+        Your portfolios are saved in this browser only, signing in on another device won't show them.
         Set up <a href="https://vercel.com/docs/storage/vercel-kv" target="_blank" rel="noopener">Vercel KV</a> (free tier works) and redeploy to sync them to your Google account.
       </div>
       <button class="pf-storage-warn__dismiss" id="pfStorageWarnDismiss" type="button" aria-label="Dismiss">✕</button>
@@ -180,7 +184,7 @@
       </div>
       <div class="pf-stat">
         <span class="pf-stat__label">Avg margin of safety</span>
-        <span class="pf-stat__value numeric" id="pfAvgMos">—</span>
+        <span class="pf-stat__value numeric" id="pfAvgMos">, </span>
       </div>
       <div class="pf-stat">
         <span class="pf-stat__label">Undervalued</span>
@@ -188,7 +192,7 @@
       </div>
       <div class="pf-stat">
         <span class="pf-stat__label">Best opportunity</span>
-        <span class="pf-stat__value numeric" id="pfBest">—</span>
+        <span class="pf-stat__value numeric" id="pfBest">, </span>
       </div>
     </div>
 
@@ -227,7 +231,7 @@
 
 <!-- ── WATCHLIST PAGE ─────────────────────────────────────────────────── -->
 <!-- Mirrors the portfolio page chrome (header + card list) but stripped
-     to a single read-only list — no allocation chart, no sort modes,
+     to a single read-only list, no allocation chart, no sort modes,
      no templates / share / leaderboard. -->
 <main class="portfolio-page hidden" id="watchlistPage">
   <div class="container">
@@ -235,7 +239,7 @@
       <button class="copy-btn" id="wlBackBtn" type="button">← Back to research</button>
       <div class="pf-page__title">
         <h1>Watchlist</h1>
-        <p>Stocks you're tracking — price vs VALUS fair value at a glance.
+        <p>Stocks you're tracking, price vs VALUS fair value at a glance.
            <span id="watchlistCountInline">0</span> tracked.</p>
       </div>
       <div class="pf-page__actions">
@@ -266,7 +270,7 @@
         <h3 class="onboarding-callout__title" id="onboardingCalloutTitle">First time here? Read this in 20 seconds.</h3>
         <p class="onboarding-callout__text">
           VALUS estimates each stock's <strong>fair value</strong> with a 10-year
-          <strong>discounted cash flow (DCF)</strong> model — projecting future cash
+          <strong>discounted cash flow (DCF)</strong> model, projecting future cash
           back to today and dividing by share count. Compare that to the market price
           and you get a <strong>margin of safety</strong> (MOS). The bigger the
           discount, the better the <strong>A-F grade</strong>.
@@ -281,7 +285,7 @@
     </h1>
     <p class="hero__subtitle">
       Free 10-year DCF model, intrinsic value estimate, margin of safety, and a
-      transparent breakdown of every assumption — institutional-grade rigor for
+      transparent breakdown of every assumption, institutional-grade rigor for
       learners and curious investors.
     </p>
 
@@ -311,7 +315,7 @@
         <div class="search-dropdown hidden" id="searchDropdown" role="listbox"></div>
       </form>
 
-      <!-- Trending today — populated from /api/trending. Hidden until ≥3
+      <!-- Trending today, populated from /api/trending. Hidden until ≥3
            tickers are tracked so we never show an empty state. -->
       <div class="trending-row hidden" id="trendingRow">
         <span class="trending-row__label">Trending today</span>
@@ -328,7 +332,7 @@
         <span class="trending-row__label">Watchlist movers</span>
         <div class="trending-row__chips" id="moversChips"></div>
       </div>
-      <!-- Compare two tickers — opens a side-by-side modal -->
+      <!-- Compare two tickers, opens a side-by-side modal -->
       <div class="hero-compare">
         <button type="button" class="advanced-toggle hero-compare__btn" id="compareToggle">
           <span>⇄</span> Compare two tickers side-by-side
@@ -343,21 +347,21 @@
         <div class="advanced-field">
           <label for="advYrs">
             Projection years
-            <span class="field-help" data-tip="How many years of free cash flow VALUS forecasts before applying terminal growth. Default is 10 — longer horizons add uncertainty.">?</span>
+            <span class="field-help" data-tip="How many years of free cash flow VALUS forecasts before applying terminal growth. Default is 10, longer horizons add uncertainty.">?</span>
           </label>
           <input id="advYrs" type="number" placeholder="10" min="3" max="20"/>
         </div>
         <div class="advanced-field">
           <label for="advS1">
             Stage 1 growth (%)
-            <span class="field-help" data-tip="Annual revenue/FCF growth rate during years 1–5 of the forecast. 'Auto' uses analyst consensus + sector ceiling.">?</span>
+            <span class="field-help" data-tip="Annual revenue/FCF growth rate during years 1-5 of the forecast. 'Auto' uses analyst consensus + sector ceiling.">?</span>
           </label>
           <input id="advS1" type="number" placeholder="auto" step="0.1"/>
         </div>
         <div class="advanced-field">
           <label for="advS2">
             Stage 2 growth (%)
-            <span class="field-help" data-tip="Annual growth during years 6–10, typically lower than Stage 1 as companies mature. 'Auto' tapers from Stage 1 toward terminal.">?</span>
+            <span class="field-help" data-tip="Annual growth during years 6-10, typically lower than Stage 1 as companies mature. 'Auto' tapers from Stage 1 toward terminal.">?</span>
           </label>
           <input id="advS2" type="number" placeholder="auto" step="0.1"/>
         </div>
@@ -423,7 +427,7 @@
   </div>
 </section>
 
-<!-- ── COMPARE MODAL — two tickers side-by-side ──────────────────────── -->
+<!-- ── COMPARE MODAL, two tickers side-by-side ──────────────────────── -->
 <div class="modal hidden" id="compareModal" role="dialog" aria-modal="true" aria-labelledby="compareModalTitle">
   <div class="modal__backdrop" data-modal-close></div>
   <div class="modal__panel" style="max-width: 880px;">
@@ -454,7 +458,7 @@
 <!-- ── VALUS GRADE EXPLAINER MODAL ─────────────────────────────────── -->
 <!-- Opens from any clickable .valus-grade badge OR the "How are grades
      calculated?" link on the stock detail page.  Band thresholds mirror
-     app.py::VALUS_GRADE_BANDS — single source for the data lives in
+     app.py::VALUS_GRADE_BANDS, single source for the data lives in
      setupGradeExplainer() in main.js so we can iterate the bands. -->
 <div class="modal hidden" id="gradeExplainerModal" role="dialog" aria-modal="true" aria-labelledby="gradeExplainerTitle">
   <div class="modal__backdrop" data-modal-close></div>
@@ -465,14 +469,14 @@
     </div>
     <div class="modal__body">
       <p class="signin-detail" style="margin-bottom: 14px;">
-        Every stock gets a single A-F letter that compares its <strong>current market price</strong> to <strong>VALUS fair value</strong>. The percent next to the letter is the <em>margin of safety</em> — how far below (positive) or above (negative) fair value the stock is trading.
+        Every stock gets a single A-F letter that compares its <strong>current market price</strong> to <strong>VALUS fair value</strong>. The percent next to the letter is the <em>margin of safety</em>, how far below (positive) or above (negative) fair value the stock is trading.
       </p>
       <ul class="grade-explainer__list" id="gradeExplainerList">
         <!-- Populated by setupGradeExplainer(); single data source. -->
       </ul>
       <p class="plus-fineprint" style="margin-top: 14px;">
         The letter is derived purely from the DCF model + the current price.
-        It's <strong>not</strong> a buy/sell signal — read the full verdict
+        It's <strong>not</strong> a buy/sell signal, read the full verdict
         and the underlying methodology before acting on it.
         <a href="/methodology" style="color: var(--accent);">Read the methodology →</a>
       </p>
@@ -494,20 +498,20 @@
       <p class="plus-intro">Unlock the institutional toolkit for <strong>$2 / month</strong>.</p>
       <ul class="plus-perks">
         <li><span class="plus-perks__icon">∞</span><div><strong>Unlimited searches.</strong> No daily cap on any ticker.</div></li>
-        <li><span class="plus-perks__icon">⌖</span><div><strong>Scenario analysis</strong> — bear / base / bull weighted fair value.</div></li>
-        <li><span class="plus-perks__icon">▣</span><div><strong>Insider trading</strong> — Form 4 filings for every ticker.</div></li>
-        <li><span class="plus-perks__icon">↗</span><div><strong>5-year valuation history</strong> — model IV vs market price replay.</div></li>
-        <li><span class="plus-perks__icon">🏆</span><div><strong>Publish to leaderboard</strong> — flex your undervalued picks.</div></li>
-        <li><span class="plus-perks__icon">⚡</span><div><strong>Priority data refresh</strong> — fresher caches on every analyze.</div></li>
+        <li><span class="plus-perks__icon">⌖</span><div><strong>Scenario analysis</strong>, bear / base / bull weighted fair value.</div></li>
+        <li><span class="plus-perks__icon">▣</span><div><strong>Insider trading</strong>, Form 4 filings for every ticker.</div></li>
+        <li><span class="plus-perks__icon">↗</span><div><strong>5-year valuation history</strong>, model IV vs market price replay.</div></li>
+        <li><span class="plus-perks__icon">🏆</span><div><strong>Publish to leaderboard</strong>, flex your undervalued picks.</div></li>
+        <li><span class="plus-perks__icon">⚡</span><div><strong>Priority data refresh</strong>, fresher caches on every analyze.</div></li>
       </ul>
       <div class="plus-cta-row">
         <button class="copy-btn" data-modal-close type="button">Maybe later</button>
         <button class="copy-btn copy-btn--primary plus-cta" id="plusCheckoutBtn" type="button">
-          <span>VALUS+ — Unlimited for $2/month</span>
+          <span>VALUS+, Unlimited for $2/month</span>
         </button>
       </div>
       <p class="plus-fineprint">
-        Secure checkout via Stripe. Cancel anytime — your access continues through the current billing period.
+        Secure checkout via Stripe. Cancel anytime, your access continues through the current billing period.
       </p>
       <p class="signin-not-configured hidden" id="plusNotConfigured">
         ⚠ Subscription checkout is not yet configured on this deployment.  The
@@ -529,7 +533,7 @@
     <div class="modal__body">
       <p class="signin-intent" id="signInIntent">Sign in to continue.</p>
       <p class="signin-detail">
-        VALUS is free to use without an account — search any stock, drag the
+        VALUS is free to use without an account, search any stock, drag the
         DCF sliders, browse the leaderboard, all without signing in.  Sign in
         only when you want to save a portfolio across devices or publish to
         the public leaderboard.
@@ -558,7 +562,7 @@
   </div>
 </div>
 
-<!-- ── SETTINGS MODAL — accessibility + customization ─────────────────── -->
+<!-- ── SETTINGS MODAL, accessibility + customization ─────────────────── -->
 <div class="modal hidden" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
   <div class="modal__backdrop" data-modal-close></div>
   <div class="modal__panel" style="max-width: 480px;">
@@ -746,7 +750,7 @@
           <div class="tg-body">
             <span class="tg-label">Priced for Deep Discount</span>
             <span class="tg-mos">MOS +40% to +50%</span>
-            <span class="tg-desc">Significantly undervalued — strong signal if VALUS's growth assumptions hold.</span>
+            <span class="tg-desc">Significantly undervalued, strong signal if VALUS's growth assumptions hold.</span>
           </div>
         </div>
         <div class="tg-row tier-positive" data-tier="discount">
@@ -762,7 +766,7 @@
           <div class="tg-body">
             <span class="tg-label">Priced for Fair Value</span>
             <span class="tg-mos">MOS −10% to +15%</span>
-            <span class="tg-desc">Market and VALUS aligned. No clear edge — hold or wait for a better entry.</span>
+            <span class="tg-desc">Market and VALUS aligned. No clear edge, hold or wait for a better entry.</span>
           </div>
         </div>
         <div class="tg-row tier-warning" data-tier="growth">
@@ -770,7 +774,7 @@
           <div class="tg-body">
             <span class="tg-label">Priced for Growth</span>
             <span class="tg-mos">MOS −10% to −25%</span>
-            <span class="tg-desc">Market paying a growth premium — acceptable if execution delivers above-base growth.</span>
+            <span class="tg-desc">Market paying a growth premium, acceptable if execution delivers above-base growth.</span>
           </div>
         </div>
         <div class="tg-row tier-warning" data-tier="excellence">
@@ -799,19 +803,19 @@
   <div class="container">
     <section class="card etf-card">
       <div class="etf-head">
-        <h2 class="etf-name" id="etfName">—</h2>
+        <h2 class="etf-name" id="etfName">, </h2>
         <span class="etf-pill" id="etfClass">ETF</span>
       </div>
       <div class="etf-price-row">
         <div class="pi-block">
           <span class="pi-label">Current price</span>
-          <span class="pi-value numeric" id="etfPrice">—</span>
+          <span class="pi-value numeric" id="etfPrice">, </span>
         </div>
         <div class="etf-stats">
-          <div class="etf-stat"><span class="etf-stat__label">52W High</span><span class="etf-stat__value numeric" id="etfHigh">—</span></div>
-          <div class="etf-stat"><span class="etf-stat__label">52W Low</span><span class="etf-stat__value numeric" id="etfLow">—</span></div>
-          <div class="etf-stat"><span class="etf-stat__label">YTD Return</span><span class="etf-stat__value numeric" id="etfYtd">—</span></div>
-          <div class="etf-stat"><span class="etf-stat__label">Expense Ratio</span><span class="etf-stat__value numeric" id="etfExpense">—</span></div>
+          <div class="etf-stat"><span class="etf-stat__label">52W High</span><span class="etf-stat__value numeric" id="etfHigh">, </span></div>
+          <div class="etf-stat"><span class="etf-stat__label">52W Low</span><span class="etf-stat__value numeric" id="etfLow">, </span></div>
+          <div class="etf-stat"><span class="etf-stat__label">YTD Return</span><span class="etf-stat__value numeric" id="etfYtd">, </span></div>
+          <div class="etf-stat"><span class="etf-stat__label">Expense Ratio</span><span class="etf-stat__value numeric" id="etfExpense">, </span></div>
         </div>
       </div>
       <div class="chart-wrap"><canvas id="etfChart"></canvas></div>
@@ -858,7 +862,7 @@
           <span class="tg-dot"></span>
           <div class="tg-body">
             <span class="tg-label">Leverage non-monotonicity</span>
-            <span class="tg-desc">In highly-levered industrials (CCL, F, BA, AAL), higher growth requires more capex and debt — the equity value can actually <em>fall</em> as growth rises.  The reverse-DCF binary search converges in unexpected places.</span>
+            <span class="tg-desc">In highly-levered industrials (CCL, F, BA, AAL), higher growth requires more capex and debt, the equity value can actually <em>fall</em> as growth rises.  The reverse-DCF binary search converges in unexpected places.</span>
           </div>
         </div>
         <div class="tg-row tier-warning">
@@ -938,7 +942,7 @@
       <div class="lb-empty hidden" id="lbEmpty">
         <div class="portfolio-empty__icon">🏆</div>
         <div class="portfolio-empty__title">No one's submitted yet</div>
-        <div class="portfolio-empty__sub">Be the first — build a portfolio and click "Submit to leaderboard".</div>
+        <div class="portfolio-empty__sub">Be the first, build a portfolio and click "Submit to leaderboard".</div>
       </div>
     </div>
   </div>
@@ -960,24 +964,24 @@
       <div class="btc-price-row">
         <div class="btc-price-block">
           <span class="btc-price-label">Spot · BTC/USD</span>
-          <span class="btc-price-value numeric" id="btcPrice">—</span>
+          <span class="btc-price-value numeric" id="btcPrice">, </span>
           <div class="btc-price-deltas">
-            <span class="btc-delta" id="btcDelta24h">—</span>
-            <span class="btc-delta" id="btcDelta1y">—</span>
+            <span class="btc-delta" id="btcDelta24h">, </span>
+            <span class="btc-delta" id="btcDelta1y">, </span>
           </div>
         </div>
         <div class="btc-stats">
           <div class="btc-stat">
             <span class="btc-stat__label">Market Cap</span>
-            <span class="btc-stat__value numeric" id="btcMcap">—</span>
+            <span class="btc-stat__value numeric" id="btcMcap">, </span>
           </div>
           <div class="btc-stat">
             <span class="btc-stat__label">52W High</span>
-            <span class="btc-stat__value numeric" id="btcHigh">—</span>
+            <span class="btc-stat__value numeric" id="btcHigh">, </span>
           </div>
           <div class="btc-stat">
             <span class="btc-stat__label">52W Low</span>
-            <span class="btc-stat__value numeric" id="btcLow">—</span>
+            <span class="btc-stat__value numeric" id="btcLow">, </span>
           </div>
           <div class="btc-stat">
             <span class="btc-stat__label">Hard Cap</span>
@@ -1018,7 +1022,7 @@
     <!-- Persistent disclaimer on every results view (not just the navbar pill). -->
     <div class="results-disclaimer" role="note">
       <span class="results-disclaimer__icon">⚠</span>
-      <span><strong>Educational analysis — not financial advice.</strong>
+      <span><strong>Educational analysis, not financial advice.</strong>
       VALUS is a research tool, not an investment adviser. Figures are model
       estimates from public data and may be wrong. Do your own research and
       consult a licensed professional before investing.
@@ -1029,12 +1033,12 @@
     <section class="hero-verdict tier-info" id="heroVerdict" data-tier-class="tier-info">
       <div class="hero-verdict__head">
         <div class="hero-verdict__company">
-          <h2 class="hero-verdict__name" id="vName">—</h2>
+          <h2 class="hero-verdict__name" id="vName">, </h2>
           <div class="hero-verdict__ticker">
-            <span class="pill" id="vTicker">—</span>
-            <span id="vSector">—</span>
+            <span class="pill" id="vTicker">, </span>
+            <span id="vSector">, </span>
             <span>·</span>
-            <span id="vRange">—</span>
+            <span id="vRange">, </span>
           </div>
         </div>
         <div class="hero-verdict__actions">
@@ -1053,26 +1057,26 @@
       <div class="price-iv">
         <div class="pi-block">
           <span class="pi-label">Current price</span>
-          <span class="pi-value numeric" id="vPrice">—</span>
+          <span class="pi-value numeric" id="vPrice">, </span>
         </div>
         <div class="mos-bar">
           <span class="mos-label">Margin of safety</span>
           <div class="mos-track">
             <span class="mos-fill" id="vMosFill" style="width: 0%"></span>
           </div>
-          <span class="mos-pct" id="vMosPct">—</span>
+          <span class="mos-pct" id="vMosPct">, </span>
         </div>
         <div class="pi-block right">
           <span class="pi-label">Fair value</span>
-          <span class="pi-value iv numeric" id="vIV">—</span>
+          <span class="pi-value iv numeric" id="vIV">, </span>
         </div>
       </div>
 
-      <!-- Strategic IV floor breakdown — only shown when survival_floor tier
+      <!-- Strategic IV floor breakdown, only shown when survival_floor tier
            lifted DCF.  Format: DCF model: $X · Strategic floor: $Y · Used: $Z -->
       <div class="iv-floor-breakdown hidden" id="vIvFloorBreakdown"></div>
 
-      <!-- AI-adjusted IV breakdown — the "VALUS" number rendered alongside
+      <!-- AI-adjusted IV breakdown, the "VALUS" number rendered alongside
            the deterministic DCF.  Shown only when the AI model returned bounded
            DCF tweaks that lifted IV. Format: DCF: $X · VALUS: $Y (+Z%) -->
       <div class="iv-floor-breakdown ai-iv-breakdown hidden" id="vAiIvBreakdown"></div>
@@ -1082,16 +1086,16 @@
            the market price differs from VALUS fair value, not just THAT it does. -->
       <div class="iv-scenario hidden" id="vIvScenario">
         <span class="iv-scenario__icon" aria-hidden="true">↳</span>
-        <span class="iv-scenario__text" id="vIvScenarioText">—</span>
+        <span class="iv-scenario__text" id="vIvScenarioText">, </span>
       </div>
 
       <button class="tier-badge tier-badge--btn" id="vTierBadge" type="button" aria-label="See what this verdict means">
         <span class="tier-badge__dot"></span>
-        <span id="vTierLabel">—</span>
+        <span id="vTierLabel">, </span>
         <span class="tier-badge__info" aria-hidden="true">ⓘ</span>
       </button>
 
-      <!-- VALUS A-F letter grade (Phase 5) — large badge + one-line
+      <!-- VALUS A-F letter grade (Phase 5), large badge + one-line
            explanation, slotted right after the verdict tier so the two
            views of the same signal sit together. -->
       <div class="valus-grade-row" id="vValusGradeRow" hidden>
@@ -1103,7 +1107,7 @@
         </button>
       </div>
 
-      <!-- Strategic Asset banner — only shown when is_strategic=true.
+      <!-- Strategic Asset banner, only shown when is_strategic=true.
            Surfaces the curated thesis (CHIPS Act, defense prime, etc.)
            plus any live policy tailwinds detected from news. -->
       <div class="strategic-banner hidden" id="vStrategicBanner">
@@ -1112,27 +1116,27 @@
           <span class="strategic-banner__label" id="vStrategicLabel">Strategic Asset</span>
           <span class="strategic-banner__live hidden" id="vStrategicLive" title="Live policy tailwind detected in recent news">● Live policy tailwind</span>
         </div>
-        <div class="strategic-banner__reason" id="vStrategicReason">—</div>
+        <div class="strategic-banner__reason" id="vStrategicReason">, </div>
         <div class="strategic-banner__chips" id="vStrategicChips"></div>
       </div>
 
       <div class="reasons" id="vReasons"></div>
 
-      <!-- News block — visible on every analyze view when catalysts are
+      <!-- News block, visible on every analyze view when catalysts are
            present (not just strategic tickers).  Shows a chip and an
            expandable list of headlines from yfinance, EDGAR 8-K, and
            Google News, scored by the heuristic + Claude tie-breaker. -->
       <div class="news-block hidden" id="vNewsBlock">
         <button class="news-chip" id="vNewsChip" type="button" aria-expanded="false">
           <span class="news-chip__icon" aria-hidden="true">📰</span>
-          <span class="news-chip__count" id="vNewsCount">—</span>
+          <span class="news-chip__count" id="vNewsCount">, </span>
           <span class="news-chip__hint">click to expand</span>
           <span class="news-chip__caret" aria-hidden="true">▾</span>
         </button>
         <div class="news-list hidden" id="vNewsList"></div>
       </div>
 
-      <div class="verdict-line" id="vVerdict">—</div>
+      <div class="verdict-line" id="vVerdict">, </div>
 
       <!-- Inline insight row: confidence + implied growth + 52w range.
            Replaces the previous Bear/Base/Bull toggle (redundant with the
@@ -1140,12 +1144,12 @@
       <div class="hero-insights" id="vInsights">
         <div class="hero-insight" id="viConfidenceWrap" hidden>
           <span class="hero-insight__label">Confidence</span>
-          <span class="hero-insight__value" id="viConfidence">—</span>
+          <span class="hero-insight__value" id="viConfidence">, </span>
           <span class="hero-insight__hint" id="viConfidenceHint"></span>
         </div>
         <div class="hero-insight" id="viImpliedWrap" hidden>
           <span class="hero-insight__label">Implied growth</span>
-          <span class="hero-insight__value" id="viImplied">—</span>
+          <span class="hero-insight__value" id="viImplied">, </span>
           <span class="hero-insight__hint" id="viImpliedHint"></span>
         </div>
         <div class="hero-insight hero-insight--range" id="viRangeWrap" hidden>
@@ -1155,51 +1159,51 @@
               <div class="hr-bar__marker" id="viRangeMarker"></div>
             </div>
             <div class="hr-bar__ends">
-              <span id="viRangeLow">—</span>
-              <span id="viRangeHigh">—</span>
+              <span id="viRangeLow">, </span>
+              <span id="viRangeHigh">, </span>
             </div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- SCENARIOS — moved up so users see bear/base/bull immediately -->
+    <!-- SCENARIOS, moved up so users see bear/base/bull immediately -->
     <section class="card scenarios">
       <div class="scenarios__head">
         <span class="scenarios__title">Scenario analysis</span>
-        <span class="scenarios__weight-note" id="scWeightNote">—</span>
+        <span class="scenarios__weight-note" id="scWeightNote">, </span>
       </div>
       <div class="scenarios__grid" id="scGrid"></div>
       <div class="weighted-bar">
         <span class="weighted-bar__label">Probability-weighted fair value</span>
-        <span class="weighted-bar__value numeric" id="scWeighted">—</span>
-        <span class="weighted-bar__delta numeric" id="scWeightedDelta">—</span>
+        <span class="weighted-bar__value numeric" id="scWeighted">, </span>
+        <span class="weighted-bar__delta numeric" id="scWeightedDelta">, </span>
       </div>
     </section>
 
-    <!-- VERDICT INTELLIGENCE ROW — sanity check, what-flips, reverse-DCF -->
+    <!-- VERDICT INTELLIGENCE ROW, sanity check, what-flips, reverse-DCF -->
     <section class="verdict-grid hidden" id="verdictGrid">
       <div class="card vg-card" id="sanityCard" hidden>
         <div class="vg-head">
           <span class="vg-icon" aria-hidden="true">⚖</span>
           <span class="vg-title">Sanity check vs Wall Street</span>
-          <span class="vg-pill" id="sanityTier">—</span>
+          <span class="vg-pill" id="sanityTier">, </span>
         </div>
         <div class="vg-row">
           <div class="vg-stat">
             <span class="vg-stat__label">VALUS fair value</span>
-            <span class="vg-stat__value numeric" id="sanityValusIv">—</span>
+            <span class="vg-stat__value numeric" id="sanityValusIv">, </span>
           </div>
           <div class="vg-stat">
             <span class="vg-stat__label">Analyst consensus</span>
-            <span class="vg-stat__value numeric" id="sanityAnalyst">—</span>
+            <span class="vg-stat__value numeric" id="sanityAnalyst">, </span>
           </div>
           <div class="vg-stat">
             <span class="vg-stat__label">Gap</span>
-            <span class="vg-stat__value numeric" id="sanityGap">—</span>
+            <span class="vg-stat__value numeric" id="sanityGap">, </span>
           </div>
         </div>
-        <p class="vg-narrative" id="sanityNarrative">—</p>
+        <p class="vg-narrative" id="sanityNarrative">, </p>
       </div>
 
       <div class="card vg-card" id="flipCard" hidden>
@@ -1213,40 +1217,40 @@
       <div class="card vg-card" id="reverseDcfCard" hidden>
         <div class="vg-head">
           <span class="vg-icon" aria-hidden="true">↩</span>
-          <span class="vg-title">Reverse-DCF — what is the market pricing in?</span>
-          <span class="vg-pill" id="reverseDcfTier">—</span>
+          <span class="vg-title">Reverse-DCF, what is the market pricing in?</span>
+          <span class="vg-pill" id="reverseDcfTier">, </span>
         </div>
         <div class="vg-row">
           <div class="vg-stat">
             <span class="vg-stat__label">Market-implied growth</span>
-            <span class="vg-stat__value numeric" id="rdcfImplied">—</span>
+            <span class="vg-stat__value numeric" id="rdcfImplied">, </span>
           </div>
           <div class="vg-stat">
             <span class="vg-stat__label">Sector ceiling</span>
-            <span class="vg-stat__value numeric" id="rdcfCeiling">—</span>
+            <span class="vg-stat__value numeric" id="rdcfCeiling">, </span>
           </div>
         </div>
-        <p class="vg-narrative" id="rdcfNarrative">—</p>
+        <p class="vg-narrative" id="rdcfNarrative">, </p>
       </div>
     </section>
 
-    <!-- MINI STATS — moved up; sits right under scenarios -->
+    <!-- MINI STATS, moved up; sits right under scenarios -->
     <section class="mini-stats">
       <div class="mini-stat">
         <span class="mini-stat__label">Market Cap</span>
-        <span class="mini-stat__value numeric" id="mMcap">—</span>
+        <span class="mini-stat__value numeric" id="mMcap">, </span>
       </div>
       <div class="mini-stat">
         <span class="mini-stat__label">P/E (TTM)</span>
-        <span class="mini-stat__value numeric" id="mPE">—</span>
+        <span class="mini-stat__value numeric" id="mPE">, </span>
       </div>
       <div class="mini-stat">
         <span class="mini-stat__label">Dividend Yield</span>
-        <span class="mini-stat__value numeric" id="mDiv">—</span>
+        <span class="mini-stat__value numeric" id="mDiv">, </span>
       </div>
       <div class="mini-stat">
         <span class="mini-stat__label">Analyst Target</span>
-        <span class="mini-stat__value numeric" id="mTarget">—</span>
+        <span class="mini-stat__value numeric" id="mTarget">, </span>
       </div>
     </section>
 
@@ -1261,7 +1265,7 @@
       </div>
       <!-- Cyclical-pattern caveat: shown when the deterministic IV is
            consistently far below price (auto/airline/semi trough names).
-           Pure DCF systematically undervalues these — surface that. -->
+           Pure DCF systematically undervalues these, surface that. -->
       <div class="vh-caveat hidden" id="vhCaveat">
         <span class="vh-caveat__icon" aria-hidden="true">⚠</span>
         <span class="vh-caveat__text" id="vhCaveatText"></span>
@@ -1275,7 +1279,7 @@
         <span class="vh-legend__hint">When price dips below the mint line = undervalued window. IV is recomputed each year from data filed by that date.</span>
       </div>
       <div class="vh-empty hidden" id="vhEmpty">
-        Historical valuation requires SEC EDGAR data — available for US-listed filers with sufficient history.
+        Historical valuation requires SEC EDGAR data, available for US-listed filers with sufficient history.
       </div>
     </section>
 
@@ -1314,10 +1318,10 @@
           <div class="ic-sub" id="qualitySub">Profitability, returns, leverage</div>
         </div>
         <div class="quality-score hidden" id="qualityScoreBlock">
-          <div class="quality-score__num numeric" id="qualityScoreNum">—</div>
+          <div class="quality-score__num numeric" id="qualityScoreNum">, </div>
           <div class="quality-score__meta">
-            <span class="quality-score__grade" id="qualityScoreGrade">—</span>
-            <span class="quality-score__sub">0–100 composite</span>
+            <span class="quality-score__grade" id="qualityScoreGrade">, </span>
+            <span class="quality-score__sub">0-100 composite</span>
           </div>
         </div>
         <div class="quality-grid" id="qualityGrid"></div>
@@ -1325,14 +1329,14 @@
       <div class="card insights-card" id="moatCard" hidden>
         <div class="ic-head">
           <div class="ic-title">Moat breakdown</div>
-          <div class="ic-sub"><span id="moatStrength">—</span></div>
+          <div class="ic-sub"><span id="moatStrength">, </span></div>
         </div>
         <div class="moat-list" id="moatList"></div>
       </div>
       <div class="card insights-card" id="buffettCard" hidden>
         <div class="ic-head">
           <div class="ic-title">Buffett checklist</div>
-          <div class="ic-sub"><span id="buffettScore">—</span></div>
+          <div class="ic-sub"><span id="buffettScore">, </span></div>
         </div>
         <ul class="buffett-list" id="buffettList"></ul>
       </div>
@@ -1342,20 +1346,20 @@
           <div class="ic-sub" id="momentumSub">50/200-day moving averages</div>
         </div>
         <div class="momentum-body">
-          <div class="momentum-tier" id="momentumTier">—</div>
+          <div class="momentum-tier" id="momentumTier">, </div>
           <div class="momentum-mas">
             <div class="momentum-ma">
               <span class="momentum-ma__label">Price</span>
-              <span class="momentum-ma__value numeric" id="momPrice">—</span>
+              <span class="momentum-ma__value numeric" id="momPrice">, </span>
             </div>
             <div class="momentum-ma">
               <span class="momentum-ma__label">50-day MA</span>
-              <span class="momentum-ma__value numeric" id="momMa50">—</span>
+              <span class="momentum-ma__value numeric" id="momMa50">, </span>
               <span class="momentum-ma__gap" id="momMa50Gap"></span>
             </div>
             <div class="momentum-ma">
               <span class="momentum-ma__label">200-day MA</span>
-              <span class="momentum-ma__value numeric" id="momMa200">—</span>
+              <span class="momentum-ma__value numeric" id="momMa200">, </span>
               <span class="momentum-ma__gap" id="momMa200Gap"></span>
             </div>
           </div>
@@ -1366,8 +1370,8 @@
           <div class="ic-title">Earnings quality</div>
           <div class="ic-sub">FCF vs reported EPS</div>
         </div>
-        <div class="eq-tier" id="eqTier">—</div>
-        <p class="eq-narrative" id="eqNarrative">—</p>
+        <div class="eq-tier" id="eqTier">, </div>
+        <p class="eq-narrative" id="eqNarrative">, </p>
       </div>
       <div class="card insights-card" id="riskCard" hidden>
         <div class="ic-head">
@@ -1381,7 +1385,7 @@
       <div class="card insights-card" id="insiderCard" hidden>
         <div class="ic-head">
           <div class="ic-title">Insider activity (90d)</div>
-          <div class="ic-sub" id="insiderSub">SEC Form 4 — last 90 days</div>
+          <div class="ic-sub" id="insiderSub">SEC Form 4, last 90 days</div>
         </div>
         <div class="insider-summary" id="insiderSummary"></div>
         <div class="insider-list" id="insiderList"></div>
@@ -1389,7 +1393,7 @@
       <div class="card insights-card" id="congressCard" hidden>
         <div class="ic-head">
           <div class="ic-title">Congressional trades (180d)</div>
-          <div class="ic-sub" id="congressSub">STOCK Act PTRs — House + Senate</div>
+          <div class="ic-sub" id="congressSub">STOCK Act PTRs, House + Senate</div>
         </div>
         <div class="insider-summary" id="congressSummary"></div>
         <div class="insider-list" id="congressList"></div>
@@ -1413,26 +1417,26 @@
       <div class="drawer__inner">
         <div class="drawer__content">
 
-          <!-- Custom DCF assumptions (top — most engaging) -->
+          <!-- Custom DCF assumptions (top, most engaging) -->
           <div class="card custom-dcf">
             <div class="section-title-row">
               <div class="section-title">Try your own assumptions</div>
               <button class="copy-btn copy-btn--small" id="cdResetBtn" type="button">↺ Reset</button>
             </div>
             <div class="cd-hint">
-              Sliders start on VALUS's own assumptions and the same fair value — move them to see how the number reacts.
+              Sliders start on VALUS's own assumptions and the same fair value, move them to see how the number reacts.
             </div>
 
             <div class="cd-result">
               <div class="cd-result__col">
                 <span class="cd-result__label">VALUS fair value</span>
-                <span class="cd-result__value numeric" id="cdValusIV">—</span>
+                <span class="cd-result__value numeric" id="cdValusIV">, </span>
               </div>
               <div class="cd-arrow">→</div>
               <div class="cd-result__col cd-result__col--your">
                 <span class="cd-result__label">Your fair value</span>
-                <span class="cd-result__value numeric" id="cdYourIV">—</span>
-                <span class="cd-result__delta numeric" id="cdYourDelta">—</span>
+                <span class="cd-result__value numeric" id="cdYourIV">, </span>
+                <span class="cd-result__delta numeric" id="cdYourDelta">, </span>
               </div>
             </div>
 
@@ -1440,28 +1444,28 @@
               <div class="cd-slider-row">
                 <div class="cd-slider-head">
                   <span class="cd-slider-label">Stage 1 growth · g₁</span>
-                  <span class="cd-slider-value numeric" id="cdS1Val">—</span>
+                  <span class="cd-slider-value numeric" id="cdS1Val">, </span>
                 </div>
                 <input type="range" class="dcf-slider cd-slider" id="cdS1" min="0" max="60" step="0.5"/>
               </div>
               <div class="cd-slider-row">
                 <div class="cd-slider-head">
                   <span class="cd-slider-label">Stage 2 growth · g₂</span>
-                  <span class="cd-slider-value numeric" id="cdS2Val">—</span>
+                  <span class="cd-slider-value numeric" id="cdS2Val">, </span>
                 </div>
                 <input type="range" class="dcf-slider cd-slider" id="cdS2" min="0" max="40" step="0.5"/>
               </div>
               <div class="cd-slider-row">
                 <div class="cd-slider-head">
                   <span class="cd-slider-label">Discount rate · WACC</span>
-                  <span class="cd-slider-value numeric" id="cdWaccVal">—</span>
+                  <span class="cd-slider-value numeric" id="cdWaccVal">, </span>
                 </div>
                 <input type="range" class="dcf-slider cd-slider" id="cdWacc" min="3" max="25" step="0.1"/>
               </div>
               <div class="cd-slider-row">
                 <div class="cd-slider-head">
                   <span class="cd-slider-label">Terminal growth · g_T</span>
-                  <span class="cd-slider-value numeric" id="cdTgVal">—</span>
+                  <span class="cd-slider-value numeric" id="cdTgVal">, </span>
                 </div>
                 <input type="range" class="dcf-slider cd-slider" id="cdTg" min="0.5" max="6" step="0.1"/>
               </div>
@@ -1472,26 +1476,26 @@
           <div class="card cmp-card hidden" id="comparablesCard">
             <div class="section-title-row">
               <div class="section-title">Comparables-based fair value</div>
-              <span class="cmp-card__pill" id="cmpProb">—</span>
+              <span class="cmp-card__pill" id="cmpProb">, </span>
             </div>
-            <div class="cmp-card__sub" id="cmpReason">—</div>
+            <div class="cmp-card__sub" id="cmpReason">, </div>
 
             <div class="cmp-grid">
               <div class="cmp-stat">
                 <span class="cmp-stat__label">Company age</span>
-                <span class="cmp-stat__value numeric" id="cmpAge">—</span>
+                <span class="cmp-stat__value numeric" id="cmpAge">, </span>
               </div>
               <div class="cmp-stat">
                 <span class="cmp-stat__label">Current op. margin</span>
-                <span class="cmp-stat__value numeric" id="cmpCurMargin">—</span>
+                <span class="cmp-stat__value numeric" id="cmpCurMargin">, </span>
               </div>
               <div class="cmp-stat">
                 <span class="cmp-stat__label">Peer avg op. margin</span>
-                <span class="cmp-stat__value numeric" id="cmpPeerAvg">—</span>
+                <span class="cmp-stat__value numeric" id="cmpPeerAvg">, </span>
               </div>
               <div class="cmp-stat">
                 <span class="cmp-stat__label">P(attainment)</span>
-                <span class="cmp-stat__value numeric" id="cmpPAttain">—</span>
+                <span class="cmp-stat__value numeric" id="cmpPAttain">, </span>
               </div>
             </div>
 
@@ -1502,17 +1506,17 @@
             <div class="cmp-fcf-row">
               <div class="cmp-fcf">
                 <span class="cmp-fcf__label">Today</span>
-                <span class="cmp-fcf__value numeric" id="cmpFcfNow">—</span>
+                <span class="cmp-fcf__value numeric" id="cmpFcfNow">, </span>
               </div>
               <div class="cmp-fcf__arrow">→</div>
               <div class="cmp-fcf">
                 <span class="cmp-fcf__label">Peer-implied</span>
-                <span class="cmp-fcf__value numeric" id="cmpFcfPeer">—</span>
+                <span class="cmp-fcf__value numeric" id="cmpFcfPeer">, </span>
               </div>
               <div class="cmp-fcf__arrow">⇒</div>
               <div class="cmp-fcf cmp-fcf--weighted">
                 <span class="cmp-fcf__label">Weighted (used in DCF)</span>
-                <span class="cmp-fcf__value numeric" id="cmpFcfWeighted">—</span>
+                <span class="cmp-fcf__value numeric" id="cmpFcfWeighted">, </span>
               </div>
             </div>
           </div>
@@ -1532,20 +1536,20 @@
             <div class="dcf-year-card" id="dcfYearCard">
               <div class="dcf-year-card__head">
                 <span class="dcf-year-card__label">Year <span id="dyYearN">1</span></span>
-                <span class="dcf-year-card__growth" id="dyGrowth">— growth</span>
+                <span class="dcf-year-card__growth" id="dyGrowth">, growth</span>
               </div>
               <div class="dcf-year-card__values">
                 <div>
                   <span class="dcf-year-card__small-label">Projected FCF</span>
-                  <span class="dcf-year-card__big numeric" id="dyFcf">—</span>
+                  <span class="dcf-year-card__big numeric" id="dyFcf">, </span>
                 </div>
                 <div>
                   <span class="dcf-year-card__small-label">Discounted (PV)</span>
-                  <span class="dcf-year-card__big numeric" id="dyPv">—</span>
+                  <span class="dcf-year-card__big numeric" id="dyPv">, </span>
                 </div>
               </div>
               <div class="dcf-year-card__discount">
-                <span id="dyDiscNote">—</span>
+                <span id="dyDiscNote">, </span>
               </div>
             </div>
 
@@ -1637,7 +1641,7 @@
 <!-- ── FOOTER ─────────────────────────────────────────────────────────── -->
 <footer class="site-footer">
   <div class="container">
-    <span>VALUS · Educational research tool · Data via Yahoo Finance · Not investment advice · <a href="/how-it-works" style="color: inherit; text-decoration: underline; opacity: 0.8;">How it works</a> · <a href="/methodology" style="color: inherit; text-decoration: underline; opacity: 0.8;">Methodology</a> · <a href="/terms" style="color: inherit; text-decoration: underline; opacity: 0.8;">Terms</a> · <a href="/privacy" style="color: inherit; text-decoration: underline; opacity: 0.8;">Privacy</a></span>
+    <span>VALUS · Educational research tool · Data via Yahoo Finance · Not investment advice · <a href="/how-it-works" style="color: inherit; text-decoration: underline; opacity: 0.8;">How it works</a> · <a href="/methodology" style="color: inherit; text-decoration: underline; opacity: 0.8;">Methodology</a> · <a href="/terms" style="color: inherit; text-decoration: underline; opacity: 0.8;">Terms</a> · <a href="/privacy" style="color: inherit; text-decoration: underline; opacity: 0.8;">Privacy</a> · <a href="mailto:contact@valusfinancial.com" style="color: inherit; text-decoration: underline; opacity: 0.8;">Contact</a></span>
   </div>
 </footer>
 

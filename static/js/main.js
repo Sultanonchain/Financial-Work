@@ -1,5 +1,5 @@
 /* ════════════════════════════════════════════════════════════════════════
-   VALUS — Frontend (immersive institutional redesign)
+   VALUS, Frontend (immersive institutional redesign)
    ════════════════════════════════════════════════════════════════════════ */
 
 const $ = (id) => document.getElementById(id);
@@ -9,20 +9,20 @@ const escHtml = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({
 }[c]));
 
 const fmt = (n, d = 2) => {
-  if (n == null || isNaN(n)) return "—";
+  if (n == null || isNaN(n)) return ", ";
   return Number(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
 };
 
-const fmtPrice = (n) => n == null || isNaN(n) ? "—" : `$${fmt(n, 2)}`;
+const fmtPrice = (n) => n == null || isNaN(n) ? ", " : `$${fmt(n, 2)}`;
 
 const fmtPct = (n, d = 1) => {
-  if (n == null || isNaN(n)) return "—";
+  if (n == null || isNaN(n)) return ", ";
   const sign = n > 0 ? "+" : "";
   return `${sign}${fmt(n, d)}%`;
 };
 
 const fmtBig = (n) => {
-  if (n == null || isNaN(n)) return "—";
+  if (n == null || isNaN(n)) return ", ";
   const abs = Math.abs(n);
   if (abs >= 1e12) return `$${fmt(n / 1e12, 2)}T`;
   if (abs >= 1e9)  return `$${fmt(n / 1e9, 2)}B`;
@@ -31,11 +31,11 @@ const fmtBig = (n) => {
   return `$${fmt(n, 2)}`;
 };
 
-const fmtX = (n) => n == null ? "—" : `${fmt(n, 1)}×`;
+const fmtX = (n) => n == null ? ", " : `${fmt(n, 1)}×`;
 
 // ── VALUS A-F grade badge (Phase 5) ──────────────────────────────────
 // Renders the {grade,label,explanation,mos} payload the backend ships in
-// d.valus_grade.  Two variants — default chip, used in row contexts, and
+// d.valus_grade.  Two variants, default chip, used in row contexts, and
 // large, used on the stock detail hero.  Returns an empty string when
 // the input is null/missing so callers can string-interpolate safely.
 function renderGradeBadge(g, opts) {
@@ -48,7 +48,7 @@ function renderGradeBadge(g, opts) {
     : "";
   return `
     <span class="${cls}" data-grade="${escHtml(g.grade)}"
-          title="${escHtml((g.label || "") + " — " + (g.explanation || ""))}">
+          title="${escHtml((g.label || "") + ", " + (g.explanation || ""))}">
       <span class="valus-grade__letter">${escHtml(g.grade)}</span>
       ${label}
     </span>`;
@@ -58,7 +58,7 @@ function renderGradeBadge(g, opts) {
 // in row contexts (portfolio, watchlist) where we already have the MOS
 // number snapshot and don't want to re-fetch /api/analyze to get the
 // server's valus_grade payload.  Mirrors the bands in compute_valus_grade
-// in app.py — keep the two in sync if you tweak thresholds.
+// in app.py, keep the two in sync if you tweak thresholds.
 function mosToGrade(mos) {
   if (mos == null || isNaN(mos)) return null;
   const m = Number(mos);
@@ -77,13 +77,13 @@ function mosToGradeChip(mos) {
   const g = mosToGrade(mos);
   if (!g) {
     return `<span class="valus-grade" data-grade="C"
-             title="MOS unavailable"><span class="valus-grade__letter">—</span></span>`;
+             title="MOS unavailable"><span class="valus-grade__letter">, </span></span>`;
   }
   const sign = mos >= 0 ? "+" : "";
   const pct  = `${sign}${fmt(mos, 1)}%`;
   return `
     <span class="valus-grade" data-grade="${g}"
-          title="VALUS grade ${g} · ${pct} — click for definitions">
+          title="VALUS grade ${g} · ${pct}, click for definitions">
       <span class="valus-grade__letter">${g}</span>
       <span class="valus-grade__label">${pct}</span>
     </span>`;
@@ -96,16 +96,16 @@ function mosToGradeChip(mos) {
 function itemGradeChip(it) {
   if (!it) return mosToGradeChip(null);
   const stored = it.grade;
-  // No snapshot — derive from MOS like before (back-compat for items
+  // No snapshot, derive from MOS like before (back-compat for items
   // added pre-reconciliation shipping).
   if (!stored) return mosToGradeChip(it.mos);
   const mos = it.mos;
   const mosTxt = (typeof mos === "number")
     ? `${mos >= 0 ? "+" : ""}${fmt(mos, 1)}%`
-    : "—";
+    : ", ";
   return `
     <span class="valus-grade" data-grade="${escHtml(stored)}"
-          title="VALUS grade ${escHtml(stored)} · ${mosTxt} — click for definitions">
+          title="VALUS grade ${escHtml(stored)} · ${mosTxt}, click for definitions">
       <span class="valus-grade__letter">${escHtml(stored)}</span>
       <span class="valus-grade__label">${mosTxt}</span>
     </span>`;
@@ -119,19 +119,19 @@ function itemGradeChip(it) {
 const GRADE_BANDS = [
   { grade: "A", range: "MOS ≥ +30%",
     label: "Deeply undervalued",
-    desc:  "Market price is well below VALUS fair value — a significant margin of safety. The kind of mispricing value investors look for." },
+    desc:  "Market price is well below VALUS fair value, a significant margin of safety. The kind of mispricing value investors look for." },
   { grade: "B", range: "+15% to +30%",
     label: "Moderately undervalued",
     desc:  "Trading below VALUS fair value with a comfortable cushion. Less extreme than A but still attractive on the DCF view." },
   { grade: "C", range: "−15% to +15%",
     label: "Fairly priced",
-    desc:  "Market price tracks VALUS fair value — no obvious mispricing. The market and the model roughly agree on what this is worth." },
+    desc:  "Market price tracks VALUS fair value, no obvious mispricing. The market and the model roughly agree on what this is worth." },
   { grade: "D", range: "−30% to −15%",
     label: "Moderately overvalued",
     desc:  "Trading above VALUS fair value. Investors are paying for growth or quality that exceeds what the DCF baseline supports." },
   { grade: "F", range: "MOS ≤ −30%",
     label: "Severely overvalued",
-    desc:  "Market price is far above VALUS fair value — expectations look stretched. Either the model is missing something, or the price is." },
+    desc:  "Market price is far above VALUS fair value, expectations look stretched. Either the model is missing something, or the price is." },
 ];
 
 function renderGradeExplainerList() {
@@ -339,7 +339,7 @@ function showError(msg) {
 function showRateLimit(data) {
   // Daily-search-limit responses ship a concrete used/limit pair + error
   // code so we can render a banner whose CTA matches the user's tier.
-  // Generic 429s (Flask-Limiter spam protection — no error code) fall
+  // Generic 429s (Flask-Limiter spam protection, no error code) fall
   // through to a permissive copy.
   const banner = ensureLimitBanner();
   const used = (data && Number.isFinite(data.used)) ? data.used : null;
@@ -355,19 +355,19 @@ function showRateLimit(data) {
     // Match the product spec verbatim. The signed-in/$2 numbers come from
     // the server payload so they stay in sync if we ever tune the tiers.
     body = `You've used your ${limit ?? 5} free searches today. ` +
-           `Sign in for ${SIGNED_IN_LIMIT_LABEL}/day or upgrade to VALUS+ for unlimited — $2/month`;
+           `Sign in for ${SIGNED_IN_LIMIT_LABEL}/day or upgrade to VALUS+ for unlimited, $2/month`;
     const next = window.location.pathname + window.location.search + window.location.hash;
     primaryHref = `/auth/login?next=${encodeURIComponent(next)}`;
     primaryLabel = "Sign in (free)";
-    secondaryLabel = "VALUS+ — Unlimited for $2/month";
+    secondaryLabel = "VALUS+, Unlimited for $2/month";
   } else if (data && data.error === "search_limit_signed_in") {
     body = `You've used your ${limit ?? 8} free searches today. ` +
-           `Upgrade to VALUS+ for unlimited — $2/month`;
-    secondaryLabel = "VALUS+ — Unlimited for $2/month";
+           `Upgrade to VALUS+ for unlimited, $2/month`;
+    secondaryLabel = "VALUS+, Unlimited for $2/month";
   } else {
     body = "Daily search limit reached. Try again tomorrow, " +
            "or upgrade to VALUS+ for unlimited.";
-    secondaryLabel = "VALUS+ — Unlimited for $2/month";
+    secondaryLabel = "VALUS+, Unlimited for $2/month";
   }
 
   banner.querySelector(".limit-banner__msg").textContent = body;
@@ -394,7 +394,7 @@ function showRateLimit(data) {
 }
 
 // One banner element, lazily inserted at the top of the results region so
-// the user sees it without scrolling. Idempotent — replaces children, not
+// the user sees it without scrolling. Idempotent, replaces children, not
 // the host node.
 const SIGNED_IN_LIMIT_LABEL = "8";
 function ensureLimitBanner() {
@@ -496,7 +496,7 @@ function renderResults(d) {
 }
 
 /* ════════════════════════════════════════════════════════════════════════
-   ETF / Index hero — special view for non-equity tickers
+   ETF / Index hero, special view for non-equity tickers
    ════════════════════════════════════════════════════════════════════════ */
 
 let etfChartInstance = null;
@@ -511,11 +511,11 @@ function renderETFHero(d) {
 
   $("etfName").textContent  = d.company_name || d.ticker;
   $("etfClass").textContent = d.asset_class || "ETF";
-  $("etfPrice").textContent = d.current_price != null ? fmtPrice(d.current_price) : "—";
-  $("etfHigh").textContent  = d["52w_high"] != null ? fmtPrice(d["52w_high"]) : "—";
-  $("etfLow").textContent   = d["52w_low"]  != null ? fmtPrice(d["52w_low"])  : "—";
-  $("etfYtd").textContent   = d.ytd_return != null ? fmtPct(d.ytd_return * 100) : "—";
-  $("etfExpense").textContent = d.expense_ratio != null ? `${fmt(d.expense_ratio * 100, 2)}%` : "—";
+  $("etfPrice").textContent = d.current_price != null ? fmtPrice(d.current_price) : ", ";
+  $("etfHigh").textContent  = d["52w_high"] != null ? fmtPrice(d["52w_high"]) : ", ";
+  $("etfLow").textContent   = d["52w_low"]  != null ? fmtPrice(d["52w_low"])  : ", ";
+  $("etfYtd").textContent   = d.ytd_return != null ? fmtPct(d.ytd_return * 100) : ", ";
+  $("etfExpense").textContent = d.expense_ratio != null ? `${fmt(d.expense_ratio * 100, 2)}%` : ", ";
   $("etfMessage").textContent = d.etf_message || "";
 
   // Render price chart (theme by YTD direction)
@@ -553,7 +553,7 @@ function renderETFHero(d) {
   }
   // ── Add to Portfolio ─────────────────────────────────────────────────
   // ETFs don't have an intrinsic value (DCF doesn't apply to baskets), but
-  // users still want to track them alongside equities — sector defaults to
+  // users still want to track them alongside equities, sector defaults to
   // "ETF" so the pie/legend on the portfolio page groups them cleanly.
   const etfAdd = $("etfAddPortfolio");
   if (etfAdd) {
@@ -600,7 +600,7 @@ function renderETFHero(d) {
 }
 
 /* ════════════════════════════════════════════════════════════════════════
-   BTC HODL hero — special view for ₿ tickers
+   BTC HODL hero, special view for ₿ tickers
    ════════════════════════════════════════════════════════════════════════ */
 
 let btcChartInstance = null;
@@ -619,7 +619,7 @@ function renderBTCHero(d) {
   // Animate price count-up
   animateNumber($("btcPrice"), 0, price || 0, 700, v => fmtPrice(v));
 
-  // 24h delta — last vs second-to-last close
+  // 24h delta, last vs second-to-last close
   if (hist.length >= 2) {
     const last = hist[hist.length - 1].close;
     const yest = hist[hist.length - 2].close;
@@ -645,9 +645,9 @@ function renderBTCHero(d) {
     }
   }
 
-  $("btcMcap").textContent = mcap != null ? fmtBig(mcap) : "—";
-  $("btcHigh").textContent = high != null ? fmtPrice(high) : "—";
-  $("btcLow").textContent  = low  != null ? fmtPrice(low)  : "—";
+  $("btcMcap").textContent = mcap != null ? fmtBig(mcap) : ", ";
+  $("btcHigh").textContent = high != null ? fmtPrice(high) : ", ";
+  $("btcLow").textContent  = low  != null ? fmtPrice(low)  : ", ";
 
   // Render chart with orange BTC theme
   const canvas = $("btcChart");
@@ -755,9 +755,9 @@ function renderHeroVerdict(d) {
   // Company info
   $("vName").textContent = d.company_name || d.ticker;
   $("vTicker").textContent = d.ticker;
-  $("vSector").textContent = d.sector || "—";
+  $("vSector").textContent = d.sector || ", ";
   $("vRange").textContent = d["52w_low"] && d["52w_high"]
-    ? `52W $${fmt(d["52w_low"])} – $${fmt(d["52w_high"])}`
+    ? `52W $${fmt(d["52w_low"])}, $${fmt(d["52w_high"])}`
     : "";
 
   // Price + IV with count-up
@@ -773,16 +773,16 @@ function renderHeroVerdict(d) {
   if (d.extreme_mos_flag) {
     // Data-quality outlier (share-class mismatch like BRK.B, forward-earnings
     // spike, stale/split price). A wildly large MOS is almost always a data
-    // error, not a real opportunity — so we SUPPRESS the misleading number
+    // error, not a real opportunity, so we SUPPRESS the misleading number
     // instead of showing "200%+" / "19,000%" with a chip.
-    pctEl.innerHTML = `<span class="mos-na">N/A</span><span class="mos-confidence-chip" title="VALUS can't produce a reliable margin of safety for this ticker. The underlying data (often a share-class mismatch, a forward-earnings spike, or a stale/split-adjusted price) makes the valuation unreliable — treat it as no signal, not as undervalued.">data issue</span>`;
+    pctEl.innerHTML = `<span class="mos-na">N/A</span><span class="mos-confidence-chip" title="VALUS can't produce a reliable margin of safety for this ticker. The underlying data (often a share-class mismatch, a forward-earnings spike, or a stale/split-adjusted price) makes the valuation unreliable, treat it as no signal, not as undervalued.">data issue</span>`;
     if (fillEl) { fillEl.style.width = "0%"; fillEl.classList.remove("positive","negative"); }
   } else if (mos != null) {
     if (d.iv_confidence === "low" || d.iv_confidence === "medium") {
       // Surface emergency / multiples-only IV provenance.
       const conf = d.iv_confidence === "low" ? "Low Conf" : "Medium";
       const tip  = d.iv_source_label
-        ? `Source: ${d.iv_source_label}. DCF was unavailable or low-confidence — IV anchored to a fallback method.`
+        ? `Source: ${d.iv_source_label}. DCF was unavailable or low-confidence, IV anchored to a fallback method.`
         : "IV from a fallback method (multiples, analyst target, distressed P/B, etc.).";
       pctEl.innerHTML = `${fmtPct(mos)}<span class="mos-confidence-chip" title="${escHtml(tip)}">${conf}</span>`;
     } else {
@@ -799,7 +799,7 @@ function renderHeroVerdict(d) {
       fillEl.classList.add("negative"); fillEl.classList.remove("positive");
     }
   } else {
-    pctEl.textContent = "—";
+    pctEl.textContent = ", ";
     if (fillEl) fillEl.style.width = "0%";
   }
 
@@ -826,7 +826,7 @@ function renderHeroVerdict(d) {
     }
   }
 
-  // Strategic IV floor breakdown — only when survival_floor tier lifted DCF.
+  // Strategic IV floor breakdown, only when survival_floor tier lifted DCF.
   // Format: DCF model: $X · Strategic floor: $Y · Used: $Z
   const floorEl = $("vIvFloorBreakdown");
   if (floorEl) {
@@ -848,7 +848,7 @@ function renderHeroVerdict(d) {
     }
   }
 
-  // AI-adjusted IV — the "VALUS" number Haiku produces by nudging Stage 1
+  // AI-adjusted IV, the "VALUS" number Haiku produces by nudging Stage 1
   // growth and WACC inside industry guardrails.  Renders alongside the
   // deterministic DCF so users see both: the pure-math number and the
   // AI-aware number that captures news + sovereign-capital signal.
@@ -864,7 +864,7 @@ function renderHeroVerdict(d) {
         g ? `growth ${g >= 0 ? "+" : ""}${g.toFixed(1)}pp` : "",
         w ? `WACC ${w >= 0 ? "+" : ""}${w.toFixed(2)}pp` : "",
       ].filter(Boolean).join(" · ");
-      const tip = (meta.rationale ? meta.rationale + " — " : "") + dialTxt;
+      const tip = (meta.rationale ? meta.rationale + ", " : "") + dialTxt;
       aiEl.classList.remove("hidden");
       aiEl.innerHTML = `
         <span class="iv-floor__lbl">DCF</span>
@@ -921,7 +921,7 @@ function renderHeroVerdict(d) {
   ).join("");
   $("vReasons").innerHTML = reasonsHtml;
 
-  // ── News block — visible chip + expandable list of catalyst headlines.
+  // ── News block, visible chip + expandable list of catalyst headlines.
   // Renders for *every* ticker with catalysts (not just strategic ones)
   // so investors see the news that's affecting valuation.  Color-coded:
   //   green  = positive catalyst, no material risk
@@ -930,9 +930,9 @@ function renderHeroVerdict(d) {
   //   neutral = generic news, no scoring signal
   renderNewsBlock(d);
 
-  // Verdict line — suppressed for data-quality outliers (extreme MOS).
+  // Verdict line, suppressed for data-quality outliers (extreme MOS).
   $("vVerdict").textContent = d.extreme_mos_flag
-    ? "VALUS can't produce a reliable valuation for this ticker — likely a data issue (share-class mismatch, forward-earnings spike, or a stale/split-adjusted price). Treat this as no signal."
+    ? "VALUS can't produce a reliable valuation for this ticker, likely a data issue (share-class mismatch, forward-earnings spike, or a stale/split-adjusted price). Treat this as no signal."
     : (vs.verdict || pf.narrative || "");
 
   // Hero insights (replaces the old Bear/Base/Bull toggle).
@@ -940,7 +940,7 @@ function renderHeroVerdict(d) {
 }
 
 // Populates the inline confidence + implied-growth + 52-week range row.
-// All three are independent — each hidden when its data is missing.
+// All three are independent, each hidden when its data is missing.
 function renderHeroInsights(d) {
   // ── Confidence ──
   const confWrap = document.getElementById("viConfidenceWrap");
@@ -952,7 +952,7 @@ function renderHeroInsights(d) {
     confEl.textContent = label;
     confEl.className = `hero-insight__value conf-${conf}`;
     const reason = (d.dcf_confidence_warnings || [])[0];
-    confHint.textContent = reason ? reason.split(/[—–-]/)[0].trim().slice(0, 60) : "";
+    confHint.textContent = reason ? reason.split(/[, -]/)[0].trim().slice(0, 60) : "";
     confWrap.hidden = false;
   } else {
     confWrap.hidden = true;
@@ -960,7 +960,7 @@ function renderHeroInsights(d) {
 
   // ── Market-implied scenario line (under the fair-value block) ──
   // Frames the gap between price and fair value as "what the market is
-  // pricing in" — not as the model being wrong.  Lynch's reframe.
+  // pricing in", not as the model being wrong.  Lynch's reframe.
   const scWrap = document.getElementById("vIvScenario");
   const scTxt  = document.getElementById("vIvScenarioText");
   if (scWrap && scTxt) {
@@ -1061,7 +1061,7 @@ function renderNewsBlock(d) {
       const cls  = score > 0 ? "news-row__score--up" : "news-row__score--down";
       scoreChip = `<span class="news-row__score ${cls}">${sign}${score.toFixed(1)}${dur ? ` · ${escHtml(dur)}` : ""}</span>`;
     }
-    const marker = isTransform ? `<span class="news-row__marker" title="Transformative catalyst — bumped Stage-1 growth">🚀</span>` : "";
+    const marker = isTransform ? `<span class="news-row__marker" title="Transformative catalyst, bumped Stage-1 growth">🚀</span>` : "";
     const ageStr = (row.age_days != null && !isNaN(row.age_days))
       ? `<span class="news-row__age">${Math.round(row.age_days)}d ago</span>`
       : "";
@@ -1103,50 +1103,50 @@ function generateScenarioReasons(which, slot, d) {
     if (isStruct)  return [
       `For the bull case at ${ivStr} (${upStr}), platform optionality (AI, robotics, or autonomy) materialises faster than the market expects and revenue compounds at the upper sector ceiling.`,
       `Operating margins expand 200-500bps as platform scale kicks in; capex efficiency improves and the network effect deepens the moat.`,
-      `Multiple expansion follows execution — the market re-rates the equity to reflect the optionality value embedded in the platform business.`,
+      `Multiple expansion follows execution, the market re-rates the equity to reflect the optionality value embedded in the platform business.`,
     ];
     if (isTech)    return [
-      `For the bull case at ${ivStr} (${upStr}), the AI tailwind compounds — cloud / software / silicon demand accelerates and operating leverage drives margins higher.`,
+      `For the bull case at ${ivStr} (${upStr}), the AI tailwind compounds, cloud / software / silicon demand accelerates and operating leverage drives margins higher.`,
       `Free cash flow conversion stays at 25%+ of revenue; capital allocation continues to favor buybacks and high-ROIC R&D.`,
-      `Multiple expansion comes from durable growth — the market keeps paying for moat-tech businesses with secular tailwinds.`,
+      `Multiple expansion comes from durable growth, the market keeps paying for moat-tech businesses with secular tailwinds.`,
     ];
     if (isFin)     return [
       `For the bull case at ${ivStr} (${upStr}), the rate environment supports net interest margin and loan growth accelerates 8%+.`,
       `Credit losses stay contained, capital ratios hold at regulatory comfort, and ROE expands toward sector-leading levels.`,
-      `Capital return ramps — buybacks and dividends compound book value per share faster than peers.`,
+      `Capital return ramps, buybacks and dividends compound book value per share faster than peers.`,
     ];
     if (isEnergy)  return [
       `For the bull case at ${ivStr} (${upStr}), commodity prices hold elevated and capital discipline drives free-cash-flow yield to double-digits.`,
-      `Production stays flat-to-up while capex remains restrained — the FCF flywheel converts directly to dividends + buybacks.`,
+      `Production stays flat-to-up while capex remains restrained, the FCF flywheel converts directly to dividends + buybacks.`,
       `Any recession is shallow and short; demand recovery + supply constraints push margins to cycle-high levels.`,
     ];
     if (isHC)      return [
       `For the bull case at ${ivStr} (${upStr}), pipeline assets reach commercial milestones and existing franchises hold pricing power.`,
       `R&D efficiency improves and approvals/launches drive double-digit revenue growth with expanding gross margins.`,
-      `Multiple expansion follows scientific success — the market pays a premium for proven execution against unmet medical needs.`,
+      `Multiple expansion follows scientific success, the market pays a premium for proven execution against unmet medical needs.`,
     ];
     if (isInd || isCons) return [
       `For the bull case at ${ivStr} (${upStr}), demand stays robust through any cycle softness; pricing power offsets input-cost inflation.`,
       `Operational efficiency gains and disciplined capital deployment expand operating margins 100-300bps.`,
-      `Capital return — buybacks, dividends, debt paydown — drives per-share intrinsic value higher faster than reported earnings.`,
+      `Capital return, buybacks, dividends, debt paydown, drives per-share intrinsic value higher faster than reported earnings.`,
     ];
     return [
       `For the bull case at ${ivStr} (${upStr}), revenue grows at the top of the sector band and operating margins expand on improving mix.`,
       `Capital allocation creates additional shareholder value via buybacks, dividend growth, or accretive M&A.`,
-      `Multiple holds or expands — the market continues to reward execution and cash-flow durability.`,
+      `Multiple holds or expands, the market continues to reward execution and cash-flow durability.`,
     ];
   }
 
   // Bear case
   if (isStruct)  return [
-    `For the bear case at ${ivStr} (${upStr}), the platform thesis stalls — AI / robotics / autonomy roadmap slips and capex stays elevated without payoff.`,
+    `For the bear case at ${ivStr} (${upStr}), the platform thesis stalls, AI / robotics / autonomy roadmap slips and capex stays elevated without payoff.`,
     `Growth reverts toward the base business as competition catches up; the speculative premium evaporates.`,
     `Multiple compresses as the market re-prices on actual cash flows rather than long-tail optionality.`,
   ];
   if (isTech)    return [
     `For the bear case at ${ivStr} (${upStr}), AI / cloud demand normalises and growth halves as the category matures.`,
     `Competition compresses operating margins; pricing power weakens and unit economics deteriorate.`,
-    `Multiple compresses materially — the market re-rates from "growth" to "GARP" valuation framework.`,
+    `Multiple compresses materially, the market re-rates from "growth" to "GARP" valuation framework.`,
   ];
   if (isFin)     return [
     `For the bear case at ${ivStr} (${upStr}), rates roll over and net interest margin compresses 50-100bps.`,
@@ -1155,8 +1155,8 @@ function generateScenarioReasons(which, slot, d) {
   ];
   if (isEnergy)  return [
     `For the bear case at ${ivStr} (${upStr}), commodity prices fall sharply on demand softness or excess supply.`,
-    `Capex commitments stay fixed but cash flow contracts — dividends face risk and net debt creeps higher.`,
-    `Multiple compresses on cycle fears — the market discounts a longer downturn than priced today.`,
+    `Capex commitments stay fixed but cash flow contracts, dividends face risk and net debt creeps higher.`,
+    `Multiple compresses on cycle fears, the market discounts a longer downturn than priced today.`,
   ];
   if (isHC)      return [
     `For the bear case at ${ivStr} (${upStr}), key pipeline assets fail or face surprise regulatory / pricing pressure.`,
@@ -1166,7 +1166,7 @@ function generateScenarioReasons(which, slot, d) {
   if (isInd || isCons) return [
     `For the bear case at ${ivStr} (${upStr}), demand softens on macro deceleration; volumes decline mid-single-digits.`,
     `Input-cost inflation outpaces pricing power; operating margins compress 100-200bps.`,
-    `Capital return slows — buybacks pause, debt paydown takes priority, and the multiple re-rates lower.`,
+    `Capital return slows, buybacks pause, debt paydown takes priority, and the multiple re-rates lower.`,
   ];
   return [
     `For the bear case at ${ivStr} (${upStr}), macro headwinds and competitive pressure cut revenue growth meaningfully below trend.`,
@@ -1213,7 +1213,7 @@ function activateScenario(which) {
   // Update tier label
   const tierLabelMap = { bear: "Bear case scenario", bull: "Bull case scenario" };
   if (which === "base") {
-    $("vTierLabel").textContent = (_LAST_DATA.priced_for || {}).label || "—";
+    $("vTierLabel").textContent = (_LAST_DATA.priced_for || {}).label || ", ";
   } else {
     $("vTierLabel").textContent = tierLabelMap[which];
   }
@@ -1250,9 +1250,9 @@ function activateScenario(which) {
   // Swap verdict line based on scenario
   const vline = $("vVerdict");
   if (which === "bear") {
-    vline.textContent = `What would have to be true for the bear case to play out — and how the model would re-rate from there.`;
+    vline.textContent = `What would have to be true for the bear case to play out, and how the model would re-rate from there.`;
   } else if (which === "bull") {
-    vline.textContent = `What would have to be true for the bull case to play out — and the upside the market hasn't yet priced in.`;
+    vline.textContent = `What would have to be true for the bull case to play out, and the upside the market hasn't yet priced in.`;
   } else {
     vline.textContent = (_LAST_DATA.verdict_summary || {}).verdict || (_LAST_DATA.priced_for || {}).narrative || "";
   }
@@ -1272,7 +1272,7 @@ function activateScenarioVisual(which) {
 
 function fmtMethodValue(s) {
   const v = s.value;
-  if (v == null) return "—";
+  if (v == null) return ", ";
   switch (s.format) {
     case "currency_b": return fmtBig(v);
     case "currency":   return fmtPrice(v);
@@ -1387,7 +1387,7 @@ function renderScenarios(d) {
     return "Worst case: macro headwinds, market-share losses, or margin compression cut growth meaningfully and the multiple re-rates lower.";
   }
   function baseCase() {
-    return "VALUS's central forecast — Stage 1 growth tapers to Stage 2, then to terminal at sector ceiling. Discounted at the model WACC.";
+    return "VALUS's central forecast, Stage 1 growth tapers to Stage 2, then to terminal at sector ceiling. Discounted at the model WACC.";
   }
 
   const meta = {
@@ -1413,8 +1413,8 @@ function renderScenarios(d) {
           <span class="sc-card__label">${m.label}</span>
           <span class="sc-card__weight">${w}% weight</span>
         </div>
-        <div class="sc-card__value ${m.valClass}">${v != null ? fmtPrice(v) : "—"}</div>
-        <div class="sc-card__delta">${upside != null ? fmtPct(upside) + " vs current" : "—"}</div>
+        <div class="sc-card__value ${m.valClass}">${v != null ? fmtPrice(v) : ", "}</div>
+        <div class="sc-card__delta">${upside != null ? fmtPct(upside) + " vs current" : ", "}</div>
         <div class="sc-card__bar"><div class="sc-card__bar-fill" style="--bar-width: ${barW}%; width: ${barW}%;"></div></div>
         <div class="sc-card__case">${escHtml(m.case)}</div>
         <div class="sc-card__assumptions">${s1}${wacc}</div>
@@ -1426,7 +1426,7 @@ function renderScenarios(d) {
 
   const w = sc.weighted;
   const wd = sc.weighted_upside;
-  $("scWeighted").textContent = w != null ? fmtPrice(w) : "—";
+  $("scWeighted").textContent = w != null ? fmtPrice(w) : ", ";
   $("scWeightedDelta").textContent = wd != null ? fmtPct(wd) + " potential" : "";
 }
 
@@ -1435,12 +1435,12 @@ function renderScenarios(d) {
    ════════════════════════════════════════════════════════════════════════ */
 
 function renderMiniStats(d) {
-  $("mMcap").textContent   = d.market_cap != null ? fmtBig(d.market_cap) : "—";
-  $("mPE").textContent     = d.pe_ratio != null ? fmtX(d.pe_ratio) : "—";
+  $("mMcap").textContent   = d.market_cap != null ? fmtBig(d.market_cap) : ", ";
+  $("mPE").textContent     = d.pe_ratio != null ? fmtX(d.pe_ratio) : ", ";
   const dy = d.dividend_yield;
-  $("mDiv").textContent    = dy != null ? `${fmt(dy, 2)}%` : "—";
+  $("mDiv").textContent    = dy != null ? `${fmt(dy, 2)}%` : ", ";
   const tgt = d.target_price;
-  $("mTarget").textContent = tgt != null ? fmtPrice(tgt) : "—";
+  $("mTarget").textContent = tgt != null ? fmtPrice(tgt) : ", ";
 
   // Color analyst target if it differs significantly from current price
   const tgtEl = $("mTarget");
@@ -1480,31 +1480,31 @@ function renderDrawerContent(d) {
     const ag = $("assumptionsGrid");
     if (ag) {
       const TIPS = {
-        "WACC":            "Weighted Average Cost of Capital — the blended discount rate VALUS uses to bring future cash flows to today's value. Higher WACC = lower fair value.",
+        "WACC":            "Weighted Average Cost of Capital, the blended discount rate VALUS uses to bring future cash flows to today's value. Higher WACC = lower fair value.",
         "Cost of Equity":  "What equity investors demand as a return, given the stock's risk (beta) relative to the broader market. Built from CAPM: risk-free rate + beta × equity risk premium.",
         "Cost of Debt":    "After-tax interest rate the company effectively pays on its borrowings. Lower than cost of equity because interest is tax-deductible.",
         "Beta":             "How volatile the stock is vs. the S&P 500. 1.0 = moves with the market; >1 = more volatile; <1 = less volatile. Higher beta → higher cost of equity.",
-        "Stage 1 growth":  "Annual revenue/FCF growth rate VALUS assumes for years 1–5 of the forecast.",
-        "Stage 2 growth":  "Growth during years 6–10, typically tapered down from Stage 1 as competition compresses margins.",
-        "Terminal growth": "Perpetual growth rate after year 10. Usually 2–3% (≈ long-run GDP). Anchors the terminal-value calculation.",
+        "Stage 1 growth":  "Annual revenue/FCF growth rate VALUS assumes for years 1-5 of the forecast.",
+        "Stage 2 growth":  "Growth during years 6-10, typically tapered down from Stage 1 as competition compresses margins.",
+        "Terminal growth": "Perpetual growth rate after year 10. Usually 2-3% (≈ long-run GDP). Anchors the terminal-value calculation.",
         "Tax rate":         "Effective tax rate applied to operating income. Used to compute after-tax cash flows.",
-        "Base FCF":         "Trailing twelve-month free cash flow — the starting point for the 10-year projection.",
+        "Base FCF":         "Trailing twelve-month free cash flow, the starting point for the 10-year projection.",
         "Net debt":         "Total debt minus cash. Subtracted from enterprise value to get equity value. Negative means the company has more cash than debt.",
         "Shares out":       "Diluted shares outstanding. Equity value is divided by this to get per-share fair value.",
         "Years projected":  "How many years of explicit cash flow are forecast before applying the terminal value formula.",
       };
       const rows = [
-        ["WACC",            d.wacc != null ? `${fmt(d.wacc, 1)}%` : "—"],
-        ["Cost of Equity",  d.cost_of_equity != null ? `${fmt(d.cost_of_equity, 1)}%` : "—"],
-        ["Cost of Debt",    d.cost_of_debt != null ? `${fmt(d.cost_of_debt, 1)}%` : "—"],
-        ["Beta",            d.beta != null ? fmt(d.beta, 2) : "—"],
-        ["Stage 1 growth",  d.stage1_growth != null ? `${fmt(d.stage1_growth, 1)}%` : "—"],
-        ["Stage 2 growth", d.stage2_growth != null ? `${fmt(d.stage2_growth, 1)}%` : "—"],
-        ["Terminal growth", d.terminal_growth != null ? `${fmt(d.terminal_growth, 1)}%` : "—"],
-        ["Tax rate",        d.tax_rate != null ? `${fmt(d.tax_rate, 1)}%` : "—"],
-        ["Base FCF",        d.base_fcf != null ? fmtBig(d.base_fcf) : "—"],
-        ["Net debt",        d.net_debt != null ? fmtBig(d.net_debt) : "—"],
-        ["Shares out",      d.shares_outstanding != null ? fmtBig(d.shares_outstanding).replace("$","") : "—"],
+        ["WACC",            d.wacc != null ? `${fmt(d.wacc, 1)}%` : ", "],
+        ["Cost of Equity",  d.cost_of_equity != null ? `${fmt(d.cost_of_equity, 1)}%` : ", "],
+        ["Cost of Debt",    d.cost_of_debt != null ? `${fmt(d.cost_of_debt, 1)}%` : ", "],
+        ["Beta",            d.beta != null ? fmt(d.beta, 2) : ", "],
+        ["Stage 1 growth",  d.stage1_growth != null ? `${fmt(d.stage1_growth, 1)}%` : ", "],
+        ["Stage 2 growth", d.stage2_growth != null ? `${fmt(d.stage2_growth, 1)}%` : ", "],
+        ["Terminal growth", d.terminal_growth != null ? `${fmt(d.terminal_growth, 1)}%` : ", "],
+        ["Tax rate",        d.tax_rate != null ? `${fmt(d.tax_rate, 1)}%` : ", "],
+        ["Base FCF",        d.base_fcf != null ? fmtBig(d.base_fcf) : ", "],
+        ["Net debt",        d.net_debt != null ? fmtBig(d.net_debt) : ", "],
+        ["Shares out",      d.shares_outstanding != null ? fmtBig(d.shares_outstanding).replace("$","") : ", "],
         ["Years projected", d.projection_years || 10],
       ];
       const esc = s => String(s).replace(/"/g, "&quot;");
@@ -1538,7 +1538,7 @@ function renderNotes(d) {
   // Pull all the auxiliary info into note items
   if (d.dcf_warning) items.push({ type: "warn", text: d.dcf_warning });
 
-  // Low-confidence diagnostics — only fire when |MoS| > 100% and the
+  // Low-confidence diagnostics, only fire when |MoS| > 100% and the
   // backend identified a likely data-artefact culprit. Each entry maps
   // to a plain-English explanation so the user knows whether to trust
   // the IV or treat it as directional only.
@@ -1551,14 +1551,14 @@ function renderNotes(d) {
     for (const flag of d.low_confidence_diagnostics) {
       items.push({
         type: "risk",
-        text: `<strong>Low-confidence: ${escHtml(labelMap[flag.factor] || flag.factor)}</strong> — ${escHtml(flag.message)}`,
+        text: `<strong>Low-confidence: ${escHtml(labelMap[flag.factor] || flag.factor)}</strong>, ${escHtml(flag.message)}`,
       });
     }
   }
   if (d.wacc_speculative_applied) {
     items.push({
       type: "info",
-      text: `<strong>Speculative WACC band</strong> — auto-calibrated to 20–25% because this name is pre-profit / early-stage. Capital-structure WACC understates true cost of equity for this profile.`,
+      text: `<strong>Speculative WACC band</strong>, auto-calibrated to 20-25% because this name is pre-profit / early-stage. Capital-structure WACC understates true cost of equity for this profile.`,
     });
   }
   if (d.expectation_gap) {
@@ -1568,32 +1568,32 @@ function renderNotes(d) {
   }
   if (d.fin415_used) {
     items.push({ type: "info",
-      text: `<strong>FIN 415 FCFE Model</strong> active — Ke = ${d.fin415_ke}%, Conservative target $${d.fin415_conservative}` });
+      text: `<strong>FIN 415 FCFE Model</strong> active, Ke = ${d.fin415_ke}%, Conservative target $${d.fin415_conservative}` });
   }
   if (d.reality_reconciled) {
     items.push({ type: "info",
       text: `<strong>Reality Reconciliation</strong>: ${escHtml(d.reality_reason)}` });
   }
   if (d.is_cash_rich && d.cash_rich_narrative) {
-    items.push({ type: "good", text: `<strong>Cash Rich</strong> — ${escHtml(d.cash_rich_narrative)}` });
+    items.push({ type: "good", text: `<strong>Cash Rich</strong>, ${escHtml(d.cash_rich_narrative)}` });
   }
   if (d.is_mag7) {
     items.push({ type: "warn",
-      text: `<strong>Mag 7 Member</strong> — concentration risk: 6 of 7 Mag 7 stocks correlate with the AI productivity thesis. A 10–15% pullback could unwind multiple positions simultaneously.` });
+      text: `<strong>Mag 7 Member</strong>, concentration risk: 6 of 7 Mag 7 stocks correlate with the AI productivity thesis. A 10-15% pullback could unwind multiple positions simultaneously.` });
   }
   if (d.debt_momentum && d.debt_momentum.classification && d.debt_momentum.classification !== "stable") {
     const dm = d.debt_momentum;
     const colorMap = { deleveraging: "good", speculative_distress: "risk", recovery_watch: "warn", healthy_leverage: "info" };
     items.push({ type: colorMap[dm.classification] || "info",
-      text: `<strong>${escHtml(dm.label)}</strong> — ${escHtml(dm.narrative)}` });
+      text: `<strong>${escHtml(dm.label)}</strong>, ${escHtml(dm.narrative)}` });
   }
   if (d.moat_detected) {
     items.push({ type: "good",
-      text: `<strong>${escHtml(d.moat_path)}</strong> moat detected — WACC adjustment ${d.moat_wacc_delta}pp.` });
+      text: `<strong>${escHtml(d.moat_path)}</strong> moat detected, WACC adjustment ${d.moat_wacc_delta}pp.` });
   }
   if (d.structural_transformer) {
     items.push({ type: "info",
-      text: `<strong>Structural Transformer</strong> — platform optionality (AI/robotics/autonomy) priced on top of base.` });
+      text: `<strong>Structural Transformer</strong>, platform optionality (AI/robotics/autonomy) priced on top of base.` });
   }
   if (d.has_positive_catalyst) items.push({ type: "good", text: `<strong>Positive catalyst</strong> in recent filings.` });
   if (d.has_material_risk)     items.push({ type: "risk", text: `<strong>Material risk</strong> in recent filings.` });
@@ -1760,7 +1760,7 @@ function renderRiskCard(d) {
     || (conf && conf !== "high");
 
   if (!hasAnything) {
-    summary.innerHTML = `<span class="risk-pill risk-pill--clean">Clean read — no material risk flags</span>`;
+    summary.innerHTML = `<span class="risk-pill risk-pill--clean">Clean read, no material risk flags</span>`;
     chips.innerHTML = "";
     bullets.innerHTML = "";
     card.hidden = false;
@@ -1863,7 +1863,7 @@ function renderQualityCard(d) {
   if (block && score && Number.isFinite(score.score)) {
     document.getElementById("qualityScoreNum").textContent = score.score;
     const grade = document.getElementById("qualityScoreGrade");
-    grade.textContent = score.grade || "—";
+    grade.textContent = score.grade || ", ";
     block.classList.remove("hidden");
     block.dataset.grade = (score.grade || "").toLowerCase();
   } else if (block) {
@@ -1873,7 +1873,7 @@ function renderQualityCard(d) {
   grid.innerHTML = metrics.map(m => {
     const v = m.value_pct != null ? `${fmt(m.value_pct, 1)}%`
             : m.value_ratio != null ? `${fmt(m.value_ratio, 2)}×`
-            : "—";
+            : ", ";
     return `
       <div class="quality-cell q-${m.tier || 'ok'}">
         <span class="quality-cell__label">${escHtml(m.label)}</span>
@@ -1896,7 +1896,7 @@ function renderMoatCard(d) {
     return;
   }
   const strengthLabel = ({wide: "Wide moat", narrow: "Narrow moat",
-                         single: "Single edge", none: "No structural moat"})[mb.strength] || "—";
+                         single: "Single edge", none: "No structural moat"})[mb.strength] || ", ";
   document.getElementById("moatStrength").textContent =
     `${strengthLabel} · ${mb.n_applies}/4 dimensions`;
   list.innerHTML = mb.categories.map(c => `
@@ -1928,19 +1928,19 @@ function renderBuffettCard(d) {
     if (Number.isFinite(b.passes) && Number.isFinite(b.evaluated)) {
       score.textContent = `Passes ${b.passes}/${b.evaluated} criteria`;
     } else {
-      score.textContent = "—";
+      score.textContent = ", ";
     }
   }
   list.innerHTML = b.rows.map(r => {
     const cls = r.passes === true ? "buf-row--pass"
               : r.passes === false ? "buf-row--fail"
               : "buf-row--na";
-    const icon = r.passes === true ? "✓" : r.passes === false ? "✕" : "—";
+    const icon = r.passes === true ? "✓" : r.passes === false ? "✕" : ", ";
     return `
       <li class="buf-row ${cls}" title="${escHtml(r.hint || '')}">
         <span class="buf-row__icon" aria-hidden="true">${icon}</span>
         <span class="buf-row__label">${escHtml(r.label)}</span>
-        <span class="buf-row__value">${escHtml(r.value != null ? r.value : "—")}</span>
+        <span class="buf-row__value">${escHtml(r.value != null ? r.value : ", ")}</span>
       </li>
     `;
   }).join("");
@@ -1956,12 +1956,12 @@ function renderMomentumCard(d) {
   if (!m || !m.tier) { card.hidden = true; return; }
   const tierEl = document.getElementById("momentumTier");
   if (tierEl) {
-    tierEl.textContent = m.label || "—";
+    tierEl.textContent = m.label || ", ";
     tierEl.dataset.tier = m.tier;
   }
-  document.getElementById("momPrice").textContent = m.price != null ? fmtPrice(m.price) : "—";
-  document.getElementById("momMa50").textContent  = m.ma50  != null ? fmtPrice(m.ma50)  : "—";
-  document.getElementById("momMa200").textContent = m.ma200 != null ? fmtPrice(m.ma200) : "—";
+  document.getElementById("momPrice").textContent = m.price != null ? fmtPrice(m.price) : ", ";
+  document.getElementById("momMa50").textContent  = m.ma50  != null ? fmtPrice(m.ma50)  : ", ";
+  document.getElementById("momMa200").textContent = m.ma200 != null ? fmtPrice(m.ma200) : ", ";
   const fmtGap = (g) => g == null ? "" : `${g >= 0 ? "+" : ""}${fmt(g, 1)}%`;
   const setGap = (id, g) => {
     const el = document.getElementById(id);
@@ -1986,7 +1986,7 @@ function renderEarningsQualityCard(d) {
   if (!eq || !eq.tier) { card.hidden = true; return; }
   const tierEl = document.getElementById("eqTier");
   if (tierEl) {
-    tierEl.textContent = eq.label || "—";
+    tierEl.textContent = eq.label || ", ";
     tierEl.dataset.tier = eq.tier;
   }
   document.getElementById("eqNarrative").textContent = eq.narrative || "";
@@ -2061,7 +2061,7 @@ function renderReverseDcfCard(d) {
 }
 
 // ── Insider activity (Form 4) ────────────────────────────────────────────
-// Async — fetches /api/insider when a ticker is analyzed. Hides card on
+// Async, fetches /api/insider when a ticker is analyzed. Hides card on
 // failure or no recent filings.
 async function renderInsiderCard(ticker) {
   const card = document.getElementById("insiderCard");
@@ -2077,7 +2077,7 @@ async function renderInsiderCard(ticker) {
       card.hidden = true;
       return;
     }
-    // Prefer the NET buy/sell sentiment pill — single, clear read.  Fall
+    // Prefer the NET buy/sell sentiment pill, single, clear read.  Fall
     // back to the activity tone if sentiment wasn't computed (no buy/sell
     // breakdown in payload).
     const s = j.sentiment;
@@ -2157,7 +2157,7 @@ function renderValuationHistoryChart(payload) {
 
   const priceSeries = pricePts.map(p => p.price);
 
-  // Smooth IV curve — interpolate between yearly IV anchor points instead
+  // Smooth IV curve, interpolate between yearly IV anchor points instead
   // of stepping. Cleaner reference baseline, like AlphaSpread's chart.
   const ivSmooth = (() => {
     const out = new Array(labels.length).fill(null);
@@ -2200,7 +2200,7 @@ function renderValuationHistoryChart(payload) {
 
   // End-of-line label plugin: paints a small "IV $X.XX" pill at the right
   // edge of the chart so the intrinsic value is the most obvious thing on
-  // the canvas — not just one of two indistinct lines.
+  // the canvas, not just one of two indistinct lines.
   const ivEndLabelPlugin = {
     id: "ivEndLabel",
     afterDatasetsDraw(chart) {
@@ -2255,7 +2255,7 @@ function renderValuationHistoryChart(payload) {
     data: {
       labels,
       datasets: [
-        // IV — solid mint line, the primary signal of the chart. Sits on
+        // IV, solid mint line, the primary signal of the chart. Sits on
         // top of the price band so the model's number is unmissable.
         {
           label: "Intrinsic Value (VALUS)",
@@ -2269,7 +2269,7 @@ function renderValuationHistoryChart(payload) {
           pointHoverRadius: 5,
           order: 0,
         },
-        // Price — tinted band beneath the IV line. Color signals the
+        // Price, tinted band beneath the IV line. Color signals the
         // current valuation state (red = overvalued, green = undervalued).
         {
           label: "Price",
@@ -2334,7 +2334,7 @@ function renderValuationHistoryChart(payload) {
 
   // ── Cyclical-pattern caveat ───────────────────────────────────────────
   // When the deterministic IV is consistently far below price across the
-  // full 5y window, surface a banner — pure DCF systematically underestimates
+  // full 5y window, surface a banner, pure DCF systematically underestimates
   // value for cyclicals at trough (autos, airlines, semis, materials).
   const caveat = document.getElementById("vhCaveat");
   const caveatTxt = document.getElementById("vhCaveatText");
@@ -2347,7 +2347,7 @@ function renderValuationHistoryChart(payload) {
       const gap = pxMedian > 0 ? (pxMedian - ivMedian) / pxMedian : 0;
       if (gap > 0.55) {
         caveatTxt.textContent =
-          "Cyclical / inflection-point pattern detected. Pure-DCF replay underestimates value when current FCF is at a trough — the scenario analysis below captures the bull case more honestly.";
+          "Cyclical / inflection-point pattern detected. Pure-DCF replay underestimates value when current FCF is at a trough, the scenario analysis below captures the bull case more honestly.";
         caveat.classList.remove("hidden");
       } else {
         caveat.classList.add("hidden");
@@ -2379,7 +2379,7 @@ function renderValuationHistoryChart(payload) {
   }
 }
 
-// Floating tooltip — appended to body so it can escape any ancestor's
+// Floating tooltip, appended to body so it can escape any ancestor's
 // `overflow: hidden`. Positions itself above the trigger with viewport
 // clamping so it never clips the screen edge.
 (function _setupFloatingTip() {
@@ -2441,7 +2441,7 @@ function renderValuationHistoryChart(payload) {
   document.addEventListener("focusout", () => hide());
   window.addEventListener("scroll", hide, true);
 })();
-function _alignAssumptionTooltips() { /* legacy no-op — floating-tip handles clamping */ }
+function _alignAssumptionTooltips() { /* legacy no-op, floating-tip handles clamping */ }
 
 let _PRICE_HISTORY_FULL = [];
 let _PRICE_RANGE = "1Y";
@@ -2613,7 +2613,7 @@ function renderDcfChart(fcfData) {
   let labels, projected, discounted, footerLine;
 
   if (which === "base" && fcfData && fcfData.projected && fcfData.projected.values) {
-    // Backend already ships these in $B — do NOT divide again.
+    // Backend already ships these in $B, do NOT divide again.
     labels     = fcfData.projected.labels || [];
     projected  = (fcfData.projected.values || []).slice();
     discounted = (fcfData.projected.pvs    || []).slice();
@@ -2701,10 +2701,10 @@ function renderDcfChart(fcfData) {
       dyPv.textContent   = `$${fmt(pv,  2)}B`;
       dyGrowth.textContent = g != null
         ? `${(g >= 0 ? "+" : "")}${fmt(g * 100, 1)}% growth`
-        : "—";
+        : ", ";
       dyDiscNote.textContent =
         `Discount factor: 1 / (1 + ${fmt(wacc, 1)}%)^${y} = ${fmt(1 / discFactor, 4)} · ` +
-        `Year-${y} growth applied: ${g != null ? fmt(g * 100, 1) + "%" : "—"}`;
+        `Year-${y} growth applied: ${g != null ? fmt(g * 100, 1) + "%" : ", "}`;
 
       // Slider-fill % for the colored runnable track
       const pct = ((y - 1) / Math.max(labels.length - 1, 1)) * 100;
@@ -2779,7 +2779,7 @@ function renderDcfChart(fcfData) {
     }
   });
 
-  // Bind scenario toggle (idempotent — replaces existing handlers)
+  // Bind scenario toggle (idempotent, replaces existing handlers)
   document.querySelectorAll("[data-dcf-sc]").forEach(btn => {
     btn.onclick = () => {
       _DCF_CHART_SCENARIO = btn.dataset.dcfSc;
@@ -2810,7 +2810,7 @@ function renderProjectionTable(d) {
     `<tr>
       <td>Year ${r.year}</td>
       <td>${fmtBig(r.fcf)}</td>
-      <td>${r.growth != null ? `${fmt(r.growth * 100, 1)}%` : '—'}</td>
+      <td>${r.growth != null ? `${fmt(r.growth * 100, 1)}%` : ', '}</td>
       <td>${fmtBig(r.pv)}</td>
     </tr>`
   ).join("");
@@ -2865,7 +2865,7 @@ async function renderFinancialsTabs(d) {
       body.innerHTML = `<tr><td class="text-muted">No ${key} statement available.</td></tr>`;
       return;
     }
-    // Format column headers — keep just YYYY-MM-DD or year for compactness
+    // Format column headers, keep just YYYY-MM-DD or year for compactness
     const headers = cols.map(c => {
       const s = String(c);
       // If it looks like a date, show "FY 2025" style
@@ -2876,10 +2876,10 @@ async function renderFinancialsTabs(d) {
     const headerRow = `<tr><th style="text-align:left">Item (${escHtml(ccy)})</th>${headers.map(h => `<th>${escHtml(h)}</th>`).join("")}</tr>`;
     const bodyRows = rows.map(r => {
       if (r.section) {
-        // Section header row — visually distinct
+        // Section header row, visually distinct
         return `<tr class="fin-section-row"><td colspan="${1 + headers.length}" style="text-align:left; padding-top: 14px; color: var(--accent); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; font-size: 11px;">${escHtml(r.label)}</td></tr>`;
       }
-      return `<tr><td style="text-align:left">${escHtml(r.label)}</td>${(r.values || []).map(v => `<td>${v == null ? "—" : fmtBig(v)}</td>`).join("")}</tr>`;
+      return `<tr><td style="text-align:left">${escHtml(r.label)}</td>${(r.values || []).map(v => `<td>${v == null ? ", " : fmtBig(v)}</td>`).join("")}</tr>`;
     }).join("");
     body.innerHTML = headerRow + bodyRows;
   }
@@ -2937,7 +2937,7 @@ function setupSearch() {
   function submit() {
     const t = input.value.trim().toUpperCase();
     if (!t) return;
-    // Cancel any pending debounced suggestion fetch — without this, a
+    // Cancel any pending debounced suggestion fetch, without this, a
     // setTimeout fired ~180ms after Enter would re-open the dropdown
     // on top of the freshly-loaded analysis.
     if (timer) { clearTimeout(timer); timer = null; }
@@ -3002,7 +3002,7 @@ function setupCopyButton() {
 //
 // On first read, any v1 data is migrated into a default "My Portfolio"
 // entry so users with cached state lose nothing.  pfRead/pfWrite/pfHas/
-// pfAdd/pfRemove all operate on the CURRENTLY ACTIVE portfolio — so the
+// pfAdd/pfRemove all operate on the CURRENTLY ACTIVE portfolio, so the
 // existing call sites (the ⭐ button, the portfolio page) keep working
 // unchanged; switching active just changes what they read.
 
@@ -3015,7 +3015,7 @@ let _PF_IS_PLUS = false;
 let _PF_SYNC_TIMER = null;
 
 function _pfNewLocalId() {
-  // 12 hex chars — matches the server format so server-assigned ids can
+  // 12 hex chars, matches the server format so server-assigned ids can
   // be swapped in transparently on sign-in.
   const hex = "0123456789abcdef";
   let s = "";
@@ -3142,7 +3142,7 @@ function pfSyncToServer() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ items: pfRead() }),
       });
-    } catch (e) { /* offline / transient — local copy still authoritative */ }
+    } catch (e) { /* offline / transient, local copy still authoritative */ }
   }, 600);
 }
 
@@ -3197,14 +3197,14 @@ async function pfPullFromServer() {
             body: JSON.stringify({ items: merged }),
           });
           serverDefault.items = merged;
-        } catch (e) { /* network blip — leave server as-is */ }
+        } catch (e) { /* network blip, leave server as-is */ }
       }
     }
 
     // Data-loss guard for deploys without durable storage (Vercel KV
     // unset).  On every cold Lambda the server returns an EMPTY default
     // portfolio.  If we naively replaced local state with that, every
-    // sign-in would silently nuke the user's holdings — exactly the
+    // sign-in would silently nuke the user's holdings, exactly the
     // "portfolios don't actually save" complaint.  When storage is not
     // durable AND the server has zero items across every portfolio,
     // keep the local copy and skip the canonical-replace.
@@ -3215,19 +3215,19 @@ async function pfPullFromServer() {
     if (!_STORAGE_DURABLE && !serverHasAnyItems && localHasAnyItems) {
       console.warn(
         "[valus] Server returned empty portfolios but storage_durable=false " +
-        "and local has items — keeping local copy to avoid cold-start data loss. " +
+        "and local has items, keeping local copy to avoid cold-start data loss. " +
         "Configure Vercel KV to enable durable cross-device sync."
       );
       return;
     }
 
-    // Replace local state with server state — server is canonical now.
+    // Replace local state with server state, server is canonical now.
     pfWriteState({ schema: 2, active_pid: defaultPid, portfolios: serverPortfolios });
 
-    // Discard the legacy v1 key — its contents are either on the server
+    // Discard the legacy v1 key, its contents are either on the server
     // or have just been merged in.
     try { localStorage.removeItem(PF_KEY_V1); } catch {}
-  } catch (e) { /* network blip — local copy still serves */ }
+  } catch (e) { /* network blip, local copy still serves */ }
 }
 
 // ── Multi-portfolio operations (signed-in only) ──────────────────────
@@ -3258,7 +3258,7 @@ async function pfCreatePortfolio(name) {
   };
   s.active_pid = data.id;
   pfWriteState(s);
-  // Server's default doesn't change automatically on create — we leave
+  // Server's default doesn't change automatically on create, we leave
   // default as-is and let active follow the user's just-made choice.
   return data;
 }
@@ -3316,7 +3316,7 @@ async function pfSetActive(pid) {
   s.active_pid = pid;
   pfWriteState(s);
   // Tell the server which portfolio is now the default for this user so
-  // other endpoints (movers, etc.) follow.  Fire-and-forget — local
+  // other endpoints (movers, etc.) follow.  Fire-and-forget, local
   // active is the source of truth for the UI.
   if (_ME) {
     try {
@@ -3326,7 +3326,7 @@ async function pfSetActive(pid) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pid }),
       });
-    } catch (e) { /* tolerated — next pfPullFromServer reconciles */ }
+    } catch (e) { /* tolerated, next pfPullFromServer reconciles */ }
   }
 }
 
@@ -3335,7 +3335,7 @@ async function pfSetActive(pid) {
 // the legacy one-portfolio UX (no nav noise for a feature they can't
 // meaningfully use without sync).
 
-// The PORTFOLIO button is now the switcher — there's only one nav element
+// The PORTFOLIO button is now the switcher, there's only one nav element
 // for portfolios.  When signed in it shows the active portfolio's name
 // and a caret; clicking opens the dropdown of all portfolios + actions.
 // When signed out it shows the static "Portfolio" label and the caret +
@@ -3392,7 +3392,7 @@ function pfUpdateSwitcher() {
     }).join("");
   }
 
-  // Action availability — delete is blocked when only one remains; cap
+  // Action availability, delete is blocked when only one remains; cap
   // hint surfaces when at limit so the user understands why "New" is off.
   const total = ordered.length;
   const atCap = (typeof _PF_CAP === "number") && total >= _PF_CAP;
@@ -3484,7 +3484,7 @@ async function _pfPromptDelete() {
     return;
   }
   const n = (active.items || []).length;
-  const tail = n ? `\n\nThis portfolio has ${n} holding${n === 1 ? "" : "s"} — they will be permanently removed.` : "";
+  const tail = n ? `\n\nThis portfolio has ${n} holding${n === 1 ? "" : "s"}, they will be permanently removed.` : "";
   if (!window.confirm(`Delete "${active.name}"?${tail}`)) return;
   try {
     await pfDeletePortfolio(active.pid);
@@ -3509,7 +3509,7 @@ function setupPfSwitcher() {
   });
 
   // Picking a portfolio in the list: switch active (if not already) AND
-  // open the page.  Picking the active one is also valid — opens its page.
+  // open the page.  Picking the active one is also valid, opens its page.
   const list = $("pfSwitcherList");
   if (list) {
     list.addEventListener("click", async (e) => {
@@ -3546,17 +3546,17 @@ function setupPfSwitcher() {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// Watchlist (Phase 2) — separate from portfolios.
+// Watchlist (Phase 2), separate from portfolios.
 //
 // Conceptually: portfolios are what you OWN, watchlists are what you're
 // WATCHING.  We keep them as separate localStorage keys + separate KV
 // records so the two surfaces never interfere (the watchlist's 50 tickers
 // don't pollute the portfolio allocation chart or movers feed).
 //
-// One watchlist per user.  Free for everyone — no plan gating.
+// One watchlist per user.  Free for everyone, no plan gating.
 // Storage shape on disk and in localStorage: array of
 //   {ticker, name, sector, price, iv, mos, tier, addedAt}
-// — same snapshot shape the portfolio uses, so the add button on the
+//, same snapshot shape the portfolio uses, so the add button on the
 // analysis page can fill the same fields.
 // ════════════════════════════════════════════════════════════════════════
 const WL_KEY = "valus.watchlist.v1";
@@ -3598,7 +3598,7 @@ function wlSyncToServer() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ items: wlRead() }),
       });
-    } catch (e) { /* offline / transient — local copy stays authoritative */ }
+    } catch (e) { /* offline / transient, local copy stays authoritative */ }
   }, 600);
 }
 
@@ -3611,7 +3611,7 @@ async function wlPullFromServer() {
     const remote = data.items || [];
     const local  = wlRead();
     const byTicker = new Map();
-    // Local wins on conflict (its snapshot is fresher — was computed at add time
+    // Local wins on conflict (its snapshot is fresher, was computed at add time
     // on this device).  Remote-only entries get unioned in.
     for (const it of local)  byTicker.set(it.ticker, it);
     for (const it of remote) if (!byTicker.has(it.ticker)) byTicker.set(it.ticker, it);
@@ -3621,7 +3621,7 @@ async function wlPullFromServer() {
     if (merged.length !== remote.length || merged.length !== local.length) {
       wlSyncToServer();
     }
-  } catch (e) { /* network blip — keep local */ }
+  } catch (e) { /* network blip, keep local */ }
 }
 
 // ── Add-to-watchlist button (lives next to the ⭐ on the analysis page) ──
@@ -3647,7 +3647,7 @@ function setupAddWatchlistButton() {
       iv:     _LAST_DATA.intrinsic_value,
       mos:    _LAST_DATA.margin_of_safety,
       tier:   _LAST_DATA.priced_for?.label || "",
-      // Snapshot reconciled grade — see pfAdd for rationale.
+      // Snapshot reconciled grade, see pfAdd for rationale.
       grade:  _LAST_DATA.valus_grade?.grade || null,
     });
     btn.classList.add("starred");
@@ -3670,7 +3670,7 @@ function syncAddWatchlistButtonForCurrent() {
 
 // ── Watchlist page ────────────────────────────────────────────────────
 // Mirrors the portfolio page layout but stripped to a single read-only
-// list — no allocation chart, no sort modes (just "added desc"), no
+// list, no allocation chart, no sort modes (just "added desc"), no
 // templates.  Same .card / .pf-item visual chrome so the two pages feel
 // like siblings without duplicating CSS.
 async function openWatchlistPage() {
@@ -3716,8 +3716,8 @@ function renderWatchlistPage() {
   if (empty) empty.classList.add("hidden");
   list.innerHTML = items.map(it => {
     const mos      = (typeof it.mos === "number") ? it.mos : null;
-    const priceTxt = (typeof it.price === "number") ? fmtPrice(it.price) : "—";
-    const ivTxt    = (typeof it.iv    === "number") ? fmtPrice(it.iv)    : "—";
+    const priceTxt = (typeof it.price === "number") ? fmtPrice(it.price) : ", ";
+    const ivTxt    = (typeof it.iv    === "number") ? fmtPrice(it.iv)    : ", ";
     return `
       <div class="pf-item" data-wl-row="${escHtml(it.ticker)}">
         <button class="pf-item__ticker" data-wl-open="${escHtml(it.ticker)}" type="button">
@@ -3766,7 +3766,7 @@ function setupWatchlistPage() {
 // ── CSV export (Phase 8a) ────────────────────────────────────────────
 // Shared by the portfolio + watchlist export buttons.  Builds a CSV
 // from the in-memory items array and triggers a browser download.  No
-// server round-trip — the data already lives in localStorage.
+// server round-trip, the data already lives in localStorage.
 //
 // Fields:   ticker, name, sector, price, fair_value, mos_pct, grade,
 //           verdict, added_at_iso
@@ -3805,7 +3805,7 @@ function _itemsToCsv(items) {
 
 function exportItemsToCsv(items, basename) {
   if (!items || items.length === 0) {
-    alert("Nothing to export yet — add a stock first.");
+    alert("Nothing to export yet, add a stock first.");
     return;
   }
   const csv = _itemsToCsv(items);
@@ -3840,7 +3840,7 @@ function setupOnboardingCallout() {
   let seen = false;
   try { seen = !!localStorage.getItem(ONBOARD_KEY); } catch {}
   if (seen) {
-    // Stay hidden — already dismissed on a previous visit.
+    // Stay hidden, already dismissed on a previous visit.
     el.classList.add("hidden");
     return;
   }
@@ -3878,7 +3878,7 @@ function setupAddPortfolioButton() {
       mos: _LAST_DATA.margin_of_safety,
       tier: _LAST_DATA.priced_for?.label || "",
       // Snapshot the server-reconciled letter grade so the portfolio row
-      // shows the same grade the user saw on the detail page — important
+      // shows the same grade the user saw on the detail page, important
       // when a tier override (e.g. Strategic Discount) bumped the grade
       // away from what raw MOS-math would derive.
       grade: _LAST_DATA.valus_grade?.grade || null,
@@ -3905,12 +3905,12 @@ function syncAddPortfolioButtonForCurrent() {
 let _PF_SORT = "added";   // ticker | mos | added
 
 async function openPortfolioPage() {
-  // Sign-in gate — portfolio is for authenticated users only
+  // Sign-in gate, portfolio is for authenticated users only
   if (!_ME) {
     const ok = await requireAuthWithRedirectIntent("portfolio");
     if (!ok) return;
   }
-  // Hide ALL other views — portfolio is its own dedicated page
+  // Hide ALL other views, portfolio is its own dedicated page
   hideAllViews?.();
   $("results").classList.add("hidden");
   $("btcHero")?.classList.add("hidden");
@@ -3975,7 +3975,7 @@ function renderPortfolioPage() {
   } else if (_PF_SORT === "mos") {
     items.sort((a, b) => (b.mos ?? -Infinity) - (a.mos ?? -Infinity));
   } else {
-    // 'added' — most recent first
+    // 'added', most recent first
     items.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
   }
 
@@ -3985,15 +3985,15 @@ function renderPortfolioPage() {
     list.innerHTML = "";
     $("pfAllocationCard").style.display = "none";
     $("pfCount").textContent = "0";
-    $("pfAvgMos").textContent = "—";
+    $("pfAvgMos").textContent = ", ";
     $("pfUnderCount").textContent = "0 / 0";
-    $("pfBest").textContent = "—";
+    $("pfBest").textContent = ", ";
     return;
   }
   empty.classList.add("hidden");
   $("pfAllocationCard").style.display = "";
 
-  // Render holdings — grade chip replaces the old plain MOS pill so users
+  // Render holdings, grade chip replaces the old plain MOS pill so users
   // can scan A/B/C/D/F across their portfolio in one glance.  The chip
   // still surfaces the MOS percent next to the letter.
   list.innerHTML = items.map(it => {
@@ -4001,7 +4001,7 @@ function renderPortfolioPage() {
       <div class="pf-item" data-pf-ticker="${escHtml(it.ticker)}">
         <span class="pf-item__ticker">${escHtml(it.ticker)}</span>
         <span class="pf-item__name">${escHtml(it.name || "")}</span>
-        <span class="pf-item__price">${it.price != null ? fmtPrice(it.price) : "—"}</span>
+        <span class="pf-item__price">${it.price != null ? fmtPrice(it.price) : ", "}</span>
         <span class="pf-item__grade-cell">${itemGradeChip(it)}</span>
         <button class="pf-item__remove" data-pf-remove="${escHtml(it.ticker)}" aria-label="Remove">✕</button>
       </div>
@@ -4031,7 +4031,7 @@ function renderPortfolioPage() {
   const mosVals = items.filter(it => it.mos != null).map(it => it.mos);
   const avgMos = mosVals.length ? mosVals.reduce((a, b) => a + b, 0) / mosVals.length : null;
   const avgEl = $("pfAvgMos");
-  avgEl.textContent = avgMos != null ? fmtPct(avgMos) : "—";
+  avgEl.textContent = avgMos != null ? fmtPct(avgMos) : ", ";
   avgEl.classList.toggle("text-positive", avgMos != null && avgMos > 5);
   avgEl.classList.toggle("text-negative", avgMos != null && avgMos < -5);
 
@@ -4039,9 +4039,9 @@ function renderPortfolioPage() {
   $("pfUnderCount").textContent = `${underCount} / ${items.length}`;
 
   const best = items.filter(it => it.mos != null).sort((a, b) => b.mos - a.mos)[0];
-  $("pfBest").textContent = best ? `${best.ticker} ${fmtPct(best.mos)}` : "—";
+  $("pfBest").textContent = best ? `${best.ticker} ${fmtPct(best.mos)}` : ", ";
 
-  // Sector allocation — doughnut + side legend.  Same aggregation as
+  // Sector allocation, doughnut + side legend.  Same aggregation as
   // before; just a clearer read than a horizontal stacked bar at 12
   // holdings spread across 6+ sectors.
   const bySector = {};
@@ -4119,7 +4119,7 @@ function renderPortfolioPage() {
   }
 }
 
-// Single instance — destroy on re-render to avoid the Chart.js
+// Single instance, destroy on re-render to avoid the Chart.js
 // "Canvas is already in use" warning when the portfolio page is
 // re-entered.
 let _pfAllocPieInstance = null;
@@ -4152,7 +4152,7 @@ async function refreshPortfolioPrices() {
     const vals = d.valuations || {};
     const updated = items.map(it => {
       const v = vals[it.ticker];
-      if (!v) return it;   // not resolvable right now — keep prior snapshot
+      if (!v) return it;   // not resolvable right now, keep prior snapshot
       return {
         ...it,
         price: (v.price != null ? v.price : it.price),
@@ -4170,7 +4170,7 @@ async function refreshPortfolioPrices() {
 }
 
 function setupPortfolioPage() {
-  // #portfolioBtn's click handler lives in setupPfSwitcher() — it routes
+  // #portfolioBtn's click handler lives in setupPfSwitcher(), it routes
   // between "open menu" (signed in) and "open page" (signed out) via a
   // single dispatcher so the two handlers don't double-fire.
 
@@ -4183,7 +4183,7 @@ function setupPortfolioPage() {
   const tpl = $("pfTemplatesBtn");
   if (tpl) tpl.onclick = openTemplatesModal;
 
-  // CSV export — pull the active portfolio's items + a slug-safe filename
+  // CSV export, pull the active portfolio's items + a slug-safe filename
   // segment based on its name (e.g. "Long Term" → "long-term") so a user
   // with multiple portfolios doesn't clobber yesterday's export.
   const csv = $("pfExportCsvBtn");
@@ -4213,7 +4213,7 @@ function setupPortfolioPage() {
 }
 
 /* ════════════════════════════════════════════════════════════════════════
-   Portfolio Templates — Strategies + Investor 13F portfolios
+   Portfolio Templates, Strategies + Investor 13F portfolios
    ════════════════════════════════════════════════════════════════════════ */
 
 const PF_STRATEGIES = [
@@ -4247,7 +4247,7 @@ const PF_STRATEGIES = [
   {
     id: "barbell",
     name: "Taleb Barbell",
-    blurb: "Pair safety with asymmetric upside — most of the portfolio in T-bills, a small sleeve in high-volatility growth.",
+    blurb: "Pair safety with asymmetric upside, most of the portfolio in T-bills, a small sleeve in high-volatility growth.",
     allocation: [
       { label: "Short-term Treasuries", pct: 90, ticker: "BIL" },
       { label: "Aggressive growth",     pct: 10, ticker: "QQQ" },
@@ -4433,7 +4433,7 @@ function renderInvestor13F(data) {
   if (!detail) return;
   const inv = data.investor || {};
   const rows = (data.holdings || []).map((h, i) => {
-    const tkr = h.ticker || `<span class="pf-tpl__no-ticker">—</span>`;
+    const tkr = h.ticker || `<span class="pf-tpl__no-ticker">, </span>`;
     return `
       <tr class="pf-tpl__hold-row" ${h.ticker ? `data-hold-ticker="${escHtml(h.ticker)}"` : ""}>
         <td class="pf-tpl__hold-rank">${i + 1}</td>
@@ -4448,7 +4448,7 @@ function renderInvestor13F(data) {
     <button class="copy-btn pf-tpl__back" id="pfTplInvBack" type="button">← Back to investors</button>
     <div class="pf-tpl__detail-head">
       <div>
-        <div class="pf-tpl__detail-name">${escHtml(inv.name || "")} — top holdings</div>
+        <div class="pf-tpl__detail-name">${escHtml(inv.name || "")}, top holdings</div>
         <div class="pf-tpl__detail-meta">${escHtml(inv.manager || "")} · ${filed}</div>
       </div>
       <div class="pf-tpl__detail-actions">
@@ -4517,7 +4517,7 @@ async function addTickersToPortfolio(tickers, btn, restoreLabel) {
         grade:  d.valus_grade?.grade || null,
       });
     } catch {
-      // keep going — partial success is better than aborting
+      // keep going, partial success is better than aborting
     }
   }
   const added = pfRead().length - before;
@@ -4537,24 +4537,24 @@ function setupTemplatesTabs() {
   });
 }
 
-// Tier metadata for the focused glossary modal — single source of truth
+// Tier metadata for the focused glossary modal, single source of truth
 const TIER_META = {
   distress:      { label: "Priced for Distress",      mos: "MOS > +50%",            color: "tier-positive",
                    desc: "Market is overly pessimistic. Trading well below fair value, often during macro fear or sector rotation. Meaningful upside if fundamentals stabilise." },
   deep_discount: { label: "Priced for Deep Discount", mos: "MOS +40% to +50%",      color: "tier-positive",
-                   desc: "Significantly undervalued — strong signal if VALUS's growth assumptions hold. Worth a quality check to avoid value traps." },
+                   desc: "Significantly undervalued, strong signal if VALUS's growth assumptions hold. Worth a quality check to avoid value traps." },
   discount:      { label: "Priced for Discount",      mos: "MOS +15% to +40%",      color: "tier-positive",
-                   desc: "Trading below fundamental value. Modest opportunity zone — model and analysts both see room above current price." },
+                   desc: "Trading below fundamental value. Modest opportunity zone, model and analysts both see room above current price." },
   fair_value:    { label: "Priced for Fair Value",    mos: "MOS −10% to +15%",      color: "tier-info",
-                   desc: "Market and VALUS aligned. The price reflects fundamentals as the model sees them — no clear edge in either direction." },
+                   desc: "Market and VALUS aligned. The price reflects fundamentals as the model sees them, no clear edge in either direction." },
   growth:        { label: "Priced for Growth",        mos: "MOS −10% to −25%",      color: "tier-warning",
-                   desc: "Market is paying a growth premium — modestly overvalued by VALUS. Acceptable if you believe execution will deliver above-base growth." },
+                   desc: "Market is paying a growth premium, modestly overvalued by VALUS. Acceptable if you believe execution will deliver above-base growth." },
   excellence:    { label: "Priced for Excellence",    mos: "MOS −25% to −50%",      color: "tier-warning",
-                   desc: "Market expects flawless execution. Premium pricing requires growth, margins, and capital discipline to all work together — limited margin of error if any leg slips." },
+                   desc: "Market expects flawless execution. Premium pricing requires growth, margins, and capital discipline to all work together, limited margin of error if any leg slips." },
   miracle:       { label: "Priced for Miracle",       mos: "MOS < −50% or speculative growth", color: "tier-negative",
-                   desc: "Market is pricing in extraordinary outcomes that fewer than 1% of public companies achieve over a decade. Speculative — driven by momentum, not fundamentals." },
+                   desc: "Market is pricing in extraordinary outcomes that fewer than 1% of public companies achieve over a decade. Speculative, driven by momentum, not fundamentals." },
   strategic_discount: { label: "Strategic Discount", mos: "Pre-revenue strategic asset", color: "tier-positive",
-                   desc: "Pure DCF undervalues this name because earnings haven't materialised yet. Sovereign-backstopped franchise (defense / CHIPS Act / DOE) — analyst consensus and policy tailwinds support upside that the cashflow model can't see." },
+                   desc: "Pure DCF undervalues this name because earnings haven't materialised yet. Sovereign-backstopped franchise (defense / CHIPS Act / DOE), analyst consensus and policy tailwinds support upside that the cashflow model can't see." },
 };
 
 function setupTierGlossary() {
@@ -4582,10 +4582,10 @@ function openTierModal() {
   if (!_LAST_DATA) return;
   const pf = _LAST_DATA.priced_for || {};
   const tier = pf.tier;
-  // Fallback meta for any tier we don't recognise — modal must always open.
+  // Fallback meta for any tier we don't recognise, modal must always open.
   const meta = TIER_META[tier] || {
     label: (pf.label || "Verdict"),
-    mos:   "—",
+    mos:   ", ",
     color: "tier-info",
     desc:  (pf.narrative || "VALUS verdict for this stock. Detail metadata not available."),
   };
@@ -4614,15 +4614,15 @@ function openTierModal() {
     <div class="tg-current__numbers">
       <div class="tg-num">
         <span class="tg-num__label">Margin of safety</span>
-        <span class="tg-num__value">${mos != null ? fmtPct(mos) : "—"}</span>
+        <span class="tg-num__value">${mos != null ? fmtPct(mos) : ", "}</span>
       </div>
       <div class="tg-num">
         <span class="tg-num__label">Fair value</span>
-        <span class="tg-num__value">${iv != null ? fmtPrice(iv) : "—"}</span>
+        <span class="tg-num__value">${iv != null ? fmtPrice(iv) : ", "}</span>
       </div>
       <div class="tg-num">
         <span class="tg-num__label">Sector ceiling</span>
-        <span class="tg-num__value">${ceil != null ? `${ceil}% (${escHtml(ceilLbl || "—")})` : "—"}</span>
+        <span class="tg-num__value">${ceil != null ? `${ceil}% (${escHtml(ceilLbl || ", ")})` : ", "}</span>
       </div>
     </div>
   `;
@@ -4652,7 +4652,7 @@ function closeAllModals() {
 }
 
 function setupModalDismiss() {
-  // Universal close handler — works for any modal with [data-modal-close]
+  // Universal close handler, works for any modal with [data-modal-close]
   document.addEventListener("click", (e) => {
     if (e.target.matches("[data-modal-close]")) {
       closeAllModals();
@@ -4667,7 +4667,7 @@ function setupModalDismiss() {
    Boot
    ════════════════════════════════════════════════════════════════════════ */
 
-// ── Custom DCF — live recompute via the server's actual DCF model ─────
+// ── Custom DCF, live recompute via the server's actual DCF model ─────
 // Slider input is debounced into a POST to /api/dcf/recompute, which
 // runs the same run_dcf_single() that produced the displayed base case.
 // Replaces an in-JS simplified DCF that couldn't replicate the server's
@@ -4682,7 +4682,7 @@ function updateSliderFill(slider) {
   slider.style.setProperty("--slider-pct", `${pct}%`);
 }
 
-// Token-guarded async recompute — if the user wiggles a slider faster
+// Token-guarded async recompute, if the user wiggles a slider faster
 // than the server responds, we throw away any reply that isn't from the
 // latest request so a slow earlier response can't overwrite a newer one.
 async function _cdServerRecompute(basis, override, price, token, applyResult) {
@@ -4733,19 +4733,19 @@ function setupCustomDCFSliders() {
   };
 
   const applyResult = (token, data) => {
-    if (token !== reqToken) return;          // stale response — discard
+    if (token !== reqToken) return;          // stale response, discard
     const yourEl  = $("cdYourIV");
     const deltaEl = $("cdYourDelta");
     if (!yourEl || !deltaEl) return;
     if (data.error || data.iv == null || !isFinite(data.iv) || data.iv <= 0) {
-      yourEl.textContent = "—";
+      yourEl.textContent = ", ";
       deltaEl.textContent = data.error === "network" ? "Offline" : "";
       deltaEl.classList.remove("positive", "negative");
       return;
     }
     // Scale the pure-DCF result so its baseline matches VALUS's headline
     // fair value.  The headline includes scenario weighting, sector
-    // overlays, and the consensus anchor — none of which the pure-DCF
+    // overlays, and the consensus anchor, none of which the pure-DCF
     // recompute can replicate.  Without this scale, the very first
     // slider tick would jump from VALUS's displayed IV to a different
     // pure-DCF number, which is exactly the discontinuity users
@@ -4758,7 +4758,7 @@ function setupCustomDCFSliders() {
     const scale   = (valusIv && baseIv && baseIv > 0) ? (valusIv / baseIv) : 1;
     const scaledIv = data.iv * scale;
     yourEl.textContent = fmtPrice(scaledIv);
-    // Recompute MOS against the scaled IV — the server-returned `data.mos`
+    // Recompute MOS against the scaled IV, the server-returned `data.mos`
     // is based on the raw pure-DCF iv, so it'd skew the delta.
     if (d.current_price && d.current_price > 0) {
       const mos = (scaledIv - d.current_price) / d.current_price * 100;
@@ -4785,23 +4785,23 @@ function setupCustomDCFSliders() {
     $("cdTgVal").textContent   = `${fmt(tg, 1)}%`;
 
     const valusIv = d.intrinsic_value;
-    $("cdValusIV").textContent = valusIv != null ? fmtPrice(valusIv) : "—";
+    $("cdValusIV").textContent = valusIv != null ? fmtPrice(valusIv) : ", ";
 
     const basis = d.dcf_recompute_basis;
     const yourEl  = $("cdYourIV");
     const deltaEl = $("cdYourDelta");
 
     // No DCF basis means this ticker uses a non-DCF model (banking, biotech,
-    // FCF-negative) — the slider can't produce a comparable number.
+    // FCF-negative), the slider can't produce a comparable number.
     if (!basis) {
-      yourEl.textContent = "—";
+      yourEl.textContent = ", ";
       deltaEl.textContent = "DCF not available for this ticker";
       deltaEl.classList.remove("positive", "negative");
       return;
     }
 
-    // Pristine: mirror VALUS's headline fair value exactly — same number,
-    // same MOS — so the user sees "I'm starting from what VALUS thinks,
+    // Pristine: mirror VALUS's headline fair value exactly, same number,
+    // same MOS, so the user sees "I'm starting from what VALUS thinks,
     // with the assumptions VALUS used" before they touch anything.  Any
     // slider tick triggers a server recompute that scales relative to
     // this anchor (see applyResult), so first movement is smooth, not
@@ -4825,13 +4825,13 @@ function setupCustomDCFSliders() {
           deltaEl.textContent = "";
         }
       } else {
-        yourEl.textContent = "—";
+        yourEl.textContent = ", ";
         deltaEl.textContent = "";
       }
       return;
     }
 
-    // Slider moved — debounce ~120ms so dragging doesn't fire a request
+    // Slider moved, debounce ~120ms so dragging doesn't fire a request
     // per pointer event, then hit the server.  Token guards against
     // out-of-order replies.
     reqToken += 1;
@@ -4871,13 +4871,13 @@ function renderComparablesCard(d) {
   }
   card.classList.remove("hidden");
 
-  $("cmpProb").textContent = cmp.p_attain != null ? `P=${fmt(cmp.p_attain, 0)}%` : "—";
+  $("cmpProb").textContent = cmp.p_attain != null ? `P=${fmt(cmp.p_attain, 0)}%` : ", ";
   $("cmpReason").textContent = cmp.reason || "";
 
-  $("cmpAge").textContent       = cmp.age_years != null ? `${fmt(cmp.age_years, 1)} yr` : "—";
-  $("cmpCurMargin").textContent = cmp.current_margin != null ? `${fmt(cmp.current_margin, 1)}%` : "—";
-  $("cmpPeerAvg").textContent   = cmp.peer_avg_margin != null ? `${fmt(cmp.peer_avg_margin, 1)}%` : "—";
-  $("cmpPAttain").textContent   = cmp.p_attain != null ? `${fmt(cmp.p_attain, 0)}%` : "—";
+  $("cmpAge").textContent       = cmp.age_years != null ? `${fmt(cmp.age_years, 1)} yr` : ", ";
+  $("cmpCurMargin").textContent = cmp.current_margin != null ? `${fmt(cmp.current_margin, 1)}%` : ", ";
+  $("cmpPeerAvg").textContent   = cmp.peer_avg_margin != null ? `${fmt(cmp.peer_avg_margin, 1)}%` : ", ";
+  $("cmpPAttain").textContent   = cmp.p_attain != null ? `${fmt(cmp.p_attain, 0)}%` : ", ";
 
   const peers = cmp.peer_margins || {};
   $("cmpPeers").innerHTML = Object.keys(peers).length === 0
@@ -4888,14 +4888,14 @@ function renderComparablesCard(d) {
           <span class="cmp-peer__margin">${fmt(m, 1)}%</span>
         </span>`).join("");
 
-  $("cmpFcfNow").textContent      = cmp.current_base_fcf != null ? fmtBig(cmp.current_base_fcf) : "—";
-  $("cmpFcfPeer").textContent     = cmp.peer_implied_fcf != null ? fmtBig(cmp.peer_implied_fcf) : "—";
-  $("cmpFcfWeighted").textContent = cmp.weighted_base_fcf != null ? fmtBig(cmp.weighted_base_fcf) : "—";
+  $("cmpFcfNow").textContent      = cmp.current_base_fcf != null ? fmtBig(cmp.current_base_fcf) : ", ";
+  $("cmpFcfPeer").textContent     = cmp.peer_implied_fcf != null ? fmtBig(cmp.peer_implied_fcf) : ", ";
+  $("cmpFcfWeighted").textContent = cmp.weighted_base_fcf != null ? fmtBig(cmp.weighted_base_fcf) : ", ";
 }
 
 // ── Low confidence explainer ───────────────────────────────────────────
 function setupLowConfExplainer() {
-  // Delegated click — the chip is rendered dynamically inside the MOS pill
+  // Delegated click, the chip is rendered dynamically inside the MOS pill
   document.addEventListener("click", (e) => {
     if (e.target.closest(".mos-confidence-chip")) {
       $("lowConfModal").classList.remove("hidden");
@@ -4906,7 +4906,7 @@ function setupLowConfExplainer() {
 // ── Auth state machine ─────────────────────────────────────────────────
 // _ME holds the OAuth-derived identity ({sub, name, picture, email})
 // or null when signed out.  _AUTH_CONFIGURED is false when the deploy
-// has no GOOGLE_CLIENT_ID — in that case the sign-in flow is disabled
+// has no GOOGLE_CLIENT_ID, in that case the sign-in flow is disabled
 // gracefully (modal explains, no broken redirect).
 const VALUS_USER_KEY = "valus.user.v1";   // legacy soft-token, kept for claim flow
 let _ME = null;
@@ -4915,13 +4915,13 @@ let _STRIPE_CONFIGURED = false;
 let _IS_PLUS = false;          // VALUS+ subscriber flag, refreshed from /api/me
 let _UNLIMITED_ACCESS = false; // redeemed team access code (stakeholder)
 let _PLUS_RENEWS_AT = null;    // unix-seconds when current period ends (if plus)
-// True only when the deployment has a working KV/Redis connection — i.e.
+// True only when the deployment has a working KV/Redis connection, i.e.
 // portfolio writes actually persist across cold starts AND across devices
 // for the same Google account.  When false, signing in elsewhere won't
 // surface this device's portfolios.  Treated defensively by pfPullFromServer
 // (won't overwrite local with an empty server response) and by the
 // portfolio page (shows a one-time banner so the deploy owner notices).
-let _STORAGE_DURABLE = true;   // optimistic default — refreshMe overrides
+let _STORAGE_DURABLE = true;   // optimistic default, refreshMe overrides
 let _PENDING_INTENT = null;   // string set when an action prompted sign-in;
                               // re-fired on auth_ok=1 redirect.
 
@@ -4978,9 +4978,9 @@ async function refreshMe() {
   updateAuthControl();
   // Show/hide the portfolio switcher to match the current auth state.
   // (pfPullFromServer below will also refresh it once the server data
-  // arrives — this call covers the visibility flip ahead of that.)
+  // arrives, this call covers the visibility flip ahead of that.)
   pfUpdateSwitcher();
-  // Pick up storage_durable change — banner appears immediately if needed
+  // Pick up storage_durable change, banner appears immediately if needed
   // even when the portfolio page is already open.
   syncStorageWarnVisibility();
   // First-time sign-in: claim any legacy soft-token entries
@@ -5017,7 +5017,7 @@ function updateAuthControl() {
   const tier      = $("authMenuTier");
   const premLabel = $("authPremiumLabel");
   const premHint  = $("authPremiumHint");
-  // Standalone access badge — shows for code-holders (even when signed out)
+  // Standalone access badge, shows for code-holders (even when signed out)
   // and VALUS+ subscribers. "Team" = redeemed access code, "VALUS+" = paid.
   const accessBadge = $("accessBadge");
   if (accessBadge) {
@@ -5061,7 +5061,7 @@ function updateAuthControl() {
       avatar.classList.remove("auth-avatar--plus");
       if (plusBadge) plusBadge.classList.add("hidden");
       if (tier) tier.classList.add("hidden");
-      if (premLabel) premLabel.textContent = "VALUS+ — Unlimited for $2/month";
+      if (premLabel) premLabel.textContent = "VALUS+, Unlimited for $2/month";
       if (premHint)  premHint.textContent  = "";
     }
   } else {
@@ -5116,7 +5116,7 @@ function startCheckout() {
 async function showManageSubscription() {
   // Lightweight: tell the user their renewal date and offer to cancel
   // at period end. A full Stripe Customer Portal would be nicer, but
-  // requires an extra Stripe endpoint config — phase this in later.
+  // requires an extra Stripe endpoint config, phase this in later.
   const renews = _PLUS_RENEWS_AT
     ? new Date(_PLUS_RENEWS_AT * 1000).toLocaleDateString(undefined, {
         year: "numeric", month: "short", day: "numeric"
@@ -5161,15 +5161,15 @@ function handleStripeRedirect() {
       attempts++;
       await refreshMe();
       if (_IS_PLUS) {
-        showToast("🎉 Welcome to VALUS+ — unlimited searches unlocked.", "success");
+        showToast("🎉 Welcome to VALUS+, unlimited searches unlocked.", "success");
         return;
       }
       if (attempts < 6) setTimeout(poll, 2000);
-      else showToast("Payment received — refresh in a moment if VALUS+ doesn't appear.", "info");
+      else showToast("Payment received, refresh in a moment if VALUS+ doesn't appear.", "info");
     };
     poll();
   } else if (subbed === "0") {
-    showToast("Checkout cancelled — you can upgrade anytime.", "info");
+    showToast("Checkout cancelled, you can upgrade anytime.", "info");
   } else if (stripeErr) {
     showToast(`Checkout error: ${stripeErr.replace(/_/g, " ")}.`, "error");
   }
@@ -5483,7 +5483,7 @@ function setupCompareModal() {
   // Format a market-cap number into a compact $1.23T / $456B / $7.8B / $123M.
   // Falls back to plain dollars under $1M (rare in this app, but defensive).
   function fmtMktCap(v) {
-    if (v == null || !Number.isFinite(v)) return "—";
+    if (v == null || !Number.isFinite(v)) return ", ";
     const abs = Math.abs(v);
     if (abs >= 1e12) return `$${fmt(v / 1e12, 2)}T`;
     if (abs >= 1e9)  return `$${fmt(v / 1e9,  2)}B`;
@@ -5495,23 +5495,23 @@ function setupCompareModal() {
   // important deltas (fair value, MOS, market cap, analyst target) sit
   // at the top of the table.
   const COMPARE_FIELDS = [
-    ["price",          "Price",           v => v != null ? fmtPrice(v) : "—", "higher_better:false"],
-    ["iv",             "VALUS fair value",v => v != null ? fmtPrice(v) : "—", "higher_better:true"],
-    ["mos",            "Margin of safety",v => v != null ? fmtPct(v)  : "—",  "higher_better:true"],
-    ["tier_label",     "Verdict",         v => v || "—",                       "neutral"],
-    ["valus_grade",    "VALUS grade",     v => v ? renderGradeBadge(v, {showLabel:false}) : "—", "neutral"],
+    ["price",          "Price",           v => v != null ? fmtPrice(v) : ", ", "higher_better:false"],
+    ["iv",             "VALUS fair value",v => v != null ? fmtPrice(v) : ", ", "higher_better:true"],
+    ["mos",            "Margin of safety",v => v != null ? fmtPct(v)  : ", ",  "higher_better:true"],
+    ["tier_label",     "Verdict",         v => v || ", ",                       "neutral"],
+    ["valus_grade",    "VALUS grade",     v => v ? renderGradeBadge(v, {showLabel:false}) : ", ", "neutral"],
     ["market_cap",     "Market cap",      fmtMktCap,                           "neutral"],
-    ["analyst_target", "Analyst target",  v => v != null ? fmtPrice(v) : "—", "higher_better:true"],
-    ["quality_score",  "Quality (0-100)", v => v && v.score != null ? `${v.score} (${v.grade})` : "—", "higher_better:true_quality"],
-    ["roe",            "ROE",             v => v != null ? `${fmt(v, 1)}%` : "—", "higher_better:true"],
-    ["rev_growth",     "Revenue growth",  v => v != null ? `${fmt(v, 1)}%` : "—", "higher_better:true"],
-    ["forward_pe",     "Forward P/E",     v => v != null ? `${fmt(v, 1)}×` : "—", "higher_better:false"],
-    ["peg",            "PEG ratio",       v => v != null ? `${fmt(v, 2)}×` : "—", "higher_better:false"],
-    ["dividend_yield", "Dividend yield",  v => v != null ? `${fmt(v, 2)}%` : "—", "higher_better:true"],
-    ["fcf_yield",      "FCF yield",       v => v != null ? `${fmt(v, 2)}%` : "—", "higher_better:true"],
-    ["wacc",           "Discount (WACC)", v => v != null ? `${fmt(v, 2)}%` : "—", "higher_better:false"],
-    ["implied_growth", "Market-implied growth", v => v != null ? `${fmt(v, 1)}%` : "—", "neutral"],
-    ["iv_confidence",  "DCF confidence",  v => v || "—", "neutral"],
+    ["analyst_target", "Analyst target",  v => v != null ? fmtPrice(v) : ", ", "higher_better:true"],
+    ["quality_score",  "Quality (0-100)", v => v && v.score != null ? `${v.score} (${v.grade})` : ", ", "higher_better:true_quality"],
+    ["roe",            "ROE",             v => v != null ? `${fmt(v, 1)}%` : ", ", "higher_better:true"],
+    ["rev_growth",     "Revenue growth",  v => v != null ? `${fmt(v, 1)}%` : ", ", "higher_better:true"],
+    ["forward_pe",     "Forward P/E",     v => v != null ? `${fmt(v, 1)}×` : ", ", "higher_better:false"],
+    ["peg",            "PEG ratio",       v => v != null ? `${fmt(v, 2)}×` : ", ", "higher_better:false"],
+    ["dividend_yield", "Dividend yield",  v => v != null ? `${fmt(v, 2)}%` : ", ", "higher_better:true"],
+    ["fcf_yield",      "FCF yield",       v => v != null ? `${fmt(v, 2)}%` : ", ", "higher_better:true"],
+    ["wacc",           "Discount (WACC)", v => v != null ? `${fmt(v, 2)}%` : ", ", "higher_better:false"],
+    ["implied_growth", "Market-implied growth", v => v != null ? `${fmt(v, 1)}%` : ", ", "neutral"],
+    ["iv_confidence",  "DCF confidence",  v => v || ", ", "neutral"],
   ];
 
   // For an N-ticker row of values, return a Set of column indices that
@@ -5553,7 +5553,7 @@ function setupCompareModal() {
       return;
     }
     if (tickers.length > 3) {
-      // Defensive — the UI only exposes 3 inputs, but guard anyway.
+      // Defensive, the UI only exposes 3 inputs, but guard anyway.
       errEl.textContent = "Compare up to 3 tickers at a time.";
       errEl.classList.remove("hidden");
       return;
@@ -5602,7 +5602,7 @@ function setupCompareModal() {
       results.innerHTML = `<table class="cmp-table cmp-table--cols-${datas.length}">${head}<tbody>${rows}</tbody></table>`;
       results.classList.remove("hidden");
     } catch (e) {
-      errEl.textContent = "Network error — try again.";
+      errEl.textContent = "Network error, try again.";
       errEl.classList.remove("hidden");
     } finally {
       loading.classList.add("hidden");
@@ -5621,7 +5621,7 @@ function setupAuthControl() {
   if (signInBtn) signInBtn.onclick = () => showSignInModal("default");
   if (googleBtn) googleBtn.onclick = () => {
     if (!_AUTH_CONFIGURED) return;
-    // Preserve the current URL — including the hash — so the user lands
+    // Preserve the current URL, including the hash, so the user lands
     // back on the same page after the Google round-trip.  Without the
     // hash, signing in from the Leaderboard or another non-search view would dump
     // the user on the search hero.
@@ -5677,7 +5677,7 @@ function setupAuthControl() {
     } catch {}
     sessionStorage.removeItem("valus.claimed");
     _ME = null;
-    // Clear the local portfolio mirror — it's tied to the signed-in
+    // Clear the local portfolio mirror, it's tied to the signed-in
     // identity.  The server copy is preserved (keyed to the user's sub)
     // and will be pulled back on next sign-in.  We clear both the v2
     // multi-portfolio state and the long-retired v1 single-array key.
@@ -5697,7 +5697,7 @@ function setupAuthControl() {
     updateAuthControl();
   };
 
-  // Delete account — permanent erasure of all server-side data for the user.
+  // Delete account, permanent erasure of all server-side data for the user.
   const deleteBtn = $("authDeleteBtn");
   if (deleteBtn) deleteBtn.onclick = async () => {
     const ok = window.confirm(
@@ -5746,7 +5746,7 @@ function setupAuthControl() {
       if (r.ok && d.ok) {
         _ME = null;                       // force /api/me refresh
         if (typeof updateAuthControl === "function") { try { await updateAuthControl(); } catch {} }
-        if (!silent) alert("Access code accepted — you now have unlimited searches.");
+        if (!silent) alert("Access code accepted, you now have unlimited searches.");
         return true;
       }
       if (!silent) alert(d.error === "invalid_code"
@@ -5778,7 +5778,7 @@ function setupAuthControl() {
     }
   }
 
-  // After OAuth roundtrip, URL has ?auth_ok=1 — replay any pending intent
+  // After OAuth roundtrip, URL has ?auth_ok=1, replay any pending intent
   if (window.location.search.includes("auth_ok=1")) {
     // Strip the marker from the URL but keep the rest
     const url = new URL(window.location.href);
@@ -5844,7 +5844,7 @@ function setupSubmitToLeaderboard() {
       setTimeout(() => { publishBtn.textContent = "🏆 Publish"; }, 1500);
       return;
     }
-    // Gate on real auth — sign-in modal is shown if not signed in.
+    // Gate on real auth, sign-in modal is shown if not signed in.
     if (!(await requireAuthWithRedirectIntent("publish"))) return;
     // Pre-populate display name from the OAuth identity
     if (_ME?.name) nameEl.value = _ME.name;
@@ -5927,7 +5927,7 @@ async function openLeaderboardPage() {
   if (_LB_POLL_TIMER) clearInterval(_LB_POLL_TIMER);
   _LB_POLL_TIMER = setInterval(() => {
     if (!$("leaderboardPage").classList.contains("hidden")) {
-      loadLeaderboard(false);   // silent — no spinner flash
+      loadLeaderboard(false);   // silent, no spinner flash
     } else {
       clearInterval(_LB_POLL_TIMER);
       _LB_POLL_TIMER = null;
@@ -5957,7 +5957,7 @@ async function loadLeaderboard(showSpinner = true) {
     const data = await res.json();
     const items = data.items || [];
     // Skip re-render if nothing changed (preserves scroll position on polls).
-    // Sort key must be part of the fingerprint — without it, switching from
+    // Sort key must be part of the fingerprint, without it, switching from
     // "Avg MOS" to "Most Recent" produces the same id+avg+count tuple in a
     // different order, the early-return fires, but lbList was already
     // cleared by the spinner branch above → user sees an empty leaderboard.
@@ -5989,7 +5989,7 @@ function renderLeaderboard(items) {
   }
   empty.classList.add("hidden");
 
-  // Track current user — prefer the OAuth `sub` (rock-solid identity);
+  // Track current user, prefer the OAuth `sub` (rock-solid identity);
   // fall back to a name match for legacy entries that haven't been claimed.
   const mySub  = _ME?.sub || null;
   const myName = (_ME?.name || "").trim().toLowerCase();
@@ -6024,7 +6024,7 @@ function renderLeaderboard(items) {
         </div>
         <div class="lb-stat">
           <span class="lb-stat__label">Avg MOS</span>
-          <span class="lb-stat__value ${avgClass}">${avg != null ? fmtPct(avg) : "—"}</span>
+          <span class="lb-stat__value ${avgClass}">${avg != null ? fmtPct(avg) : ", "}</span>
         </div>
         <div class="lb-stat">
           <span class="lb-stat__label">Underv.</span>
@@ -6050,7 +6050,7 @@ function renderLeaderboard(items) {
   // Scroll to user's own row if it's not in viewport
   const mine = list.querySelector(".lb-row.is-mine");
   if (mine && !isFirstRender) {
-    // Only scroll on first render or after publish — not on every poll
+    // Only scroll on first render or after publish, not on every poll
   } else if (mine && isFirstRender) {
     setTimeout(() => mine.scrollIntoView({ behavior: "smooth", block: "center" }), 400);
   }
@@ -6071,7 +6071,7 @@ function setupLeaderboard() {
   });
   $("lbRefreshBtn")?.addEventListener("click", loadLeaderboard);
   // Restore the persisted sort (sessionStorage) so refresh keeps the user's
-  // current filter — defaults to avg_mos otherwise.
+  // current filter, defaults to avg_mos otherwise.
   try {
     const saved = sessionStorage.getItem("valus.lb.sort");
     if (saved && ["avg_mos", "recent", "size"].includes(saved)) {
@@ -6125,7 +6125,7 @@ function renderHomepageTopPicks(items) {
   const row  = document.getElementById("homeTopPicksRow");
   if (!root || !row) return;
   // A/B-grade names sorted by descending MOS, capped at 5.  Hidden when
-  // fewer than 3 — a 1-card row looks anemic and a 2-card row breaks
+  // fewer than 3, a 1-card row looks anemic and a 2-card row breaks
   // the grid visually.
   const picks = (items || [])
     .filter(it => !it.extreme && typeof it.mos === "number" && it.mos > 0)
@@ -6174,7 +6174,7 @@ async function loadHomepageTopPicks() {
       _saveHomeTopPicksLocal(items);
       renderHomepageTopPicks(items);
     }
-  } catch { /* offline / transient — local snapshot already rendered */ }
+  } catch { /* offline / transient, local snapshot already rendered */ }
 }
 
 async function refreshAnalyzeTick(ticker) {
@@ -6193,7 +6193,7 @@ async function refreshAnalyzeTick(ticker) {
     const newMos = Math.max(Math.min((iv - q.price) / q.price * 100, 200), -99);
     _LAST_DATA.current_price = q.price;
     _LAST_DATA.margin_of_safety = newMos;
-    // Patch the visible header in place.  No animateNumber call — the
+    // Patch the visible header in place.  No animateNumber call, the
     // periodic update should be subtle, not draw the eye every tick.
     const priceEl = document.getElementById("vPrice");
     if (priceEl) priceEl.textContent = fmtPrice(q.price);
@@ -6211,7 +6211,7 @@ async function refreshAnalyzeTick(ticker) {
         fillEl.classList.add("negative"); fillEl.classList.remove("positive");
       }
     }
-  } catch { /* silent — next tick retries */ }
+  } catch { /* silent, next tick retries */ }
 }
 
 // ── Shared portfolio (read-only via URL) ───────────────────────────────
@@ -6241,7 +6241,7 @@ async function openSharedPortfolio(tickers) {
       return {
         ticker: d.ticker || t,
         name:   d.company_name || t,
-        sector: d.sector || "—",
+        sector: d.sector || ", ",
         price:  d.current_price,
         iv:     d.intrinsic_value,
         mos:    d.margin_of_safety,
@@ -6272,8 +6272,8 @@ function renderSharedList(items) {
       <div class="pf-item" data-pf-ticker="${escHtml(it.ticker)}">
         <span class="pf-item__ticker">${escHtml(it.ticker)}</span>
         <span class="pf-item__name">${escHtml(it.name || "")}</span>
-        <span class="pf-item__price">${it.price != null ? fmtPrice(it.price) : "—"}</span>
-        <span class="pf-item__mos ${mosClass}">${it.mos != null ? fmtPct(it.mos) : "—"}</span>
+        <span class="pf-item__price">${it.price != null ? fmtPrice(it.price) : ", "}</span>
+        <span class="pf-item__mos ${mosClass}">${it.mos != null ? fmtPct(it.mos) : ", "}</span>
       </div>
     `;
   }).join("");
@@ -6296,9 +6296,9 @@ function renderSharedList(items) {
   const under = items.filter(it => it.mos != null && it.mos > 5).length;
   const best = items.filter(it => it.mos != null).sort((a, b) => b.mos - a.mos)[0];
   $("pfCount").textContent = items.length;
-  $("pfAvgMos").textContent = avg != null ? fmtPct(avg) : "—";
+  $("pfAvgMos").textContent = avg != null ? fmtPct(avg) : ", ";
   $("pfUnderCount").textContent = `${under} / ${items.length}`;
-  $("pfBest").textContent = best ? `${best.ticker} ${fmtPct(best.mos)}` : "—";
+  $("pfBest").textContent = best ? `${best.ticker} ${fmtPct(best.mos)}` : ", ";
   $("pfAllocationCard").style.display = "none";   // simpler shared view
 }
 
@@ -6355,7 +6355,7 @@ function syncStorageWarnVisibility() {
   if (!el) return;
   let dismissed = false;
   try { dismissed = !!localStorage.getItem(PF_STORAGE_WARN_DISMISSED_KEY); } catch {}
-  // Only nag signed-in users — guests are already localStorage-only by design.
+  // Only nag signed-in users, guests are already localStorage-only by design.
   const shouldShow = !!_ME && !_STORAGE_DURABLE && !dismissed;
   el.classList.toggle("hidden", !shouldShow);
 }
@@ -6372,11 +6372,11 @@ function hideAllViews() {
   $("btcHero")?.classList.add("hidden");
   $("etfHero")?.classList.add("hidden");
   $("portfolioPage")?.classList.add("hidden");
-  $("leaderboardPage")?.classList.add("hidden");   // was missing — caused
+  $("leaderboardPage")?.classList.add("hidden");   // was missing, caused
                                                    // leaderboard
                                                    // to stack visually
   $("loading")?.classList.add("hidden");
-  // Stop any live polling tied to the analyze hero — it's no longer visible.
+  // Stop any live polling tied to the analyze hero, it's no longer visible.
   if (typeof _ANALYZE_TICK_TIMER !== "undefined" && _ANALYZE_TICK_TIMER) {
     clearInterval(_ANALYZE_TICK_TIMER);
     _ANALYZE_TICK_TIMER = null;
@@ -6416,7 +6416,7 @@ async function bootFromURL() {
     analyze(ticker);
     return;
   }
-  // No ticker / no shared portfolio — restore the hash-encoded view so
+  // No ticker / no shared portfolio, restore the hash-encoded view so
   // browser refresh on Portfolio / Watchlist / Leaderboard stays put
   // instead of bouncing back to the search hero.
   if (view === "portfolio")       { openPortfolioPage();   return; }
@@ -6476,7 +6476,7 @@ document.addEventListener("DOMContentLoaded", () => {
   pfUpdateBadge();
   wlUpdateBadge();
   pfUpdateSwitcher();
-  // Fetch identity in parallel with bootFromURL — non-blocking
+  // Fetch identity in parallel with bootFromURL, non-blocking
   refreshMe();
   handleStripeRedirect();
   bootFromURL();
@@ -6486,7 +6486,7 @@ document.addEventListener("DOMContentLoaded", () => {
   window.addEventListener("popstate", () => {
     const { ticker, portfolio, view } = readURLParams();
     if (ticker || portfolio) { bootFromURL(); return; }
-    // Hash-only navigation — close everything and re-route to the view.
+    // Hash-only navigation, close everything and re-route to the view.
     closePortfolioPage();
     closeWatchlistPage();
     closeLeaderboardPage();

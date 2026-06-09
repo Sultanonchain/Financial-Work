@@ -36,7 +36,7 @@
 <main class="container" style="padding:32px 0 48px;max-width:780px;">
 
   <h1 style="font-size:32px;font-weight:700;line-height:1.2;margin:0 0 8px;">Methodology</h1>
-  <p style="color:var(--ink-muted);font-size:15px;margin:0 0 28px;line-height:1.55;">Every assumption VALUS makes when pricing a stock, in detail. Educational only — not investment advice.</p>
+  <p style="color:var(--ink-muted);font-size:15px;margin:0 0 28px;line-height:1.55;">Every assumption VALUS makes when pricing a stock, in detail. Educational only, not investment advice.</p>
 
   <section style="margin:28px 0;">
     <h2 style="font-size:20px;font-weight:600;margin:0 0 10px;">DCF model</h2>
@@ -46,7 +46,7 @@
     <pre style="background:rgba(255,255,255,0.04);border-radius:8px;padding:14px;font-size:12px;color:#a3aab8;overflow-x:auto;line-height:1.6;">IV = Σ (FCF_t / (1+WACC)^t) for t=1..10
    + (FCF_10 × (1+g_term) / (WACC − g_term)) / (1+WACC)^10
    + Net cash on balance sheet</pre>
-    <p style="color:var(--ink-secondary);line-height:1.7;font-size:14px;">Each year's projected free cash flow grows at a stage-specific rate (stage 1 = years 1–5, stage 2 = years 6–10), discounted back to today using WACC, then summed.</p>
+    <p style="color:var(--ink-secondary);line-height:1.7;font-size:14px;">Each year's projected free cash flow grows at a stage-specific rate (stage 1 = years 1-5, stage 2 = years 6-10), discounted back to today using WACC, then summed.</p>
   </section>
 
   <section style="margin:28px 0;">
@@ -61,17 +61,17 @@
 
   <section style="margin:28px 0;">
     <h2 style="font-size:20px;font-weight:600;margin:0 0 10px;">Terminal growth</h2>
-    <p style="color:var(--ink-secondary);line-height:1.7;font-size:14px;">Capped at 3% by default — the long-run rate at which a mature company can grow without exceeding global GDP growth indefinitely. Adjustable from 1% to 5% in the Customize panel.</p>
+    <p style="color:var(--ink-secondary);line-height:1.7;font-size:14px;">Capped at 3% by default, the long-run rate at which a mature company can grow without exceeding global GDP growth indefinitely. Adjustable from 1% to 5% in the Customize panel.</p>
   </section>
 
   <section style="margin:28px 0;">
     <h2 style="font-size:20px;font-weight:600;margin:0 0 10px;">Sector-aware growth ceilings</h2>
-    <p style="color:var(--ink-secondary);line-height:1.7;font-size:14px;">A semiconductor company can plausibly compound at 18% for a few years; a regulated utility cannot. VALUS caps stage 1 and stage 2 growth rates at sector-specific ceilings, derived from observed long-term growth distributions. This prevents the model from extrapolating one good year into a fantasy outcome — the most common DCF failure mode.</p>
+    <p style="color:var(--ink-secondary);line-height:1.7;font-size:14px;">A semiconductor company can plausibly compound at 18% for a few years; a regulated utility cannot. VALUS caps stage 1 and stage 2 growth rates at sector-specific ceilings, derived from observed long-term growth distributions. This prevents the model from extrapolating one good year into a fantasy outcome, the most common DCF failure mode.</p>
   </section>
 
   <section style="margin:28px 0;">
     <h2 style="font-size:20px;font-weight:600;margin:0 0 10px;">Reverse DCF (implied growth)</h2>
-    <p style="color:var(--ink-secondary);line-height:1.7;font-size:14px;">In addition to the forward DCF, VALUS solves for the constant growth rate that would make intrinsic value equal the current price — the "implied growth" the market is pricing in. If a stock trades at a price requiring 25% annual growth for a decade and the sector ceiling is 12%, the verdict tier flags it as "Priced for Miracle." Reverse-DCF is the single most useful sanity check on whether today's price is plausible.</p>
+    <p style="color:var(--ink-secondary);line-height:1.7;font-size:14px;">In addition to the forward DCF, VALUS solves for the constant growth rate that would make intrinsic value equal the current price, the "implied growth" the market is pricing in. If a stock trades at a price requiring 25% annual growth for a decade and the sector ceiling is 12%, the verdict tier flags it as "Priced for Miracle." Reverse-DCF is the single most useful sanity check on whether today's price is plausible.</p>
   </section>
 
   <section style="margin:28px 0;">
