@@ -9776,6 +9776,9 @@ def api_valuations():
             "tier":     (payload.get("priced_for") or {}).get("label"),
             "grade":    (payload.get("valus_grade") or {}).get("grade") if reliable else None,
             "reliable": reliable,
+            # Peter Lynch classification (slowGrower/stalwart/fastGrower/cyclical/
+            # turnaround/assetPlay) for the portfolio Lynch-allocation pie (#11).
+            "lynch_category": (payload.get("lynch_verdict") or {}).get("category"),
         }
     return jsonify({"valuations": out})
 

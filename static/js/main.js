@@ -3991,6 +3991,7 @@ function renderPortfolioPage() {
     empty.classList.remove("hidden");
     list.innerHTML = "";
     $("pfAllocationCard").style.display = "none";
+    $("pfLynchCard")?.classList.add("hidden");   // #11
     $("pfCount").textContent = "0";
     $("pfAvgMos").textContent = "N/A";
     $("pfUnderCount").textContent = "0 / 0";
@@ -4124,6 +4125,7 @@ function renderPortfolioPage() {
       },
     });
   }
+  renderLynchAllocation(items);   // #11: Peter Lynch classification pie
 }
 
 // Single instance, destroy on re-render to avoid the Chart.js
@@ -4134,6 +4136,88 @@ function destroyAllocationPie() {
   if (_pfAllocPieInstance) {
     try { _pfAllocPieInstance.destroy(); } catch {}
     _pfAllocPieInstance = null;
+  }
+}
+
+// #11: Peter Lynch classification allocation — same doughnut + legend style
+// as the Sector pie, aggregated by each holding's Lynch category (from the
+// AI verdict). Hidden until at least one holding is classified.
+const LYNCH_LABELS = {
+  fastGrower: "Fast Growers", stalwart: "Stalwarts", slowGrower: "Slow Growers",
+  cyclical: "Cyclicals", turnaround: "Turnarounds", assetPlay: "Asset Plays",
+};
+let _pfLynchPieInstance = null;
+function destroyLynchPie() {
+  if (_pfLynchPieInstance) {
+    try { _pfLynchPieInstance.destroy(); } catch {}
+    _pfLynchPieInstance = null;
+  }
+}
+function renderLynchAllocation(items) {
+  const card    = $("pfLynchCard");
+  const legend  = $("pfLynchLegend");
+  const canvas  = $("pfLynchPie");
+  const totalEl = $("pfLynchTotal");
+  const byCat = {};
+  let classified = 0;
+  (items || []).forEach(it => {
+    const c = it.lynchCategory;
+    if (!c) return;   // skip holdings with no Lynch classification yet
+    const label = LYNCH_LABELS[c] || c;
+    byCat[label] = (byCat[label] || 0) + 1;
+    classified++;
+  });
+  const cats = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+  if (!classified || !cats.length) {
+    if (card) card.classList.add("hidden");
+    destroyLynchPie();
+    return;
+  }
+  if (card) card.classList.remove("hidden");
+  const colors = cats.map((_, idx) => getSectorColor(idx));
+  if (totalEl) totalEl.innerHTML =
+    `<div class="pf-alloc-total__num">${classified}</div>` +
+    `<div class="pf-alloc-total__lbl">classified</div>`;
+  legend.innerHTML = cats.map(([s, n], idx) => {
+    const pct = (n / classified) * 100;
+    return `<span class="pf-legend-item">` +
+           `<span class="pf-legend-dot" style="background:${colors[idx]};"></span>` +
+           `<span class="pf-legend-name">${escHtml(s)}</span>` +
+           `<span class="pf-legend-meta">${n} (${pct.toFixed(0)}%)</span>` +
+           `</span>`;
+  }).join("");
+  if (canvas && typeof Chart !== "undefined") {
+    destroyLynchPie();
+    _pfLynchPieInstance = new Chart(canvas.getContext("2d"), {
+      type: "doughnut",
+      data: {
+        labels: cats.map(([s]) => s),
+        datasets: [{
+          data:            cats.map(([, n]) => n),
+          backgroundColor: colors,
+          borderColor:     "#0e131c",
+          borderWidth:     2,
+          hoverOffset:     6,
+        }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, cutout: "62%",
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: "#11151d", borderColor: "rgba(255,255,255,0.08)", borderWidth: 1,
+            titleColor: "#f5f7fa", bodyColor: "#b6bdcb",
+            callbacks: {
+              label: (c) => {
+                const n = c.parsed;
+                const pct = classified ? (n / classified * 100).toFixed(0) : "0";
+                return `${c.label}: ${n} (${pct}%)`;
+              },
+            },
+          },
+        },
+      },
+    });
   }
 }
 
@@ -4168,6 +4252,7 @@ async function refreshPortfolioPrices() {
         reliable: v.reliable,
         tier:  v.tier || it.tier,
         grade: v.reliable ? (v.grade || null) : null,
+        lynchCategory: v.lynch_category || it.lynchCategory || null,  // #11
       };
     });
     pfWrite(updated);
