@@ -11223,21 +11223,41 @@ def analyze():
         # Catches nonsense in both directions: 19,000% MOS upper-tail bugs
         # AND $0.01 IVs from a broken multiples calc on the lower-tail.
         # Applied AFTER emergency_iv too — it's the universal sanity envelope.
+        _iv_collapsed = False   # True when the pre-clamp DCF produced 0/negative IV
         if intrinsic_value is not None and price and price > 0:
             _iv_pre_clamp = intrinsic_value
+            # A 0 or negative pre-clamp IV means the DCF/multiples genuinely failed to
+            # produce a value (ADRs like BABA, pre-revenue names like SMR). The clamp
+            # floors it to price×0.05, which would otherwise masquerade as a confident
+            # "−95% overvalued" — flag it so the UI shows "can't value reliably" instead.
+            _iv_collapsed = (_iv_pre_clamp is not None and _iv_pre_clamp <= 0)
             intrinsic_value = _clamp_iv(intrinsic_value, price, analyst_target_price)
             if intrinsic_value != _iv_pre_clamp:
                 margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
                 if scenarios:
-                    _factor = intrinsic_value / _iv_pre_clamp
-                    for _k in ("base", "bull", "bear"):
-                        _slot = scenarios.get(_k)
-                        if _slot and _slot.get("value") is not None:
-                            _slot["value"]  = round(_slot["value"] * _factor, 2)
-                            _slot["upside"] = round((_slot["value"] - price) / price * 100, 1)
-                    if scenarios.get("weighted") is not None:
-                        scenarios["weighted"] = round(scenarios["weighted"] * _factor, 2)
-                        scenarios["weighted_upside"] = round((scenarios["weighted"] - price) / price * 100, 1)
+                    # Only rescale scenarios proportionally when the pre-clamp IV is a
+                    # usable positive number. When it's 0 or negative (broken multiples
+                    # / emergency cascade — e.g. SMR, BABA, FLY) the scenario values are
+                    # meaningless, so drop them rather than (a) dividing by zero, which
+                    # used to crash the WHOLE analysis, or (b) showing $0 bull/base/bear.
+                    if _iv_pre_clamp and _iv_pre_clamp > 0:
+                        _factor = intrinsic_value / _iv_pre_clamp
+                        for _k in ("base", "bull", "bear"):
+                            _slot = scenarios.get(_k)
+                            if _slot and _slot.get("value") is not None:
+                                _slot["value"]  = round(_slot["value"] * _factor, 2)
+                                _slot["upside"] = round((_slot["value"] - price) / price * 100, 1)
+                        if scenarios.get("weighted") is not None:
+                            scenarios["weighted"] = round(scenarios["weighted"] * _factor, 2)
+                            scenarios["weighted_upside"] = round((scenarios["weighted"] - price) / price * 100, 1)
+                    else:
+                        scenarios = None
+
+        # A collapsed (0/negative pre-clamp) IV is not a confident verdict — the model
+        # couldn't value the name. Downgrade confidence so the UI suppresses the
+        # misleading "−95% overvalued" and shows a data-quality note instead.
+        if _iv_collapsed:
+            iv_confidence = "low"
 
         # ── Scenario Coherence Enforcer (Bear < Base < Bull, sane spreads) ────
         if scenarios and intrinsic_value is not None:
@@ -11915,7 +11935,7 @@ def analyze():
             # confidence/fallback IV) — NOT merely large. A high-confidence DCF
             # with a big margin of safety (e.g. FIVN) is a legitimate result and
             # is shown normally. See _mos_unreliable for the full rule.
-            "extreme_mos_flag":  _mos_unreliable(margin_of_safety, iv_confidence, ticker),
+            "extreme_mos_flag":  _iv_collapsed or _mos_unreliable(margin_of_safety, iv_confidence, ticker),
             # ── "Priced For" Verdict + Verdict Summary ────────────────────
             "priced_for":              priced_for,
             # ── VALUS A-F letter grade (derived from MOS, then reconciled
