@@ -71,10 +71,12 @@
       <!-- Watchlist, what you're WATCHING (no holdings).  Separate from
            portfolios; free for everyone.  Signed-out users keep using it
            via localStorage; sign-in pulls/merges. -->
-      <button class="header-btn" id="watchlistBtn" type="button" aria-label="Open watchlist">
-        <span class="header-btn__icon">≡</span>
-        <span class="header-btn__label" data-i18n="nav.watchlist">Watchlist</span>
-        <span class="header-btn__count" id="watchlistCount" hidden>0</span>
+      <!-- Investor Hub lives in the old Watchlist slot: opens the hub (investor
+           13F portfolios + allocation strategies, with the globe tracker to
+           follow). Watchlist itself moved into the Portfolio dropdown. -->
+      <button class="header-btn" id="investorHubBtn" type="button" aria-label="Open Investor Hub">
+        <span class="header-btn__icon"><svg class="ic" aria-hidden="true"><use href="#vi-cap"></use></svg></span>
+        <span class="header-btn__label" data-i18n="pf.investorHub">Investor Hub</span>
       </button>
       <!-- Unified portfolio nav: ONE button.  When signed in, clicking
            opens a dropdown of all portfolios (active checked) plus New /
@@ -103,6 +105,11 @@
           <button class="pf-switcher__action pf-switcher__action--danger" id="pfSwitcherDelete" role="menuitem" type="button">
             <span class="pf-switcher__action-icon" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#vi-trash"></use></svg></span>
             <span class="pf-switcher__action-label" data-i18n="switcher.delete">Delete current…</span>
+          </button>
+          <div class="pf-switcher__sep"></div>
+          <button class="pf-switcher__action" id="pfSwitcherWatchlist" role="menuitem" type="button">
+            <span class="pf-switcher__action-icon" aria-hidden="true">≡</span>
+            <span class="pf-switcher__action-label" data-i18n="nav.watchlist">Watchlist</span>
           </button>
         </div>
       </div>

@@ -3781,8 +3781,10 @@ function renderWatchlistPage() {
 }
 
 function setupWatchlistPage() {
-  const navBtn = $("watchlistBtn");
-  if (navBtn) navBtn.onclick = openWatchlistPage;
+  // Watchlist no longer has a dedicated header button (the Investor Hub took
+  // that slot); it now opens from the Portfolio dropdown's Watchlist item.
+  const wlItem = $("pfSwitcherWatchlist");
+  if (wlItem) wlItem.addEventListener("click", () => { _pfMenuClose(); openWatchlistPage(); });
   const back = $("wlBackBtn");
   if (back) back.onclick = closeWatchlistPage;
   const csv = $("wlExportCsvBtn");
@@ -4293,6 +4295,9 @@ function setupPortfolioPage() {
 
   const tpl = $("pfTemplatesBtn");
   if (tpl) tpl.onclick = openTemplatesModal;
+  // Investor Hub is also reachable from the header (old Watchlist slot).
+  const hubNav = $("investorHubBtn");
+  if (hubNav) hubNav.onclick = openTemplatesModal;
 
   // CSV export, pull the active portfolio's items + a slug-safe filename
   // segment based on its name (e.g. "Long Term" → "long-term") so a user
