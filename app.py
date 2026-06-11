@@ -209,6 +209,12 @@ def limit_medium():
     return "60 per minute; 1000 per day" if _is_signed_in() else "20 per minute; 200 per day"
 def limit_light():
     return "120 per minute; 2000 per day" if _is_signed_in() else "30 per minute; 300 per day"
+def limit_valuations():
+    # Batched read endpoint: the Investor Hub MOS column fires several small
+    # POSTs per investor view (one per 5-ticker batch).  Give it more headroom
+    # than the generic medium bucket so clicking through a few funds doesn't
+    # trip a 429 and blank the column.
+    return "120 per minute; 3000 per day" if _is_signed_in() else "40 per minute; 400 per day"
 
 _limiter_storage = _kv_url if _kv else None
 limiter = Limiter(
@@ -9730,7 +9736,7 @@ def leaderboard():
 
 
 @app.route("/api/valuations", methods=["POST"])
-@limiter.limit(limit_medium)
+@limiter.limit(limit_valuations)
 def api_valuations():
     """Current IV / MOS / tier for a set of tickers, read from the SHARED
     analyze cache so the same ticker resolves identically everywhere, e.g.

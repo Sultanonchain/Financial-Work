@@ -4428,16 +4428,18 @@ function switchTemplatesTab(name) {
   if (name === "investors" && !_PF_TPL_INVESTORS) {
     loadInvestorRegistry();
   }
+  // Strategy pies need a laid-out (visible) canvas to size against, so build
+  // them only once the Strategies pane is actually shown.  rAF lets the
+  // pane's layout settle after the `hidden` class is removed above.
+  if (name === "strategies") {
+    requestAnimationFrame(buildStrategyPies);
+  }
 }
 
 function renderStrategiesGrid() {
   const grid = $("pfTplStrategiesGrid");
   if (!grid || grid.dataset.rendered === "1") return;
   grid.innerHTML = PF_STRATEGIES.map(s => {
-    const segs = s.allocation.map((a, i) => {
-      const color = getSectorColor(i);
-      return `<div class="pf-tpl__seg" style="width:${a.pct}%; background:${color};" title="${escHtml(a.label)} ${a.pct}%"></div>`;
-    }).join("");
     const legend = s.allocation.map((a, i) => {
       const color = getSectorColor(i);
       return `<span class="pf-tpl__legend-item"><span class="pf-tpl__legend-dot" style="background:${color};"></span>${escHtml(a.label)} · <strong>${a.pct}%</strong> <span class="pf-tpl__legend-tkr">(${escHtml(a.ticker)})</span></span>`;
@@ -4448,7 +4450,7 @@ function renderStrategiesGrid() {
           <div class="pf-tpl__card-name">${escHtml(s.name)}</div>
         </div>
         <p class="pf-tpl__card-blurb">${escHtml(s.blurb)}</p>
-        <div class="pf-tpl__bar">${segs}</div>
+        <div class="pf-tpl__pie-wrap"><canvas id="pfStratPie-${escHtml(s.id)}" aria-label="${escHtml(s.name)} allocation pie chart"></canvas></div>
         <div class="pf-tpl__legend">${legend}</div>
         <button class="copy-btn pf-tpl__apply" data-apply-strategy="${escHtml(s.id)}" type="button">Apply as ETFs</button>
       </div>
@@ -4458,6 +4460,48 @@ function renderStrategiesGrid() {
     btn.onclick = () => applyStrategy(btn.dataset.applyStrategy, btn);
   });
   grid.dataset.rendered = "1";
+}
+
+// One doughnut per strategy card, same look as the portfolio sector pie.
+// Built lazily on first reveal of the Strategies tab (canvas must be visible
+// to size correctly); on re-reveal we just resize the existing instances.
+let _pfStrategyPies = [];
+function buildStrategyPies() {
+  if (typeof Chart === "undefined") return;
+  if (_pfStrategyPies.length) {
+    _pfStrategyPies.forEach(c => { try { c.resize(); } catch {} });
+    return;
+  }
+  PF_STRATEGIES.forEach(s => {
+    const canvas = document.getElementById(`pfStratPie-${s.id}`);
+    if (!canvas) return;
+    const colors = s.allocation.map((_, i) => getSectorColor(i));
+    const chart = new Chart(canvas.getContext("2d"), {
+      type: "doughnut",
+      data: {
+        labels: s.allocation.map(a => a.label),
+        datasets: [{
+          data:            s.allocation.map(a => a.pct),
+          backgroundColor: colors,
+          borderColor:     "#0e131c",
+          borderWidth:     2,
+          hoverOffset:     6,
+        }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, cutout: "58%",
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: "#11151d", borderColor: "rgba(255,255,255,0.08)", borderWidth: 1,
+            titleColor: "#f5f7fa", bodyColor: "#b6bdcb",
+            callbacks: { label: (c) => `${c.label}: ${c.parsed}%` },
+          },
+        },
+      },
+    });
+    _pfStrategyPies.push(chart);
+  });
 }
 
 async function applyStrategy(id, btn) {
@@ -4547,30 +4591,96 @@ async function loadInvestor13F(cik) {
 // #10/#14: fill the VALUS MOS column on a 13F holdings table from the shared
 // valuation source (cached + shared, so the same ticker reads identically to
 // the rest of the app). Coloured by sign like the hero MOS.
+let _PF_MOS_RUN = 0;   // bumps per render so stale in-flight batches don't write
 async function populateInvestor13FMos(holdings) {
   const tickers = [...new Set((holdings || []).filter(h => h.ticker).map(h => h.ticker.toUpperCase()))].slice(0, 30);
   if (!tickers.length) return;
-  const fill = (mapFn) => document.querySelectorAll("[data-mos-cell]").forEach(cell => {
-    const r = mapFn(cell.getAttribute("data-mos-cell"));
-    cell.textContent = r.text;
-    cell.classList.remove("mos-up", "mos-down", "mos-muted");
-    if (r.cls) cell.classList.add(r.cls);
+  const myRun = ++_PF_MOS_RUN;
+
+  // ticker -> { text, cls }; absent means "still computing" (keeps the "…").
+  const results = {};
+  const applyResults = () => {
+    if (myRun !== _PF_MOS_RUN) return;   // a newer fund view took over
+    document.querySelectorAll("[data-mos-cell]").forEach(cell => {
+      const r = results[cell.getAttribute("data-mos-cell")];
+      if (!r) return;
+      cell.textContent = r.text;
+      cell.classList.remove("mos-up", "mos-down", "mos-muted");
+      if (r.cls) cell.classList.add(r.cls);
+    });
+  };
+
+  // Fill the column in small batches run a couple at a time, rather than one
+  // big request.  A single 25-ticker POST can trigger up to a dozen synchronous
+  // DCF + AI computes server-side and blow past the function timeout, which
+  // left every cell stuck at N/A.  Small batches stay well under the limit and
+  // the column fills progressively as each returns.
+  const CHUNK = 5, CONCURRENCY = 2;
+  const batches = [];
+  for (let i = 0; i < tickers.length; i += CHUNK) batches.push(tickers.slice(i, i + CHUNK));
+
+  // Exponential backoff with jitter, honoring an explicit Retry-After floor.
+  const backoff = (attempt, floorMs = 0) => new Promise(res => {
+    const wait = Math.max(floorMs, 500 * Math.pow(2, attempt) + Math.random() * 250);
+    setTimeout(res, wait);
   });
-  try {
-    const resp = await fetch("/api/valuations", {
-      method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tickers }),
-    });
-    const vals = (await resp.json()).valuations || {};
-    fill(tk => {
-      const v = vals[tk];
-      if (!v || !v.reliable || v.mos == null) return { text: "N/A", cls: "mos-muted" };
-      return { text: fmtPct(v.mos), cls: v.mos > 0 ? "mos-up" : (v.mos < 0 ? "mos-down" : "") };
-    });
-  } catch {
-    fill(() => ({ text: "N/A", cls: "mos-muted" }));
-  }
+
+  // Fetch one batch with bounded retries.  A 429 (rate-limit), 5xx, or a
+  // Vercel timeout returns a *resolved* Response — without checking resp.ok we
+  // used to treat those as "no valuation" and burn every cell to a permanent
+  // N/A with no recovery (the very symptom this whole change targets).  Now we
+  // retry transient failures; only after retries are exhausted do we fall back
+  // to N/A (so a cell never hangs on the "…" placeholder either).
+  const fetchBatch = async (batch) => {
+    const MAX_TRIES = 3;
+    for (let attempt = 0; attempt < MAX_TRIES; attempt++) {
+      if (myRun !== _PF_MOS_RUN) return null;   // a newer fund view took over
+      let resp;
+      try {
+        resp = await fetch("/api/valuations", {
+          method: "POST", credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tickers: batch }),
+        });
+      } catch (err) {
+        if (attempt < MAX_TRIES - 1) { await backoff(attempt); continue; }
+        throw err;
+      }
+      if (resp.ok) return (await resp.json().catch(() => ({}))).valuations || {};
+      if ((resp.status === 429 || resp.status >= 500) && attempt < MAX_TRIES - 1) {
+        const ra = Number(resp.headers.get("Retry-After"));
+        await backoff(attempt, Number.isFinite(ra) && ra > 0 ? ra * 1000 : 0);
+        continue;
+      }
+      throw new Error("http " + resp.status);   // non-retryable
+    }
+    throw new Error("retries exhausted");
+  };
+
+  let next = 0;
+  const worker = async () => {
+    while (next < batches.length) {
+      if (myRun !== _PF_MOS_RUN) return;
+      const batch = batches[next++];
+      let vals;
+      try {
+        vals = await fetchBatch(batch);
+        if (vals === null) return;   // cancelled mid-flight
+      } catch (err) {
+        console.warn("[mos] valuation batch failed:", (err && err.message) || err);
+        vals = {};   // exhausted retries → N/A, never leave the cell hanging
+      }
+      if (myRun !== _PF_MOS_RUN) return;
+      batch.forEach(tk => {
+        const v = vals[tk];
+        results[tk] = (!v || !v.reliable || v.mos == null)
+          ? { text: "N/A", cls: "mos-muted" }
+          : { text: fmtPct(v.mos), cls: v.mos > 0 ? "mos-up" : (v.mos < 0 ? "mos-down" : "") };
+      });
+      applyResults();
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, batches.length) }, worker));
 }
 
 function renderInvestor13F(data) {
@@ -4798,7 +4908,25 @@ function openTierModal() {
 }
 
 function closeAllModals() {
+  // If the contact dialog was open, return focus to a visible control on close.
+  // Its trigger lives in the now-hidden account menu (display:none), so fall
+  // back to the avatar rather than stranding focus on an invisible element.
+  const contactWasOpen = !$("contactModal")?.classList.contains("hidden");
   document.querySelectorAll(".modal").forEach(m => m.classList.add("hidden"));
+  if (contactWasOpen) {
+    const av = $("authAvatar");
+    if (av && !av.classList.contains("hidden")) { try { av.focus(); } catch {} }
+  }
+}
+
+function openContactModal() {
+  const m = $("contactModal");
+  if (!m) return;
+  m.classList.remove("hidden");
+  // Move focus into the dialog (role=dialog / aria-modal).  The trigger is
+  // about to be hidden along with the account menu, so don't leave focus on it.
+  const f = $("contactCopyBtn") || m.querySelector(".modal__close");
+  if (f) { try { f.focus(); } catch {} }
 }
 
 function setupModalDismiss() {
@@ -5414,6 +5542,11 @@ const I18N = {
     "menu.terms": "Términos del servicio",
     "menu.contact": "Contacto y soporte",
     "menu.code": "Introducir código de acceso",
+    "contact.title": "Contacto y soporte",
+    "contact.intro": "¿Preguntas, comentarios o un problema con VALUS? Escribe a nuestro equipo: leemos todos los mensajes y respondemos lo antes posible.",
+    "contact.copy": "Copiar correo",
+    "contact.copied": "¡Copiado!",
+    "contact.openMail": "Abrir en la app de correo",
     "menu.signout": "Cerrar sesión",
     "menu.deleteAccount": "Eliminar cuenta",
     "switcher.new": "Nueva cartera…",
@@ -5540,6 +5673,11 @@ const I18N = {
     "menu.terms": "服务条款",
     "menu.contact": "联系与支持",
     "menu.code": "输入访问码",
+    "contact.title": "联系与支持",
+    "contact.intro": "对 VALUS 有疑问、反馈或遇到问题？给我们团队发邮件，我们会阅读每一条消息并尽快回复。",
+    "contact.copy": "复制邮箱",
+    "contact.copied": "已复制！",
+    "contact.openMail": "在邮件应用中打开",
     "menu.signout": "退出登录",
     "menu.deleteAccount": "删除账户",
     "switcher.new": "新建组合…",
@@ -5663,6 +5801,7 @@ function applyI18n(lang) {
   const dict = I18N[lang] || null;
   document.documentElement.lang = lang || "en";
   document.querySelectorAll("[data-i18n]").forEach(el => {
+    if (el.dataset.copied) return;   // don't clobber a transient JS-owned label (e.g. "Copied!")
     if (!_i18nOrig.has(el)) _i18nOrig.set(el, el.textContent);
     el.textContent = (dict && dict[el.dataset.i18n]) || _i18nOrig.get(el);
   });
@@ -6125,6 +6264,38 @@ function setupAuthControl() {
   if (settingsBtn) settingsBtn.onclick = () => {
     if (menu) menu.classList.add("hidden");
     openSettingsModal();
+  };
+  const contactBtn = $("authContactBtn");
+  if (contactBtn) contactBtn.onclick = () => {
+    if (menu) menu.classList.add("hidden");
+    openContactModal();
+  };
+  const contactCopyBtn = $("contactCopyBtn");
+  if (contactCopyBtn) contactCopyBtn.onclick = async () => {
+    const email = "contact@valusfinancial.com";
+    try {
+      await navigator.clipboard.writeText(email);
+    } catch {
+      // Fallback for non-secure contexts / browsers without the async clipboard API.
+      const ta = document.createElement("textarea");
+      ta.value = email;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); } catch {}
+      ta.remove();
+    }
+    // Flag the transient state so a language switch (applyI18n) within the
+    // window doesn't prematurely overwrite "Copied!", and clear any prior
+    // timer so rapid re-clicks don't restore the label early.
+    if (contactCopyBtn._copyTimer) clearTimeout(contactCopyBtn._copyTimer);
+    contactCopyBtn.dataset.copied = "1";
+    contactCopyBtn.textContent = t("contact.copied", "Copied!");
+    contactCopyBtn._copyTimer = setTimeout(() => {
+      delete contactCopyBtn.dataset.copied;
+      contactCopyBtn.textContent = t("contact.copy", "Copy email");
+    }, 1500);
   };
   if (signOutBtn) signOutBtn.onclick = async () => {
     try {

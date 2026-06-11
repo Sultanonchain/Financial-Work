@@ -154,10 +154,10 @@
             <span class="auth-menu__icon"><svg class="ic" aria-hidden="true"><use href="#vi-file"></use></svg></span>
             <span class="auth-menu__label" data-i18n="menu.terms">Terms of Service</span>
           </a>
-          <a class="auth-menu__btn auth-menu__btn--neutral" href="mailto:contact@valusfinancial.com">
+          <button class="auth-menu__btn auth-menu__btn--neutral" id="authContactBtn" type="button">
             <span class="auth-menu__icon"><svg class="ic" aria-hidden="true"><use href="#vi-mail"></use></svg></span>
-            <span class="auth-menu__label" data-i18n="menu.contact">Contact &amp; support</span>
-          </a>
+            <span class="auth-menu__label" data-i18n="menu.contact">Contact &amp; Support</span>
+          </button>
           <button class="auth-menu__btn auth-menu__btn--neutral" id="authCodeBtn" type="button">
             <span class="auth-menu__icon"><svg class="ic" aria-hidden="true"><use href="#vi-key"></use></svg></span>
             <span class="auth-menu__label" data-i18n="menu.code">Enter access code</span>
@@ -754,6 +754,28 @@
         <p class="pf-tpl__intro">Classic allocation playbooks. Click <strong>Apply as ETFs</strong> to one-click populate your portfolio with the mapped funds.</p>
         <div class="pf-tpl__grid" id="pfTplStrategiesGrid"></div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── CONTACT & SUPPORT MODAL ────────────────────────────────────────── -->
+<div class="modal hidden" id="contactModal" role="dialog" aria-modal="true" aria-labelledby="contactModalTitle">
+  <div class="modal__backdrop" data-modal-close></div>
+  <div class="modal__panel contact-modal__panel">
+    <div class="modal__head">
+      <h2 class="modal__title" id="contactModalTitle" data-i18n="contact.title">Contact &amp; Support</h2>
+      <button class="modal__close" data-modal-close aria-label="Close">✕</button>
+    </div>
+    <div class="modal__body">
+      <p class="contact-modal__intro" data-i18n="contact.intro">Questions, feedback, or a problem with VALUS? Email our team, we read every message and reply as soon as we can.</p>
+      <div class="contact-modal__email-row">
+        <a class="contact-modal__email" id="contactEmailLink" href="mailto:contact@valusfinancial.com">contact@valusfinancial.com</a>
+        <button class="copy-btn" id="contactCopyBtn" type="button" data-i18n="contact.copy">Copy email</button>
+      </div>
+      <a class="copy-btn starred contact-modal__mailto" id="contactMailtoBtn" href="mailto:contact@valusfinancial.com">
+        <svg class="ic" aria-hidden="true"><use href="#vi-mail"></use></svg>
+        <span data-i18n="contact.openMail">Open in email app</span>
+      </a>
     </div>
   </div>
 </div>

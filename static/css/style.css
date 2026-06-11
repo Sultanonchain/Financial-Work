@@ -3900,14 +3900,15 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
   color: var(--ink-muted);
   margin: 0;
 }
-.pf-tpl__bar {
-  display: flex;
-  height: 8px;
-  border-radius: 4px;
-  overflow: hidden;
-  background: rgba(255,255,255,0.04);
+/* Strategy allocation doughnut, mirrors the portfolio sector pie. */
+.pf-tpl__pie-wrap {
+  position: relative;
+  width: 140px; height: 140px;
+  align-self: center;
 }
-.pf-tpl__seg { height: 100%; }
+.pf-tpl__pie-wrap canvas {
+  width: 140px !important; height: 140px !important;
+}
 .pf-tpl__legend {
   display: flex; flex-wrap: wrap;
   gap: var(--space-2) var(--space-3);
@@ -3931,6 +3932,30 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
   font-size: 13px;
 }
 .pf-tpl__error { color: #f87171; }
+
+/* Contact & Support modal */
+.contact-modal__panel { max-width: 440px; }
+.contact-modal__intro {
+  font-size: 13px; line-height: 1.6;
+  color: var(--ink-secondary);
+  margin: 0 0 var(--space-4);
+}
+.contact-modal__email-row {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.contact-modal__email {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--ink-primary);
+  text-decoration: none;
+  word-break: break-all;
+}
+.contact-modal__email:hover { text-decoration: underline; }
+.contact-modal__mailto {
+  display: inline-flex; align-items: center; gap: 6px;
+}
 
 .pf-tpl__detail {
   margin-top: var(--space-5);
