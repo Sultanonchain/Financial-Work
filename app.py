@@ -17,6 +17,8 @@ import os
 import hmac
 import math
 import json as _json_top
+import contextlib
+import contextvars
 import xml.etree.ElementTree as ET
 from datetime import datetime, date, timedelta
 from urllib.parse import urlencode, urlparse
@@ -29,6 +31,42 @@ except Exception:
     pass
 
 app = Flask(__name__)
+
+# ── Internal-call marker ──────────────────────────────────────────────────
+# Some endpoints fan out to themselves in-process via app.test_request_context
+# (warm-up, compare, movers, valuations, discovery). Those internal calls must
+# bypass the per-IP/per-user search paywall and skip popularity tracking — but
+# we must NOT trust an inbound HTTP header for that (it would be trivially
+# spoofable by any external client). Instead we use a process-local contextvar
+# that is set only inside the in-process call wrapper below and can never be
+# influenced by a network request.
+_INTERNAL_CALL = contextvars.ContextVar("valus_internal", default=False)
+
+
+@contextlib.contextmanager
+def _internal_call():
+    """Mark the current (in-process) call stack as internal."""
+    tok = _INTERNAL_CALL.set(True)
+    try:
+        yield
+    finally:
+        _INTERNAL_CALL.reset(tok)
+
+
+def _safe_next(u):
+    """Validate an OAuth `next` redirect target so it can only ever point at a
+    local same-origin path. Rejects absolute URLs, scheme-relative `//host`,
+    and the backslash/encoded-backslash variants browsers normalize to `//`."""
+    if not u:
+        return "/"
+    if "\\" in u or "%5c" in u.lower():
+        return "/"
+    if not u.startswith("/") or u.startswith("//"):
+        return "/"
+    p = urlparse(u)
+    if p.scheme or p.netloc:
+        return "/"
+    return u
 
 # ── Static-asset cache-busting ───────────────────────────────────────────
 # main.js / style.css are referenced without a hashed filename, so browsers
@@ -277,9 +315,9 @@ if _STRIPE_CONFIGURED:
 SUBSCRIPTION_KEY_FMT = "valus:plus:{sub}"
 _SUBSCRIPTION_MEM = {}  # local-dev fallback when KV absent
 
-# When ALLOW_TEST_PLUS_OVERRIDE=1, an env-listed comma-separated list of
-# emails is treated as VALUS+ without a real Stripe sub.  Used for early
-# user grants + local QA.
+# VALUS_PLUS_EMAILS: comma-separated emails treated as VALUS+ without a real
+# Stripe sub.  Used for ops grants + local QA.  Leave unset/empty to grant
+# nobody; this list IS the on/off switch (there is no separate gate flag).
 _TEST_PLUS_EMAILS = {
     e.strip().lower() for e in
     (os.environ.get("VALUS_PLUS_EMAILS") or "").split(",")
@@ -339,6 +377,15 @@ def _write_subscription(user_sub, record):
         _SUBSCRIPTION_MEM[user_sub] = dict(record)
     else:
         _SUBSCRIPTION_MEM.pop(user_sub, None)
+
+
+def _sub_period_end(obj):
+    """Read current_period_end from a Stripe Subscription object across API
+    versions: it moved off the top-level Subscription onto each subscription
+    item (items.data[].current_period_end) in 2025-03-31 (Basil) and later.
+    Falls back to the top-level field for older accounts."""
+    items = (obj.get("items") or {}).get("data") or []
+    return (items[0].get("current_period_end") if items else None) or obj.get("current_period_end")
 
 
 def is_valus_plus(user_or_dict):
@@ -6654,6 +6701,13 @@ def stock_page(ticker):
                 "category": "Stock valuation",
                 "provider": {"@type": "Organization", "name": "VALUS"},
             })
+            # company_name is unsanitised third-party (yfinance) data. json.dumps
+            # does NOT escape < > &, so an embedded "</script>" would break out
+            # of the JSON-LD <script> block (stored XSS). Unicode-escape the
+            # dangerous chars; the result stays valid JSON-LD.
+            jsonld = (jsonld.replace("<", "\\u003c")
+                            .replace(">", "\\u003e")
+                            .replace("&", "\\u0026"))
         except Exception:
             jsonld = None
 
@@ -6787,10 +6841,10 @@ def diag_kv():
     expected = os.environ.get("CRON_SECRET")
     if not expected:
         return jsonify({"error": "diagnostics disabled (CRON_SECRET not set)"}), 503
+    # Header-only: a ?secret= query string leaks into access logs, browser
+    # history, and Referer headers.
     auth = request.headers.get("Authorization", "")
-    secret_arg = request.args.get("secret", "") or ""
-    if not (hmac.compare_digest(auth, f"Bearer {expected}") or
-            hmac.compare_digest(secret_arg, expected)):
+    if not hmac.compare_digest(auth, f"Bearer {expected}"):
         return jsonify({"error": "unauthorized"}), 401
 
     info = {"connected": False, "source": None, "ping": False, "rw": False}
@@ -6885,8 +6939,9 @@ def auth_login():
         return jsonify({
             "error": "Google OAuth not configured on this deployment.",
         }), 503
-    # Preserve where to land after OAuth, defaults to root
-    next_url = request.args.get("next", "/")
+    # Preserve where to land after OAuth, defaults to root. Validate up front
+    # so a hostile ?next can never be stored (open-redirect defence).
+    next_url = _safe_next(request.args.get("next", "/"))
     session["auth_next"] = next_url
     redirect_uri = url_for("auth_callback", _external=True)
     return _oauth.google.authorize_redirect(redirect_uri)
@@ -6906,17 +6961,21 @@ def auth_callback():
             userinfo = resp.json() if resp.ok else {}
         if not userinfo.get("sub"):
             return redirect("/?auth_error=no_userinfo")
+        # Only trust the email if the IdP asserts it is verified (some Google
+        # token encodings deliver email_verified as the string "true"). The
+        # `sub` claim is the authoritative identity; an unverified email must
+        # never feed the VALUS+ allow-list / leaderboard owner / Stripe prefill.
+        raw_verified = userinfo.get("email_verified")
+        email_verified = raw_verified is True or str(raw_verified).lower() == "true"
+        email = userinfo.get("email") if email_verified else None
         session["user"] = {
             "sub":     userinfo["sub"],
-            "email":   userinfo.get("email"),
-            "name":    userinfo.get("name") or userinfo.get("email", "").split("@")[0],
+            "email":   email,
+            "name":    userinfo.get("name") or (email or "").split("@")[0] or userinfo["sub"][:8],
             "picture": userinfo.get("picture"),
         }
         session.permanent = True
-        next_url = session.pop("auth_next", "/") or "/"
-        # Sanity: only redirect to relative paths to prevent open-redirect
-        if not next_url.startswith("/") or next_url.startswith("//"):
-            next_url = "/"
+        next_url = _safe_next(session.pop("auth_next", "/"))
         # Insert auth_ok=1 into the query string, NOT into the URL fragment.
         # If the user was on /#leaderboard when they signed in, naive
         # concatenation would produce "/#leaderboard?auth_ok=1" which the
@@ -6943,12 +7002,12 @@ def auth_callback():
         return redirect(f"/?auth_error={reason}")
 
 
-@app.route("/auth/logout", methods=["POST", "GET"])
+@app.route("/auth/logout", methods=["POST"])
 def auth_logout():
-    session.pop("user", None)
-    session.pop("auth_next", None)
-    if request.method == "GET":
-        return redirect("/")
+    # POST-only: a GET logout is CSRF-able via a top-level cross-site
+    # navigation (the Lax cookie is still sent). The frontend already uses POST.
+    # session.clear() also drops the valus_unlimited team-access flag.
+    session.clear()
     return jsonify({"ok": True})
 
 
@@ -6986,6 +7045,7 @@ def account_delete():
             print(f"[valus] account_delete subscription read failed: {e}")
 
     # 2. Per-user KV documents.
+    errors = []
     if _kv:
         for key in (
             PORTFOLIO_KEY_FMT.format(sub=sub),
@@ -6996,6 +7056,7 @@ def account_delete():
             try:
                 removed["kv_keys"] += int(_kv.delete(key) or 0)
             except Exception as e:
+                errors.append(key)
                 print(f"[valus] account_delete kv.delete({key}) failed: {e}")
 
     # 3. In-memory / local-dev mirrors (no-op in KV-backed prod, but keeps
@@ -7023,9 +7084,20 @@ def account_delete():
     except Exception as e:
         print(f"[valus] account_delete leaderboard purge failed: {e}")
 
-    # 5. End the session, the account is gone.
-    session.pop("user", None)
-    session.pop("auth_next", None)
+    # If any per-user KV delete failed, the core erasure is incomplete. Do NOT
+    # clear the session (so the user can retry with the same identity) and do
+    # NOT report success, falsely confirming a GDPR/CCPA erasure.
+    if errors:
+        return jsonify({
+            "ok": False,
+            "deleted": removed,
+            "errors": errors,
+            "detail": "data store unavailable; erasure incomplete, please retry",
+        }), 503
+
+    # 5. End the session, the account is gone. session.clear() also drops the
+    #    valus_unlimited team-access flag so an erased account leaves nothing.
+    session.clear()
 
     return jsonify({"ok": True, "deleted": removed})
 
@@ -7179,14 +7251,16 @@ def stripe_webhook():
                         "status":             sub.get("status") or "active",
                         "customer_id":        cust_id,
                         "subscription_id":    sub_id,
-                        "current_period_end": sub.get("current_period_end"),
+                        "current_period_end": _sub_period_end(sub),
                         "since":              int(time.time()),
                     })
                 except Exception:
-                    # Stripe API blip, still grant access for now; the
-                    # next subscription.updated webhook will reconcile.
+                    # Stripe API blip: do NOT grant "active" without any payment
+                    # confirmation. Write "incomplete" so is_valus_plus won't
+                    # grant access until the next subscription.updated webhook
+                    # reconciles the real status.
                     _write_subscription(user_sub, {
-                        "status":             "active",
+                        "status":             "incomplete",
                         "customer_id":        cust_id,
                         "subscription_id":    sub_id,
                         "current_period_end": None,
@@ -7207,7 +7281,7 @@ def stripe_webhook():
                     "status":             obj.get("status") or "active",
                     "customer_id":        obj.get("customer"),
                     "subscription_id":    obj.get("id"),
-                    "current_period_end": obj.get("current_period_end"),
+                    "current_period_end": _sub_period_end(obj),
                     "cancel_at_period_end": bool(obj.get("cancel_at_period_end")),
                 })
         elif etype == "customer.subscription.deleted":
@@ -7287,7 +7361,7 @@ def subscription_cancel():
             "status":              updated.get("status") or rec.get("status"),
             "cancel_at_period_end": True,
         })
-        return jsonify({"ok": True, "cancels_at": updated.get("current_period_end")})
+        return jsonify({"ok": True, "cancels_at": _sub_period_end(updated)})
     except Exception as e:
         return jsonify({"error": str(e)[:200]}), 500
 
@@ -7858,7 +7932,7 @@ def _check_anon_search_limit(req, ticker: str):
     Counts are keyed to unique TICKERS per day, re-fetching the same ticker
     multiple times in one day is free.  Quota resets at midnight ET.
     """
-    if req.headers.get("X-Valus-Internal") == "1":
+    if _INTERNAL_CALL.get():
         return None
 
     # Team access code (you + your board), unlimited, no account needed.
@@ -8063,9 +8137,8 @@ def api_compare():
     out = {}
     for t in tickers:
         try:
-            with app.test_request_context(
+            with _internal_call(), app.test_request_context(
                 f"/api/analyze?ticker={t}",
-                headers={"X-Valus-Internal": "1"},
             ):
                 resp = analyze()
             if isinstance(resp, tuple):
@@ -8114,9 +8187,8 @@ def api_watchlist_movers():
     # Reuse the existing /api/quote machinery via test_request_context so we
     # benefit from its 30s cache + parallel fetcher.
     try:
-        with app.test_request_context(
+        with _internal_call(), app.test_request_context(
             f"/api/quote?tickers={','.join(tickers)}",
-            headers={"X-Valus-Internal": "1"},
         ):
             resp = quote()
         if isinstance(resp, tuple):
@@ -8173,8 +8245,14 @@ def _ttl_for_ticker(ticker):
         return _market_aware_ttl(_ANALYZE_CACHE_TTL_POPULAR_S)
     return _market_aware_ttl(_ANALYZE_CACHE_TTL_S)
 
+_KEY_PARAMS = ("growth1", "growth2", "terminal", "years")
+
 def _analyze_cache_key(ticker, args):
-    relevant = sorted((k, v) for k, v in args.items() if k != "ticker")
+    # Only compute-affecting params belong in the key. Folding in arbitrary
+    # query args (?fresh, ?_=123, junk) fragmented the cache and let any client
+    # bust/evict it; restrict to the whitelist so plain requests share the
+    # canonical key with the cron/valuations/leaderboard.
+    relevant = sorted((k, args[k]) for k in _KEY_PARAMS if args.get(k) not in (None, ""))
     # Namespace bumped to v2 so cached analyze payloads carrying the old
     # action-word Lynch verdict ("Buy"/"Avoid") are not served after the
     # neutral-label rollout.
@@ -8293,7 +8371,7 @@ def top_picks():
 
     Anonymous-allowed, the homepage Top Picks card row needs this even
     before sign-in.  Internal callers (the daily warm cron) bypass any
-    auth via X-Valus-Internal.
+    auth via the in-process _internal_call() marker.
     """
     now = time.time()
     force_fresh = request.args.get("fresh", "").lower() in ("1", "true", "yes")
@@ -8301,22 +8379,20 @@ def top_picks():
     def _fetch_one(t):
         try:
             ck = _analyze_cache_key(t, {})
-            entry = _ANALYZE_CACHE.get(ck)
             d = None
             cached_at_age = None
-            if entry is not None:
-                ts, payload = entry
-                age = now - ts
-                # Stale-while-revalidate: serve any cached entry by default;
-                # only refetch if expired AND caller passed ?fresh=true.
-                if age < _ANALYZE_CACHE_TTL_S or not force_fresh:
-                    d = payload
-                    cached_at_age = int(age)
+            # Read through the shared accessor so Redis-only entries (other
+            # serverless instances / the cron) are served, and the market-aware
+            # TTL is enforced (no serving of arbitrarily stale entries).
+            if not force_fresh:
+                d = _analyze_cache_get(ck)
+                if d is not None:
+                    # The getter does not expose the stored timestamp.
+                    cached_at_age = None
 
             if d is None:
-                with app.test_request_context(
+                with _internal_call(), app.test_request_context(
                     f"/api/analyze?ticker={t}",
-                    headers={"X-Valus-Internal": "1"},
                 ):
                     resp = analyze()
                 if isinstance(resp, tuple):
@@ -8385,11 +8461,11 @@ def cron_refresh_top_picks():
     # Otherwise anyone could trigger a 25s lambda re-fetching 100+ tickers.
     if not expected:
         return jsonify({"error": "CRON_SECRET not configured on server"}), 500
+    # Header-only (Vercel Cron injects "Authorization: Bearer <CRON_SECRET>").
+    # A ?secret= query string would leak into access logs / Referer headers.
     auth = request.headers.get("Authorization", "")
-    secret_arg = request.args.get("secret", "") or ""
     # Constant-time comparison so the secret can't be recovered by timing.
-    if not (hmac.compare_digest(auth, f"Bearer {expected}") or
-            hmac.compare_digest(secret_arg, expected)):
+    if not hmac.compare_digest(auth, f"Bearer {expected}"):
         return jsonify({"error": "unauthorized"}), 401
 
     started = time.time()
@@ -8404,9 +8480,8 @@ def cron_refresh_top_picks():
             if _kv:
                 try: _kv.delete(ck)
                 except Exception: pass
-            with app.test_request_context(
+            with _internal_call(), app.test_request_context(
                 f"/api/analyze?ticker={t}",
-                headers={"X-Valus-Internal": "1"},
             ):
                 resp = analyze()
             if isinstance(resp, tuple):
@@ -8740,8 +8815,12 @@ def _read_portfolio_record(user_sub):
         if raw:
             try:
                 data = _json.loads(raw)
-            except Exception:
-                data = None
+            except Exception as e:
+                # A non-empty value that won't parse is a data-integrity error,
+                # NOT a "first-ever read".  Surface it as KVUnavailable so the
+                # route returns 503 and the (recoverable) value is preserved
+                # instead of being silently overwritten with an empty seed.
+                raise KVUnavailable(f"kv_get({key}) returned unparseable JSON: {e}")
             if _record_is_v3(data):
                 if _repair_record(data):
                     try:
@@ -8750,7 +8829,19 @@ def _read_portfolio_record(user_sub):
                         raise KVUnavailable(f"kv_set({key}) repair failed: {e}")
                 return data
             if isinstance(data, dict):
-                # v2 single-portfolio shape → migrate + persist.
+                if "portfolios" in data:
+                    # Damaged / future v3 (schema missing/wrong, or written by a
+                    # newer/rolled-back build) → repair, NEVER collapse to one.
+                    if not isinstance(data.get("portfolios"), dict):
+                        data["portfolios"] = {}
+                    _repair_record(data)
+                    data["schema"] = PORTFOLIO_SCHEMA
+                    try:
+                        _kv.set(key, _json.dumps(data))
+                    except Exception as e:
+                        raise KVUnavailable(f"kv_set({key}) repair failed: {e}")
+                    return data
+                # Genuine v2 single-portfolio shape ({items, updated_at}) → migrate.
                 record = _migrate_v2_to_v3(data)
                 try:
                     _kv.set(key, _json.dumps(record))
@@ -8800,6 +8891,15 @@ def _read_portfolio_record(user_sub):
         return raw
     # Legacy in-memory shape: either a list of items (v0/v1) or a v2 dict.
     if isinstance(raw, dict):
+        if "portfolios" in raw:
+            # Damaged / future v3 → repair, NEVER collapse to one.
+            if not isinstance(raw.get("portfolios"), dict):
+                raw["portfolios"] = {}
+            _repair_record(raw)
+            raw["schema"] = PORTFOLIO_SCHEMA
+            _PORTFOLIOS_MEM[user_sub] = raw
+            _persist_local_mem()
+            return raw
         record = _migrate_v2_to_v3(raw)
     elif isinstance(raw, list):
         ts = _PORTFOLIOS_MEM.get(f"{user_sub}__ts")
@@ -8891,14 +8991,22 @@ def portfolio_get():
     user, err = require_user()
     if err: return err
     pid = (request.args.get("pid") or "").strip() or None
+    if pid is not None and not _PF_ID_RE.match(pid):
+        return jsonify({"error": "invalid portfolio id"}), 400
     try:
-        data = _read_user_portfolio(user["sub"], pid=pid)
+        record = _read_portfolio_record(user["sub"])
     except KVUnavailable as e:
         return jsonify({"error": "portfolio store unavailable", "detail": str(e)}), 503
+    # An explicit pid that no longer exists is a client/device-stale error,
+    # NOT a cue to silently serve (and later overwrite) the default portfolio.
+    if pid is not None and pid not in (record.get("portfolios") or {}):
+        return jsonify({"error": "not_found"}), 404
+    target = _resolve_pid(record, pid)
+    p = (record.get("portfolios") or {}).get(target) or {}
     return jsonify({
-        "items":      data["items"],
-        "updated_at": data["updated_at"],
-        "pid":        pid,
+        "items":      p.get("items") or [],
+        "updated_at": p.get("updated_at"),
+        "pid":        target if pid is None else pid,
     })
 
 
@@ -8912,6 +9020,8 @@ def portfolio_save():
     user, err = require_user()
     if err: return err
     pid = (request.args.get("pid") or "").strip() or None
+    if pid is not None and not _PF_ID_RE.match(pid):
+        return jsonify({"error": "invalid portfolio id"}), 400
     body = request.get_json(silent=True) or {}
     raw = body.get("items") or []
     if not isinstance(raw, list):
@@ -8936,7 +9046,23 @@ def portfolio_save():
         })
 
     try:
-        _write_user_portfolio(user["sub"], cleaned, pid=pid)
+        record = _read_portfolio_record(user["sub"])
+        # An explicit pid that no longer exists must NOT silently fall back to
+        # the default portfolio (that would overwrite the wrong portfolio's
+        # holdings). Only resolve to default when pid was omitted entirely.
+        if pid is not None and pid not in (record.get("portfolios") or {}):
+            return jsonify({"error": "not_found"}), 404
+        target = _resolve_pid(record, pid)
+        portfolios = record.setdefault("portfolios", {})
+        p = portfolios.get(target) or {
+            "name":       DEFAULT_PORTFOLIO_NAME,
+            "items":      [],
+            "created_at": _pf_now(),
+        }
+        p["items"]      = cleaned
+        p["updated_at"] = _pf_now()
+        portfolios[target] = p
+        _write_portfolio_record(user["sub"], record)
     except KVUnavailable as e:
         return jsonify({"error": "portfolio store unavailable", "detail": str(e)}), 503
     return jsonify({"ok": True, "count": len(cleaned)})
@@ -9699,10 +9825,11 @@ def leaderboard():
         details = []
         for tk in entry.get("tickers", []):
             ck = _analyze_cache_key(tk, {})
-            ent = _ANALYZE_CACHE.get(ck)
-            if not ent: continue
-            ts, payload = ent
-            if time.time() - ts > _ANALYZE_CACHE_TTL_S: continue
+            # Read through the shared accessor so Redis-only entries (populated
+            # by the cron / another serverless instance) are seen, and the
+            # market-aware TTL is enforced inside the getter.
+            payload = _analyze_cache_get(ck)
+            if not payload: continue
             mos = payload.get("margin_of_safety")
             tier = (payload.get("priced_for") or {}).get("tier")
             details.append({"ticker": tk, "mos": mos, "tier": tier})
@@ -9760,9 +9887,8 @@ def api_valuations():
         if payload is None and fresh_budget > 0:
             fresh_budget -= 1
             try:
-                with app.test_request_context(
+                with _internal_call(), app.test_request_context(
                     f"/api/analyze?ticker={tk}",
-                    headers={"X-Valus-Internal": "1"},
                 ):
                     resp = analyze()
                 if isinstance(resp, tuple):
@@ -9883,7 +10009,7 @@ def analyze():
 
     # Popularity tracking (skip internal cron warm-up calls so trending
     # reflects real user interest, not background refresh).
-    if request.headers.get("X-Valus-Internal") != "1":
+    if not _INTERNAL_CALL.get():
         _track_ticker_search(ticker)
         if _current_user and _current_user.get("sub"):
             _record_recent_ticker(_current_user["sub"], ticker)
@@ -11447,9 +11573,9 @@ def analyze():
             "ccbot", "googleother", "bytespider",
         )
         _ua_is_bot = (not _ua) or any(s in _ua for s in _BOT_UA_SUBSTR)
-        # Internal warmup hits set X-Valus-Internal so the discovery cache
+        # Internal warmup runs inside _internal_call() so the discovery cache
         # still gets primed, those are safe and rate-limited at the source.
-        _is_internal = bool(request.headers.get("X-Valus-Internal"))
+        _is_internal = _INTERNAL_CALL.get()
         lynch_verdict = None
         _tape_for_lynch = None
         if not (_ua_is_bot and not _is_internal):
@@ -12095,9 +12221,8 @@ def _warm_discovery_cache():
                     ck = _analyze_cache_key(t, {})
                     if _analyze_cache_get(ck) is None:
                         try:
-                            with app.test_request_context(
+                            with _internal_call(), app.test_request_context(
                                 f"/api/analyze?ticker={t}",
-                                headers={"X-Valus-Internal": "1"},
                             ):
                                 analyze()
                         except Exception:

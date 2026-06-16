@@ -182,7 +182,7 @@ function setupGradeExplainer() {
     // click (e.g. a Top Picks card or a portfolio row).  The chip
     // visually communicates "this is clickable for explanation"; in
     // wrapped contexts we let the parent's click win to avoid surprise.
-    const wrapper = chip.closest("button, a, [data-pf-pick], [data-wl-open], [data-toppick]");
+    const wrapper = chip.closest("button, a, [data-pf-pick], [data-wl-open], [data-toppick], [data-pf-ticker]");
     if (wrapper && wrapper !== chip && !wrapper.classList.contains("valus-grade")) return;
     e.preventDefault();
     e.stopPropagation();
@@ -308,6 +308,10 @@ async function analyze(ticker, params = {}) {
     // For signed-in users the server already wrote to KV via /api/analyze;
     // anon users get their list from localStorage.  Either way, refresh.
     loadRecentTickers();
+    // Stop any prior stock's 30s live-tick before switching render paths.
+    // renderResults() re-arms it for stocks; the BTC/ETF heroes don't, so
+    // clearing here prevents a stale no-op timer leaking for the page life.
+    if (_ANALYZE_TICK_TIMER) { clearInterval(_ANALYZE_TICK_TIMER); _ANALYZE_TICK_TIMER = null; }
     if (isBTC) {
       renderBTCHero(data);
     } else if (data.is_etf) {
@@ -2104,13 +2108,18 @@ async function renderInsiderCard(ticker) {
       summary.innerHTML =
         `<span class="insider-pill insider-pill--${tone}">${j.filings} Form 4 filing${j.filings === 1 ? "" : "s"} · ${pill}</span>`;
     }
-    list.innerHTML = j.items.slice(0, 6).map(it => `
-      <a class="insider-row" href="${escHtml(it.url || '#')}" target="_blank" rel="noopener">
+    list.innerHTML = j.items.slice(0, 6).map(it => {
+      // Only allow http(s) hrefs; escHtml alone wouldn't neutralize a
+      // javascript:/data: scheme, so gate the scheme before rendering.
+      const safeUrl = /^https?:\/\//i.test(it.url || "") ? it.url : "#";
+      return `
+      <a class="insider-row" href="${escHtml(safeUrl)}" target="_blank" rel="noopener">
         <span class="insider-row__date">${escHtml(it.date)}</span>
         <span class="insider-row__name">Form 4 filing</span>
         <span class="insider-row__role">View ↗</span>
       </a>
-    `).join("");
+    `;
+    }).join("");
     card.hidden = false;
     if (insightsGrid) insightsGrid.classList.remove("hidden");
   } catch {
@@ -3038,7 +3047,12 @@ const PF_ACTIVE_KEY = "valus.active_pid";      // mirror, for fast active-id rea
 
 let _PF_CAP     = 3;       // refreshed from /api/portfolios on sign-in
 let _PF_IS_PLUS = false;
-let _PF_SYNC_TIMER = null;
+// Debounced server writes are keyed BY portfolio id.  A pending write for
+// portfolio A must survive a switch to B (B gets its own timer) so A's edit
+// is never dropped, and the timer body sends the items SNAPSHOT captured at
+// schedule time, never pfRead() at fire time, so a switch can't retarget the
+// write at the wrong portfolio.
+let _PF_SYNC_TIMERS = new Map();   // pid -> timeout handle
 
 function _pfNewLocalId() {
   // 12 hex chars, matches the server format so server-assigned ids can
@@ -3156,20 +3170,33 @@ function pfUpdateBadge() {
 }
 
 // ── Server sync ─────────────────────────────────────────────────────
-function pfSyncToServer() {
+// Immediately POST one portfolio's items.  Both the (pid, items) pair are
+// fixed by the caller, so this can never write the wrong portfolio's items.
+async function pfFlushSync(pid, items) {
+  if (!_ME || !pid) return;
+  _PF_SYNC_TIMERS.delete(pid);
+  try {
+    await fetch(`/api/portfolio?pid=${encodeURIComponent(pid)}`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items }),
+    });
+  } catch (e) { /* offline / transient, local copy still authoritative */ }
+}
+
+function pfSyncToServer(pid) {
   if (!_ME) return;                              // anon → localStorage-only
-  clearTimeout(_PF_SYNC_TIMER);
-  const pid = pfState().active_pid;
-  _PF_SYNC_TIMER = setTimeout(async () => {
-    try {
-      await fetch(`/api/portfolio?pid=${encodeURIComponent(pid)}`, {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items: pfRead() }),
-      });
-    } catch (e) { /* offline / transient, local copy still authoritative */ }
-  }, 600);
+  // Snapshot BOTH the target pid and a deep copy of its items NOW, so a
+  // switch within the 600ms debounce window can neither retarget the write
+  // (cross-portfolio corruption) nor drop it (per-pid timers, not one global).
+  const s = pfState();
+  pid = pid || s.active_pid;
+  const p = s.portfolios[pid];
+  if (!p) return;
+  const snapshot = JSON.parse(JSON.stringify(p.items || []));
+  if (_PF_SYNC_TIMERS.has(pid)) clearTimeout(_PF_SYNC_TIMERS.get(pid));
+  _PF_SYNC_TIMERS.set(pid, setTimeout(() => pfFlushSync(pid, snapshot), 600));
 }
 
 // On sign-in, pull the full server collection and reconcile with local
@@ -3248,7 +3275,18 @@ async function pfPullFromServer() {
     }
 
     // Replace local state with server state, server is canonical now.
-    pfWriteState({ schema: 2, active_pid: defaultPid, portfolios: serverPortfolios });
+    // Preserve the user's current active selection if it still exists on the
+    // server, so a dropped "set default" POST (offline/transient) doesn't
+    // silently revert which portfolio is showing on the next pull.
+    const localActivePid = localState.active_pid;
+    const nextActive = (localActivePid && localActivePid in serverPortfolios)
+      ? localActivePid : defaultPid;
+    pfWriteState({ schema: 2, active_pid: nextActive, portfolios: serverPortfolios });
+
+    // Repaint an already-open portfolio page so a pull (sign-in / refreshMe /
+    // cross-device edit) reflects the canonical holdings without a manual
+    // re-open.  Matches the guard idiom used by create/rename/delete.
+    if (!$("portfolioPage")?.classList.contains("hidden")) renderPortfolioPage();
 
     // Discard the legacy v1 key, its contents are either on the server
     // or have just been merged in.
@@ -3593,7 +3631,9 @@ function wlRead() {
   catch { return []; }
 }
 function wlWrite(items) {
-  localStorage.setItem(WL_KEY, JSON.stringify(items));
+  // Guard storage failures (quota exceeded / Storage disabled) so the click
+  // handlers' UI flip and the server sync still run, mirroring pfWriteState.
+  try { localStorage.setItem(WL_KEY, JSON.stringify(items)); } catch {}
   wlUpdateBadge();
   wlSyncToServer();
 }
@@ -3723,6 +3763,8 @@ function closeWatchlistPage() {
   document.querySelector(".hero")?.classList.remove("hidden");
   if (_LAST_DATA && isBTCTicker(_LAST_DATA.ticker)) {
     $("btcHero")?.classList.remove("hidden");
+  } else if (_LAST_DATA && _LAST_DATA.is_etf) {
+    $("etfHero")?.classList.remove("hidden");
   } else if (_LAST_DATA) {
     $("results")?.classList.remove("hidden");
   }
@@ -3800,10 +3842,17 @@ function setupWatchlistPage() {
 //           verdict, added_at_iso
 function _csvEscape(v) {
   if (v == null) return "";
-  const s = String(v);
-  // RFC 4180: wrap in quotes if it contains comma, quote, newline.
+  let s = String(v);
+  // Neutralize CSV/formula injection: a cell beginning with a formula
+  // trigger (= + - @, tab, CR) is executed by Excel/Sheets on open. Names
+  // and sectors come from upstream (yfinance) data, not us, so prefix a
+  // single-quote to force spreadsheets to treat the cell as text.
+  if (/^[=+\-@\t\r]/.test(s)) {
+    s = "'" + s;
+  }
+  // RFC 4180: wrap in quotes if it contains comma, quote, newline (or tab).
   // Escape internal quotes by doubling.
-  if (/[,"\r\n]/.test(s)) {
+  if (/[,"\r\n\t]/.test(s)) {
     return `"${s.replace(/"/g, '""')}"`;
   }
   return s;
@@ -3812,7 +3861,7 @@ function _csvEscape(v) {
 function _itemsToCsv(items) {
   const header = ["ticker","name","sector","price","fair_value","mos_pct","grade","verdict","added_at_iso"];
   const rows = (items || []).map(it => {
-    const grade = mosToGrade(it.mos) || "";
+    const grade = it.grade || mosToGrade(it.mos) || "";
     const added = (typeof it.addedAt === "number")
       ? new Date(it.addedAt).toISOString()
       : "";
@@ -3971,6 +4020,8 @@ function closePortfolioPage() {
   document.querySelector(".hero")?.classList.remove("hidden");
   if (_LAST_DATA && isBTCTicker(_LAST_DATA.ticker)) {
     $("btcHero").classList.remove("hidden");
+  } else if (_LAST_DATA && _LAST_DATA.is_etf) {
+    $("etfHero")?.classList.remove("hidden");
   } else if (_LAST_DATA) {
     $("results").classList.remove("hidden");
   }
@@ -4001,7 +4052,12 @@ function renderPortfolioPage() {
   if (_PF_SORT === "ticker") {
     items.sort((a, b) => (a.ticker || "").localeCompare(b.ticker || ""));
   } else if (_PF_SORT === "mos") {
-    items.sort((a, b) => (b.mos ?? -Infinity) - (a.mos ?? -Infinity));
+    // Guard the NaN that -Infinity − (−Infinity) yields for two null-MOS
+    // holdings; tie-break alphabetically so the order is deterministic.
+    items.sort((a, b) => {
+      const am = a.mos ?? -Infinity, bm = b.mos ?? -Infinity;
+      return (am === bm ? 0 : bm - am) || (a.ticker || "").localeCompare(b.ticker || "");
+    });
   } else {
     // 'added', most recent first
     items.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
@@ -4017,6 +4073,10 @@ function renderPortfolioPage() {
     $("pfAvgMos").textContent = "N/A";
     $("pfUnderCount").textContent = "0 / 0";
     $("pfBest").textContent = "N/A";
+    // Tear down the pies so their Chart.js instances don't leak while the
+    // cards are hidden (both destroyers are idempotent).
+    destroyAllocationPie();
+    destroyLynchPie();
     return;
   }
   empty.classList.add("hidden");
@@ -4243,6 +4303,9 @@ function renderLynchAllocation(items) {
 }
 
 async function refreshPortfolioPrices() {
+  // Remember which portfolio we're refreshing so a mid-flight switch can't
+  // write portfolio A's prices into portfolio B.
+  const startPid = pfState().active_pid;
   const items = pfRead();
   if (items.length === 0) return;
   // Don't write live values back onto a shared/read-only portfolio view.
@@ -4262,7 +4325,14 @@ async function refreshPortfolioPrices() {
     });
     const d = await r.json().catch(() => ({}));
     const vals = d.valuations || {};
-    const updated = items.map(it => {
+    // Bail out if the user switched portfolios during the fetch.
+    if (pfState().active_pid !== startPid) return;
+    // Merge onto the CURRENT holdings (re-read), not the pre-fetch snapshot,
+    // so an add/remove the user made while the request was in flight is not
+    // reverted: iterating `current` excludes removed tickers and preserves
+    // freshly added ones.
+    const current = pfRead();
+    const updated = current.map(it => {
       const v = vals[it.ticker];
       if (!v) return it;   // not resolvable right now, keep prior snapshot
       return {
@@ -4279,7 +4349,7 @@ async function refreshPortfolioPrices() {
     pfWrite(updated);
     renderPortfolioPage();
   } catch { /* keep existing snapshots on failure */ }
-  if (refreshBtn) refreshBtn.textContent = "↻ Refresh prices";
+  finally { if (refreshBtn) refreshBtn.textContent = "↻ Refresh prices"; }
 }
 
 function setupPortfolioPage() {
@@ -6632,8 +6702,9 @@ function renderLeaderboard(items) {
   list.innerHTML = items.map((entry, idx) => {
     const avg = entry.avg_mos;
     const avgClass = avg == null ? "" : (avg > 5 ? "positive" : (avg < -5 ? "negative" : ""));
-    const tickersStr = (entry.tickers || []).slice(0, 6).join(" · ") +
-                       (entry.tickers.length > 6 ? ` +${entry.tickers.length - 6} more` : "");
+    const tk = entry.tickers || [];
+    const tickersStr = tk.slice(0, 6).join(" · ") +
+                       (tk.length > 6 ? ` +${tk.length - 6} more` : "");
     const isMine = (mySub && entry.user_sub === mySub) ||
                    (myName && entry.name && entry.name.trim().toLowerCase() === myName);
     const isFresh = !isFirstRender && newIds.has(entry.id);
@@ -6824,7 +6895,22 @@ async function refreshAnalyzeTick(ticker) {
     const priceEl = document.getElementById("vPrice");
     if (priceEl) priceEl.textContent = fmtPrice(q.price);
     const pctEl = document.getElementById("vMosPct");
-    if (pctEl && !_LAST_DATA.extreme_mos_flag) pctEl.textContent = fmtPct(newMos);
+    if (pctEl && !_LAST_DATA.extreme_mos_flag) {
+      // Mirror renderHeroVerdict: low/medium-confidence IVs keep their chip
+      // (don't let the tick silently strip the data-provenance warning), and
+      // the sign-colour classes follow the live MOS across a zero-crossing.
+      if (_LAST_DATA.iv_confidence === "low" || _LAST_DATA.iv_confidence === "medium") {
+        const conf = _LAST_DATA.iv_confidence === "low" ? "Low Conf" : "Medium";
+        const tip  = _LAST_DATA.iv_source_label
+          ? `Source: ${_LAST_DATA.iv_source_label}. DCF was unavailable or low-confidence, IV anchored to a fallback method.`
+          : "IV from a fallback method (multiples, analyst target, distressed P/B, etc.).";
+        pctEl.innerHTML = `${fmtPct(newMos)}<span class="mos-confidence-chip" title="${escHtml(tip)}">${conf}</span>`;
+      } else {
+        pctEl.textContent = fmtPct(newMos);
+      }
+      pctEl.classList.toggle("mos-pct--up", newMos > 0);
+      pctEl.classList.toggle("mos-pct--down", newMos < 0);
+    }
     const fillEl = document.getElementById("vMosFill");
     if (fillEl) {
       const cap = Math.min(Math.abs(newMos), 100);
