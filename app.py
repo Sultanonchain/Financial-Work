@@ -435,8 +435,43 @@ def _has_full_access(user_or_dict):
     return is_valus_plus(user_or_dict) or _session_has_team_code()
 
 
-RISK_FREE_RATE   = 0.043   # 10-yr US Treasury proxy (Apr 2025 ~4.3%)
+RISK_FREE_RATE   = 0.043   # 10-yr US Treasury fallback (used if ^TNX fetch fails)
 EQUITY_RISK_PREM = 0.060   # FIN 415 template MRP (6.0%, matches academic standard)
+
+# Live 10-yr risk-free rate, fetched once per day from yfinance ^TNX.
+# ^TNX quotes the 10-yr yield x10 (e.g. 43.0 == 4.30%), so we divide by 100.
+# Cached in-process keyed by date (same lightweight pattern as _fx_cache);
+# clamped to a sanity band and falls back to RISK_FREE_RATE on any failure,
+# so this is safe offline (tests run without network) and never raises.
+_rfr_cache: dict = {}
+
+def get_risk_free_rate() -> float:
+    """Live 10-yr Treasury yield as a decimal (e.g. 0.043), daily-cached.
+    Fetches yfinance ^TNX (quoted x10), divides by 100, clamps to
+    [0.005, 0.10]; falls back to RISK_FREE_RATE if the fetch fails or
+    returns an out-of-band value."""
+    try:
+        key = date.today().isoformat()
+    except Exception:
+        key = "static"
+    if key in _rfr_cache:
+        return _rfr_cache[key]
+    rate = RISK_FREE_RATE
+    try:
+        fi = yf.Ticker("^TNX").fast_info
+        raw = fi.get("lastPrice") or fi.get("regularMarketPrice")
+        if raw is not None:
+            r = float(raw)
+            # ^TNX may surface as a percent (e.g. 4.50) or the legacy x10 index
+            # (e.g. 45.0); normalize either to a decimal yield.
+            r = r / 1000.0 if r > 20 else r / 100.0
+            # NaN fails this comparison, so a bad feed degrades to the fallback.
+            if 0.005 <= r <= 0.10:
+                rate = r
+    except Exception:
+        pass
+    _rfr_cache[key] = rate
+    return rate
 
 # FX rate cache (in-memory, lives for the process lifetime, good enough for a session)
 _fx_cache: dict = {}
@@ -971,9 +1006,9 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
                           quality_metrics, risk_labels, catalyst_labels,
                           confidence_weaknesses, iv_confidence,
                           strategic_info, priced_for_label,
-                          tape_signals=None):
+                          tape_signals=None, info=None):
     """
-    Per-ticker Lynch-flavored verdict via Claude Haiku.
+    Per-ticker Lynch-flavored verdict via Claude Sonnet.
     Returns dict or None on failure / no API key.
     """
     global _ANTHROPIC_COOLDOWN_UNTIL
@@ -992,14 +1027,14 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
     # Within an epoch, the verdict is frozen so live-price ticks don't burn
     # API credits or cause the Lynch card to flap.
     epoch = _market_epoch()
-    # Cache namespace is versioned (…:v2:…) so the neutral-label rollout
-    # supersedes any entries cached under the old action-word vocabulary
-    # rather than serving stale "Buy"/"Avoid" verdicts for up to 5 days.
-    bucket = (ticker.upper(), epoch, "v3")
+    # Cache namespace is versioned so a prompt/model change supersedes entries
+    # cached under the old version rather than serving stale verdicts for up to
+    # 5 days.  Bumped to v4 for the Sonnet upgrade + valuation-numerics prompt.
+    bucket = (ticker.upper(), epoch, "v4")
     cached = _LYNCH_CACHE.get(bucket)
     if cached and (time.time() - cached[0]) < _LYNCH_CACHE_TTL:
         return cached[1]
-    redis_key = f"valus:lynch:v3:{bucket[0]}:{epoch}"
+    redis_key = f"valus:lynch:v4:{bucket[0]}:{epoch}"
     if _kv:
         try:
             raw = _kv.get(redis_key)
@@ -1137,7 +1172,32 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         snap_extra += f"  Quality scorecard:\n{qm_block}\n"
         snap_extra += f"  Catalyst headlines: {catalysts_block}\n"
         snap_extra += f"  Risk headlines: {risks_block}\n"
-        snap_extra += f"  Confidence weaknesses: {weak_block}\n\n"
+        snap_extra += f"  Confidence weaknesses: {weak_block}\n"
+
+        # VALUATION & GROWTH: the numerics the Lynch heuristics above ask for
+        # (PEG, P/E, yield, payout, growth, size).  Sourced from the live info
+        # dict; each line is omitted when the field is missing so thinly-
+        # covered names stay clean.  Same None-handling style as the tape block.
+        _inf = info or {}
+        _peg     = safe(_inf.get("pegRatio"))
+        _pe_ttm  = safe(_inf.get("trailingPE"))
+        _pe_fwd  = safe(_inf.get("forwardPE"))
+        _mcap    = safe(_inf.get("marketCap"))
+        _payout  = safe(_inf.get("payoutRatio"))
+        _rev_g   = safe(_inf.get("revenueGrowth"))
+        _earn_g  = safe(_inf.get("earningsGrowth"))
+        _div_y   = safe(_inf.get("trailingAnnualDividendYield")) or safe(_inf.get("dividendYield"))
+        if _div_y is not None and _div_y > 0.30:
+            _div_y = _div_y / 100   # Yahoo sometimes returns yield as a percent
+        if _peg    is not None: snap_extra += f"  PEG ratio: {_peg:.2f}\n"
+        if _pe_ttm is not None: snap_extra += f"  P/E (trailing): {_pe_ttm:.1f}\n"
+        if _pe_fwd is not None: snap_extra += f"  P/E (forward): {_pe_fwd:.1f}\n"
+        if _rev_g  is not None: snap_extra += f"  Revenue growth (YoY): {_rev_g*100:+.1f}%\n"
+        if _earn_g is not None: snap_extra += f"  Earnings growth (YoY): {_earn_g*100:+.1f}%\n"
+        if _div_y  is not None: snap_extra += f"  Dividend yield: {_div_y*100:.2f}%\n"
+        if _payout is not None: snap_extra += f"  Payout ratio: {_payout*100:.1f}%\n"
+        if _mcap   is not None: snap_extra += f"  Market cap: ${_mcap/1e9:.1f}B\n"
+        snap_extra += "\n"
 
         instructions = (
             "Return ONLY a single-line JSON object with these keys (no prose):\n"
@@ -1174,9 +1234,10 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         full_prompt = prompt + snap_extra + instructions
 
         body = {
-            "model":      "claude-haiku-4-5-20251001",
-            "max_tokens": 700,
-            "messages":   [{"role": "user", "content": full_prompt}],
+            "model":       "claude-sonnet-4-6",
+            "max_tokens":  700,
+            "temperature": 0,
+            "messages":    [{"role": "user", "content": full_prompt}],
         }
         # 429 (rate limit) / 529 (overloaded) resilience: retry once after a
         # short backoff, and if it still fails set a global cooldown so we
@@ -1211,14 +1272,28 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         for block in data.get("content", []):
             if block.get("type") == "text":
                 txt += block.get("text", "")
-        # Match the outermost JSON object, the model occasionally wraps in prose
-        m = re.search(r"\{.*\}", txt, re.DOTALL)
-        if not m:
+        import json as _json_loads
+        # Robust parse: temperature=0 makes the model emit clean JSON, but stay
+        # defensive — strip any ```json fences, try the whole string, then fall
+        # back to the outermost {...} span before giving up.
+        cleaned = txt.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+            cleaned = re.sub(r"\s*```$", "", cleaned).strip()
+        parsed = None
+        try:
+            parsed = _json_loads.loads(cleaned)
+        except Exception:
+            m = re.search(r"\{.*\}", cleaned, re.DOTALL)
+            if m:
+                try:
+                    parsed = _json_loads.loads(m.group(0))
+                except Exception:
+                    parsed = None
+        if not isinstance(parsed, dict):
             print(f"[valus] lynch {ticker}: no JSON object in model reply, "
                   f"{txt[:200]!r}")
             return None
-        import json as _json_loads
-        parsed = _json_loads.loads(m.group(0))
 
         _VALID_CATS = {"slowGrower", "stalwart", "fastGrower",
                        "cyclical", "turnaround", "assetPlay"}
@@ -1309,7 +1384,7 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
             "dcf_tweaks":         dcf_tweaks_out,
             "as_of_epoch":        epoch,
             "as_of_label":        _market_epoch_label(epoch),
-            "model":              "claude-haiku-4-5-20251001",
+            "model":              "claude-sonnet-4-6",
         }
         _LYNCH_CACHE[bucket] = (time.time(), result)
         if _kv:
@@ -3398,7 +3473,7 @@ def calc_wacc(info, income_stmt, tax_rate=0.21, fx_rate=1.0):
     if beta_raw is None or np.isnan(beta_raw):
         beta_raw = _default_beta(info.get("sector",""), info.get("industry",""))
     beta = float(min(max(beta_raw, 0.3), 3.0))
-    coe  = RISK_FREE_RATE + beta * EQUITY_RISK_PREM
+    coe  = get_risk_free_rate() + beta * EQUITY_RISK_PREM
 
     # Cost of debt: interest expense / total debt (both in reporting ccy, ratio is neutral)
     cod = 0.05
@@ -10215,6 +10290,11 @@ def analyze():
         # the scenario analysis (institutional floor) and the multiples fallback.
         inc_ttm = get_income_stmt_ttm(stock)
         rev_ttm = inc_ttm.get("Total Revenue") or safe(info.get("totalRevenue"))
+        # Revenue in TRADING currency, for ratios against the already-USD-converted
+        # base_fcf (FCF margin). rev_ttm itself stays in REPORTING currency so the
+        # same-currency margins below (gross/operating/net) and the structural-
+        # transformer capex/revenue ratio remain correct.
+        rev_ttm_usd = (rev_ttm * fx_rate) if rev_ttm else rev_ttm
         cogs_ttm = inc_ttm.get("Cost Of Revenue")
         gp_ttm = inc_ttm.get("Gross Profit")
         oi_ttm = inc_ttm.get("Operating Income")
@@ -10783,7 +10863,7 @@ def analyze():
                 # ── Legacy dynamic FCF quality weights (fallback) ─────────────
                 scenario_net_debt = bal_data["total_debt"] - bal_data["total_cash"]
                 _neg_fcf_yrs  = sum(1 for f in fcf_series if f < 0) if fcf_series else 0
-                _fcf_margin_q = (base_fcf / rev_ttm * 100) if base_fcf and rev_ttm and rev_ttm > 0 else 10.0
+                _fcf_margin_q = (base_fcf / rev_ttm_usd * 100) if base_fcf and rev_ttm_usd and rev_ttm_usd > 0 else 10.0
                 if _neg_fcf_yrs >= 2 or _fcf_margin_q < 3.0:
                     _w_base, _w_bull, _w_bear = 0.45, 0.15, 0.40
                     _scenario_weight_note = "bear-skewed (low FCF quality)"
@@ -10991,10 +11071,10 @@ def analyze():
             if intrinsic_value and price:
                 margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
 
-        # ── Consensus Anchor ──────────────────────────────────────────────────
-        # If VALUS IV is >30% above analyst mean target, blend 70% model + 30%
-        # consensus.  This grounds the output when the model runs ahead of
-        # sell-side estimates due to near-term uncertainty the DCF cannot capture.
+        # ── Sultan Split (Consensus Anchor) ───────────────────────────────────
+        # Unconditionally blend 90% VALUS model IV + 10% analyst mean target
+        # whenever a positive analyst target exists.  The model keeps primacy;
+        # the Street view acts only as a gentle anchor (see _analyst_alignment_check).
         consensus_anchor_pre_iv = None   # original IV before anchor blending
         if intrinsic_value is not None:
             intrinsic_value, analyst_adjusted, consensus_anchor_pre_iv = \
@@ -11002,13 +11082,12 @@ def analyze():
             if analyst_adjusted and price:
                 margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
 
-        # ── Scenario Sync after Consensus Anchor ──────────────────────────────
-        # When the anchor fired, propagate the same 70/30 blend to each scenario
-        # case individually so that the Scenario Analysis cards and the
-        # Bear/Base/Bull toggle always display consistent, anchored numbers.
-        # Base → synced to the final intrinsic_value (anchored weighted IV)
-        # Bull → individually anchored (almost always above the 30% threshold)
-        # Bear → individually anchored only if it too exceeds the threshold
+        # ── Scenario Sync after Sultan Split ──────────────────────────────────
+        # When the Sultan Split fired on the headline IV, keep the Scenario
+        # Analysis cards and the Bear/Base/Bull toggle consistent with it.
+        # Base → synced to the final intrinsic_value (post-split headline IV)
+        # Bull → individually anchored 70/30 only when it runs >30% above target
+        # Bear → individually anchored 70/30 only if it too exceeds the threshold
         #        (conservative bear cases typically fall below it, left intact)
         if analyst_adjusted and scenarios and analyst_target_price:
             _at = float(analyst_target_price)
@@ -11580,7 +11659,7 @@ def analyze():
         _tape_for_lynch = None
         if not (_ua_is_bot and not _is_internal):
             try:
-                _qm_for_lynch = _build_quality_metrics(info, base_fcf, rev_ttm)
+                _qm_for_lynch = _build_quality_metrics(info, base_fcf, rev_ttm_usd)
                 _tape_for_lynch = _build_tape_signals(info, hist)
                 lynch_verdict = _claude_lynch_verdict(
                     ticker                 = ticker,
@@ -11599,6 +11678,7 @@ def analyze():
                     strategic_info         = strategic,
                     priced_for_label       = (priced_for or {}).get("label") if priced_for else None,
                     tape_signals           = _tape_for_lynch,
+                    info                   = info,
                 )
             except Exception:
                 lynch_verdict = None
@@ -11848,7 +11928,7 @@ def analyze():
         mcap = safe(info.get("marketCap"), 0) or 0
         fcf_for_yield = base_fcf or (fcf_series[0] if fcf_series else None)
         fcf_yield   = round(fcf_for_yield / mcap * 100, 2) if fcf_for_yield and mcap > 0 else None
-        rev_total   = rev_ttm  # Use TTM revenue for margin
+        rev_total   = rev_ttm_usd  # Use TTM revenue (trading ccy) for margin vs USD FCF
         fcf_margin  = round(fcf_for_yield / rev_total * 100, 1) if fcf_for_yield and rev_total else None
 
         def pct(v):
@@ -12147,11 +12227,11 @@ def analyze():
             # post-search insight cards (no extra API calls).
             "fifty_two_week_high":       safe(info.get("fiftyTwoWeekHigh")),
             "fifty_two_week_low":        safe(info.get("fiftyTwoWeekLow")),
-            "quality_metrics": _build_quality_metrics(info, base_fcf, rev_ttm),
+            "quality_metrics": _build_quality_metrics(info, base_fcf, rev_ttm_usd),
             # ── New intelligence overlays (Phase 1+2 additions) ───────────
             # Each is null-safe, the UI skips the card when data is missing.
             "quality_score":      _composite_quality_score(
-                _build_quality_metrics(info, base_fcf, rev_ttm)
+                _build_quality_metrics(info, base_fcf, rev_ttm_usd)
             ),
             "moat_breakdown":     _moat_breakdown(
                 net_margin_ttm, rev_growth_pct, earn_growth_pct,
@@ -12168,8 +12248,8 @@ def analyze():
                 sector_label=(sector or "the sector"),
             ),
             "buffett_checklist":  _buffett_checklist(
-                info, _build_quality_metrics(info, base_fcf, rev_ttm),
-                base_fcf, rev_ttm,
+                info, _build_quality_metrics(info, base_fcf, rev_ttm_usd),
+                base_fcf, rev_ttm_usd,
             ),
             "earnings_quality":   _earnings_quality_signal(info, base_fcf),
             "momentum_overlay":   _momentum_overlay(hist),
