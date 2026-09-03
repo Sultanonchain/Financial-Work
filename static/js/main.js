@@ -4,25 +4,29 @@
 
 const $ = (id) => document.getElementById(id);
 
+// Shown wherever a number is genuinely unavailable.  Every formatter below
+// used to return ", ", which rendered as a lone comma next to real values.
+const NA = "N/A";
+
 const escHtml = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
 }[c]));
 
 const fmt = (n, d = 2) => {
-  if (n == null || isNaN(n)) return ", ";
+  if (n == null || isNaN(n)) return NA;
   return Number(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
 };
 
-const fmtPrice = (n) => n == null || isNaN(n) ? ", " : `$${fmt(n, 2)}`;
+const fmtPrice = (n) => n == null || isNaN(n) ? NA : `$${fmt(n, 2)}`;
 
 const fmtPct = (n, d = 1) => {
-  if (n == null || isNaN(n)) return ", ";
+  if (n == null || isNaN(n)) return NA;
   const sign = n > 0 ? "+" : "";
   return `${sign}${fmt(n, d)}%`;
 };
 
 const fmtBig = (n) => {
-  if (n == null || isNaN(n)) return ", ";
+  if (n == null || isNaN(n)) return NA;
   const abs = Math.abs(n);
   if (abs >= 1e12) return `$${fmt(n / 1e12, 2)}T`;
   if (abs >= 1e9)  return `$${fmt(n / 1e9, 2)}B`;
@@ -31,7 +35,7 @@ const fmtBig = (n) => {
   return `$${fmt(n, 2)}`;
 };
 
-const fmtX = (n) => n == null ? ", " : `${fmt(n, 1)}×`;
+const fmtX = (n) => n == null ? NA : `${fmt(n, 1)}×`;
 
 // VALUS icon helper — returns inline SVG that references the sprite defined
 // at the top of index.html (see #vi-* symbols).  Replaces the old colour
@@ -969,7 +973,10 @@ function renderHeroInsights(d) {
     confEl.textContent = label;
     confEl.className = `hero-insight__value conf-${conf}`;
     const reason = (d.dcf_confidence_warnings || [])[0];
-    confHint.textContent = reason ? reason.split(/[, -]/)[0].trim().slice(0, 60) : "";
+    // Show the whole warning.  This used to split on /[, -]/ and take index 0,
+    // so "Thin FCF margin (2.1%), a 1pp change in WACC moves IV +/-25%"
+    // rendered as the single word "Thin".
+    confHint.textContent = reason ? String(reason).trim() : "";
     confWrap.hidden = false;
   } else {
     confWrap.hidden = true;
@@ -1289,7 +1296,7 @@ function activateScenarioVisual(which) {
 
 function fmtMethodValue(s) {
   const v = s.value;
-  if (v == null) return ", ";
+  if (v == null) return NA;
   switch (s.format) {
     case "currency_b": return fmtBig(v);
     case "currency":   return fmtPrice(v);
@@ -1430,8 +1437,8 @@ function renderScenarios(d) {
           <span class="sc-card__label">${m.label}</span>
           <span class="sc-card__weight">${w}% weight</span>
         </div>
-        <div class="sc-card__value ${m.valClass}">${v != null ? fmtPrice(v) : ", "}</div>
-        <div class="sc-card__delta">${upside != null ? fmtPct(upside) + " vs current" : ", "}</div>
+        <div class="sc-card__value ${m.valClass}">${v != null ? fmtPrice(v) : NA}</div>
+        <div class="sc-card__delta">${upside != null ? fmtPct(upside) + " vs current" : NA}</div>
         <div class="sc-card__bar"><div class="sc-card__bar-fill" style="--bar-width: ${barW}%; width: ${barW}%;"></div></div>
         <div class="sc-card__case">${escHtml(m.case)}</div>
         <div class="sc-card__assumptions">${s1}${wacc}</div>
@@ -2739,7 +2746,7 @@ function renderDcfChart(fcfData) {
         : "N/A";
       dyDiscNote.textContent =
         `Discount factor: 1 / (1 + ${fmt(wacc, 1)}%)^${y} = ${fmt(1 / discFactor, 4)} · ` +
-        `Year-${y} growth applied: ${g != null ? fmt(g * 100, 1) + "%" : ", "}`;
+        `Year-${y} growth applied: ${g != null ? fmt(g * 100, 1) + "%" : NA}`;
 
       // Slider-fill % for the colored runnable track
       const pct = ((y - 1) / Math.max(labels.length - 1, 1)) * 100;
@@ -2914,7 +2921,7 @@ async function renderFinancialsTabs(d) {
         // Section header row, visually distinct
         return `<tr class="fin-section-row"><td colspan="${1 + headers.length}" style="text-align:left; padding-top: 14px; color: var(--accent); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; font-size: 11px;">${escHtml(r.label)}</td></tr>`;
       }
-      return `<tr><td style="text-align:left">${escHtml(r.label)}</td>${(r.values || []).map(v => `<td>${v == null ? ", " : fmtBig(v)}</td>`).join("")}</tr>`;
+      return `<tr><td style="text-align:left">${escHtml(r.label)}</td>${(r.values || []).map(v => `<td>${v == null ? NA : fmtBig(v)}</td>`).join("")}</tr>`;
     }).join("");
     body.innerHTML = headerRow + bodyRows;
   }
@@ -4090,7 +4097,7 @@ function renderPortfolioPage() {
       <div class="pf-item" data-pf-ticker="${escHtml(it.ticker)}">
         <span class="pf-item__ticker">${escHtml(it.ticker)}</span>
         <span class="pf-item__name">${escHtml(it.name || "")}</span>
-        <span class="pf-item__price">${it.price != null ? fmtPrice(it.price) : ", "}</span>
+        <span class="pf-item__price">${it.price != null ? fmtPrice(it.price) : NA}</span>
         <span class="pf-item__grade-cell">${itemGradeChip(it)}</span>
         <button class="pf-item__remove" data-pf-remove="${escHtml(it.ticker)}" aria-label="Remove">✕</button>
       </div>
@@ -4944,15 +4951,15 @@ function openTierModal() {
     <div class="tg-current__numbers">
       <div class="tg-num">
         <span class="tg-num__label">Margin of safety</span>
-        <span class="tg-num__value">${mos != null ? fmtPct(mos) : ", "}</span>
+        <span class="tg-num__value">${mos != null ? fmtPct(mos) : NA}</span>
       </div>
       <div class="tg-num">
         <span class="tg-num__label">Fair value</span>
-        <span class="tg-num__value">${iv != null ? fmtPrice(iv) : ", "}</span>
+        <span class="tg-num__value">${iv != null ? fmtPrice(iv) : NA}</span>
       </div>
       <div class="tg-num">
         <span class="tg-num__label">Sector ceiling</span>
-        <span class="tg-num__value">${ceil != null ? `${ceil}% (${escHtml(ceilLbl || "N/A")})` : ", "}</span>
+        <span class="tg-num__value">${ceil != null ? `${ceil}% (${escHtml(ceilLbl || "N/A")})` : NA}</span>
       </div>
     </div>
   `;
@@ -6147,7 +6154,7 @@ function setupCompareModal() {
   // Format a market-cap number into a compact $1.23T / $456B / $7.8B / $123M.
   // Falls back to plain dollars under $1M (rare in this app, but defensive).
   function fmtMktCap(v) {
-    if (v == null || !Number.isFinite(v)) return ", ";
+    if (v == null || !Number.isFinite(v)) return NA;
     const abs = Math.abs(v);
     if (abs >= 1e12) return `$${fmt(v / 1e12, 2)}T`;
     if (abs >= 1e9)  return `$${fmt(v / 1e9,  2)}B`;
@@ -6721,7 +6728,7 @@ function renderLeaderboard(items) {
         </div>
         <div class="lb-stat">
           <span class="lb-stat__label">Avg MOS</span>
-          <span class="lb-stat__value ${avgClass}">${avg != null ? fmtPct(avg) : ", "}</span>
+          <span class="lb-stat__value ${avgClass}">${avg != null ? fmtPct(avg) : NA}</span>
         </div>
         <div class="lb-stat">
           <span class="lb-stat__label">Underv.</span>
@@ -6984,8 +6991,8 @@ function renderSharedList(items) {
       <div class="pf-item" data-pf-ticker="${escHtml(it.ticker)}">
         <span class="pf-item__ticker">${escHtml(it.ticker)}</span>
         <span class="pf-item__name">${escHtml(it.name || "")}</span>
-        <span class="pf-item__price">${it.price != null ? fmtPrice(it.price) : ", "}</span>
-        <span class="pf-item__mos ${mosClass}">${it.mos != null ? fmtPct(it.mos) : ", "}</span>
+        <span class="pf-item__price">${it.price != null ? fmtPrice(it.price) : NA}</span>
+        <span class="pf-item__mos ${mosClass}">${it.mos != null ? fmtPct(it.mos) : NA}</span>
       </div>
     `;
   }).join("");

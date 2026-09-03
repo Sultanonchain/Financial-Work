@@ -4809,7 +4809,7 @@ def run_fin415_fcfe(
     revenue_base, cogs_base, fixed_costs_base, da_base, amort_base,
     ppe_base, ltd_base, interest_rate, tax_rate, shares,
     rev_growths,      # list[float] length=yrs, one rate per year
-    cogs_growth,      # float, applied uniformly (COGS/rev margin management)
+    cogs_growth,      # float | list[float], COGS growth (per-year, see _at())
     fc_growth,        # float, operating leverage: fixed costs grow slower than rev
     da_growth,        # float, D&A tracks capex intensity
     amort_growth,     # float, amortization (usually slow/flat)
@@ -4818,6 +4818,7 @@ def run_fin415_fcfe(
     ke,               # float, cost of equity (CAPM discount rate)
     tgr,              # float, terminal growth rate
     yrs=10,
+    max_op_margin=None,   # float | None, ceiling on projected operating margin
 ):
     """
     FIN 415 bottom-up FCFE DCF, exact cell-by-cell logic from the Excel NPV tab.
@@ -4843,16 +4844,39 @@ def run_fin415_fcfe(
     fcfe_rows = []
     total_pv  = 0.0
 
+    def _at(v, year):
+        """Growth inputs may be a flat scalar or a per-year sequence.
+
+        Cost lines have to be able to step down when revenue steps down from
+        Stage 1 to Stage 2, otherwise costs compound at the Stage 1 rate for
+        all ten years while revenue slows, and operating margin collapses into
+        a negative terminal value on any high-growth company.
+        """
+        if isinstance(v, (list, tuple)):
+            return v[min(year - 1, len(v) - 1)]
+        return v
+
     for y in range(1, yrs + 1):
         g_rev = rev_growths[y - 1]
 
         # Income statement projections
         rev   = rev   * (1 + g_rev)
-        cogs  = cogs  * (1 + cogs_growth)
-        fc    = fc    * (1 + fc_growth)
-        da    = da    * (1 + da_growth)
-        amort = amort * (1 + amort_growth)
+        cogs  = cogs  * (1 + _at(cogs_growth,  y))
+        fc    = fc    * (1 + _at(fc_growth,    y))
+        da    = da    * (1 + _at(da_growth,    y))
+        amort = amort * (1 + _at(amort_growth, y))
         ebit  = rev - cogs - fc - da
+
+        # Operating-margin ceiling.  The cost ratios expand margin every single
+        # year, so an unconstrained ten-year run drifts to margins almost no
+        # real company sustains.  Cap it, and push the excess back into COGS so
+        # the cost base carries forward consistently instead of the cap being
+        # silently re-breached next year.
+        if max_op_margin is not None and rev > 0:
+            _ceiling = rev * max_op_margin
+            if ebit > _ceiling:
+                cogs += ebit - _ceiling
+                ebit  = _ceiling
 
         # Debt / interest
         interest   = ltd * interest_rate          # interest on beginning-of-year LTD
@@ -4860,20 +4884,32 @@ def run_fin415_fcfe(
 
         # CapEx (net fixed asset change)
         beg_ppe   = ppe
-        ppe       = ppe * (1 + ppe_growth)
+        ppe       = ppe * (1 + _at(ppe_growth, y))
         net_capex = (ppe - beg_ppe) + da          # mirrors Excel: EndPPE − BegPPE + DA
 
         # Debt change
         beg_ltd    = ltd
-        ltd        = ltd * (1 + ltd_growth)
+        ltd        = ltd * (1 + _at(ltd_growth, y))
         delta_debt = ltd - beg_ltd                # positive = new borrowing
 
-        # FCFE, FIN 415 NPV tab formula (row 25)
-        fcfe = (ebit
-                - net_capex
+        # FCFE = net income + non-cash charges - gross capex + net new borrowing.
+        #
+        # Two corrections vs the original Excel transcription:
+        #   1. Taxes are actually subtracted.  `taxes` was computed above and
+        #      then dropped, while the interest tax shield was still taken, so
+        #      the model paid no tax on operating profit.  That overstated fair
+        #      value by roughly a third for a typical profitable company.
+        #   2. `amort` is no longer added back.  It is never charged in `ebit`
+        #      (line above: rev - cogs - fc - da), and `da` is read from the
+        #      "Depreciation And Amortization" line, which already includes it.
+        #      Adding it back was free cash flow from nowhere.
+        #
+        # `net_capex` is gross fixed-asset spend (EndPPE - BegPPE + DA), so
+        # `+ da - net_capex` correctly nets to the change in net PPE.
+        net_income = ebit - interest - taxes
+        fcfe = (net_income
                 + da
-                + amort
-                - interest * (1 - tax_rate)
+                - net_capex
                 + delta_debt)
 
         pv        = fcfe / ((1 + ke) ** y)
@@ -10057,19 +10093,41 @@ def dcf_recompute():
     except Exception as e:
         return jsonify({"error": "dcf_failed", "detail": str(e)}), 500
 
-    if iv is None or not math.isfinite(iv):
-        return jsonify({"iv": None, "mos": None, "base_iv": basis.get("base_iv")})
+    # `scale` bridges the pure run_dcf_single value this endpoint recomputes and
+    # the value actually displayed on the page (FIN 415 + sector/consensus
+    # overlays).  Without it the slider answers a question about a number the
+    # user cannot see.  It arrives in the client-supplied basis, so bound it.
+    scale      = _num(basis.get("scale"), lo=0.05, hi=20) or 1.0
+    display_iv = _num(basis.get("display_iv"), lo=0)
+    base_out   = display_iv if display_iv is not None else basis.get("base_iv")
 
-    iv_r = round(float(iv), 2)
+    if iv is None or not math.isfinite(iv):
+        return jsonify({"iv": None, "mos": None, "base_iv": base_out, "scale": scale})
+
+    iv_r = round(float(iv) * scale, 2)
     mos  = None
     px   = _num(price, lo=0.0001)
     if px:
         mos = round((iv_r - px) / px * 100, 2)
-    return jsonify({"iv": iv_r, "mos": mos, "base_iv": basis.get("base_iv")})
+    return jsonify({
+        "iv":       iv_r,
+        "mos":      mos,
+        "base_iv":  base_out,
+        "scale":    scale,
+        "pure_iv":  round(float(iv), 2),   # unscaled run_dcf_single result
+    })
 
 
 @app.route("/api/analyze")
-@limiter.limit(limit_analyze)
+# exempt_when: every internal self-dispatch of analyze() runs inside
+# app.test_request_context(), which has no client IP, so _rate_limit_key()
+# collapsed them all onto one anonymous "ip:127.0.0.1" bucket capped at
+# 10/minute.  Portfolio and Investor Hub MOS columns, /api/compare and the
+# homepage Top Picks all fan out through here, so any one of them could
+# exhaust the shared bucket and blank out the others.  The five internal
+# call sites already wrap themselves in _internal_call(), and the daily
+# search-limit gate already honours it -- the limiter just never did.
+@limiter.limit(limit_analyze, exempt_when=lambda: _INTERNAL_CALL.get())
 def analyze():
     ticker = request.args.get("ticker", "").strip().upper()
     if not ticker:
@@ -10771,12 +10829,44 @@ def analyze():
             if fin415_inputs and dcf_available:
                 # Year-by-year revenue growth: Stage 1 for first half, Stage 2 for rest
                 _rev_growths   = [s1 if y <= yrs // 2 else s2 for y in range(1, yrs + 1)]
-                _cogs_growth   = s1 * 0.90    # COGS grows slightly slower → margin expansion
-                _fc_growth     = s1 * 0.65    # Operating leverage: fixed costs < revenue growth
-                _da_growth     = s1 * 0.80    # D&A tracks capex intensity
-                _amort_growth  = 0.02         # Amortisation: slow/flat
-                _ppe_growth    = s1 * 0.85    # Asset base grows with CapEx
+
+                # Cost lines are expressed as a fraction of THAT YEAR's revenue
+                # growth, not of Stage 1 forever.  Holding them at the Stage 1
+                # rate while revenue steps down to Stage 2 in year 6 made costs
+                # outgrow revenue for the whole back half of the projection:
+                # operating margin collapsed, terminal FCFE went negative, and
+                # _clamp_iv floored the result to price x 0.05 and presented it
+                # as a confident "severely overvalued".  It hit hardest exactly
+                # on the high-growth names the product is aimed at.
+                def _cost_curve(rev_growths):
+                    return {
+                        # COGS grows slightly slower than revenue → margin expansion
+                        "cogs": [g * 0.90 for g in rev_growths],
+                        # Operating leverage: fixed costs grow slower than revenue
+                        "fc":   [g * 0.65 for g in rev_growths],
+                        # D&A tracks capex intensity
+                        "da":   [g * 0.80 for g in rev_growths],
+                        # Asset base grows with CapEx
+                        "ppe":  [g * 0.85 for g in rev_growths],
+                    }
+
+                _curve         = _cost_curve(_rev_growths)
+                _cogs_growth   = _curve["cogs"]
+                _fc_growth     = _curve["fc"]
+                _da_growth     = _curve["da"]
+                _ppe_growth    = _curve["ppe"]
+                _amort_growth  = 0.02         # Amortisation: slow/flat, not revenue-linked
                 _ltd_growth    = -0.03        # Moderate debt paydown (-3%/yr)
+
+                # Ceiling on operating-margin expansion.  Allow up to 10pp above
+                # the base year, hard-capped at 45%, and never below where the
+                # company already operates (so a Visa-like 60%+ margin business
+                # is held flat rather than forced down).
+                _base_ebit   = (fin415_inputs["revenue"] - fin415_inputs["cogs"]
+                                - fin415_inputs["fixed_costs"] - fin415_inputs["da"])
+                _base_margin = (_base_ebit / fin415_inputs["revenue"]
+                                if fin415_inputs["revenue"] else 0.0)
+                _max_op_margin = max(_base_margin, min(_base_margin + 0.10, 0.45))
 
                 _f415_kwargs = dict(
                     revenue_base    = fin415_inputs["revenue"],
@@ -10799,6 +10889,7 @@ def analyze():
                     ke              = ke,
                     tgr             = tg,
                     yrs             = yrs,
+                    max_op_margin   = _max_op_margin,
                 )
 
                 try:
@@ -10813,8 +10904,14 @@ def analyze():
                         fin415_bear_wacc_iv, *_ = run_fin415_fcfe(**_kw_bear)
 
                         # ── FIN 415 Scenario 2: Revenue growth − 2pp ─────────
-                        _rev_bear = [max(g - 0.02, 0.0) for g in _rev_growths]
-                        _kw_grow  = {**_f415_kwargs, "rev_growths": _rev_bear}
+                        _rev_bear   = [max(g - 0.02, 0.0) for g in _rev_growths]
+                        _curve_bear = _cost_curve(_rev_bear)
+                        _kw_grow    = {**_f415_kwargs,
+                                       "rev_growths":  _rev_bear,
+                                       "cogs_growth":  _curve_bear["cogs"],
+                                       "fc_growth":    _curve_bear["fc"],
+                                       "da_growth":    _curve_bear["da"],
+                                       "ppe_growth":   _curve_bear["ppe"]}
                         fin415_bear_grow_iv, *_ = run_fin415_fcfe(**_kw_grow)
 
                         # ── FIN 415 Conservative Target (Scenario Analysis tab)
@@ -11970,6 +12067,29 @@ def analyze():
                 }
             except Exception:
                 sensitivity_grid = None
+
+        # ── Reconcile the "Try your own assumptions" slider with the headline ──
+        # dcf_recompute_basis is captured early, straight off run_dcf_single,
+        # BEFORE FIN 415 replaces intrinsic_value and the sector/consensus
+        # overlays adjust it further.  The slider panel was therefore anchored
+        # to a number that never appears anywhere on the page -- on AAPL,
+        # $164.21 against a displayed $243.76.  Moving a slider produced a
+        # value in the wrong universe, which reads to the user as "the
+        # assumptions don't do anything".
+        #
+        # Carry the displayed value and the ratio between them, so
+        # /api/dcf/recompute can express a slider move in the same units the
+        # user is actually looking at.  `scale` is an approximation -- the
+        # overlays are not re-run per tick -- so the endpoint reports it back
+        # and the UI can say so.
+        if dcf_recompute_basis:
+            _pure = dcf_recompute_basis.get("base_iv")
+            _disp = round(intrinsic_value, 2) if intrinsic_value else None
+            dcf_recompute_basis["display_iv"] = _disp
+            dcf_recompute_basis["scale"] = (
+                round(_disp / _pure, 6)
+                if (_pure and _disp and _pure > 0) else 1.0
+            )
 
         result = {
             "ticker":       ticker,
