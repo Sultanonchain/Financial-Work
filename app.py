@@ -435,6 +435,13 @@ def _has_full_access(user_or_dict):
     return is_valus_plus(user_or_dict) or _session_has_team_code()
 
 
+# Stock-based compensation is a real cost to shareholders (it is paid in
+# dilution rather than cash), but Yahoo's `freeCashflow` adds it back as a
+# non-cash charge.  Subtracting it materially lowers fair value for
+# software/tech names where SBC runs 10-25% of revenue.  Flip to False to
+# value on reported FCF instead.
+SUBTRACT_SBC_FROM_FCF = True
+
 RISK_FREE_RATE   = 0.043   # 10-yr US Treasury fallback (used if ^TNX fetch fails)
 EQUITY_RISK_PREM = 0.060   # FIN 415 template MRP (6.0%, matches academic standard)
 
@@ -5166,9 +5173,28 @@ def get_base_fcf(info, stock):
     2. TTM computed from last 4 quarters
     3. Most recent annual FCF
     """
-    # Yahoo Finance computes its own TTM FCF
+    # Yahoo Finance computes its own TTM FCF.  It is usually the freshest
+    # number, but it is NOT reliable: for MSFT FY2026 `info.freeCashflow`
+    # reports $16.5B while the filed cash flow statement shows $67.0B
+    # (operating $182.9B - capex $115.9B).  It does not even reconcile to
+    # Yahoo's own `operatingCashflow` minus capex.  Because the old code
+    # accepted any positive value, a base four times too small went into the
+    # DCF and a quality compounder was silently reported as ~36% overvalued.
+    #
+    # So: cross-check against the most recent annual statement and fall back
+    # to the statement when the two disagree implausibly.  TTM and fiscal-year
+    # legitimately differ, hence the generous 0.5x-2.0x band.
     ttm = safe(info.get("freeCashflow"))
     if ttm and ttm > 0:
+        try:
+            _annual = get_fcf_series(stock.cashflow)
+            _ref    = _annual[0] if _annual else None
+        except Exception:
+            _ref = None
+        if _ref and _ref > 0:
+            _ratio = ttm / _ref
+            if _ratio < 0.5 or _ratio > 2.0:
+                return _ref, "annual_stmt_yahoo_ttm_rejected"
         return ttm, "ttm_yahoo"
 
     # Compute TTM from quarterly cashflow
@@ -10742,6 +10768,61 @@ def analyze():
             # because Stage 1 growth already projects forward revenue growth, scaling
             # base_fcf on top of s1 would double-count the same expected uplift.
             fwd_base_fcf  = base_fcf   # always equal to base_fcf
+
+            # ── Reconcile the base cash flow with the model that consumes it ──
+            # Everything downstream (base run, bull/bear, stress, sensitivity,
+            # the reverse DCF and the slider basis) reads fwd_base_fcf, so both
+            # corrections are applied once, here.
+            #
+            # 1. FCFF vs FCFE.  base_fcf is Yahoo `freeCashflow` = operating
+            #    cash flow - capex, and interest paid sits inside operating cash
+            #    flow, so it is an equity-side (post-interest) number.  But
+            #    run_dcf_single discounts at WACC *and* subtracts net debt,
+            #    which is the enterprise-side treatment.  Leverage was charged
+            #    twice: once in the cash flow, once in the net-debt bridge.
+            #    Every levered business was therefore systematically called
+            #    more overvalued than it is.  Add after-tax interest back to
+            #    convert to FCFF, which is what a WACC + net-debt model wants.
+            #
+            # 2. Stock-based compensation, if SUBTRACT_SBC_FROM_FCF.
+            _fcf_bridge = {"reported": round(fwd_base_fcf, 0) if fwd_base_fcf else None}
+            if fwd_base_fcf and fwd_base_fcf > 0:
+                def _stmt_line(stmt, *labels):
+                    if stmt is None or getattr(stmt, "empty", True):
+                        return None
+                    for lbl in labels:
+                        if lbl in stmt.index:
+                            v = safe(stmt.loc[lbl].iloc[0])
+                            if v is not None:
+                                return abs(float(v)) * fx_rate
+                    return None
+
+                _adj = fwd_base_fcf
+                _tr  = tax_rate if (tax_rate is not None and 0 <= tax_rate < 1) else 0.21
+
+                _iexp = _stmt_line(income_stmt, "Interest Expense Non Operating",
+                                   "Interest Expense")
+                if _iexp:
+                    _addback = _iexp * (1 - _tr)
+                    _adj += _addback
+                    _fcf_bridge["interest_addback"] = round(_addback, 0)
+
+                if SUBTRACT_SBC_FROM_FCF:
+                    _sbc = _stmt_line(cashflow, "Stock Based Compensation",
+                                      "Stock Based Compensation Expense")
+                    if _sbc:
+                        _adj -= _sbc
+                        _fcf_bridge["sbc_subtracted"] = round(_sbc, 0)
+
+                # Never let the adjustments drive the base non-positive: a
+                # negative base FCF makes the whole projection meaningless, and
+                # a heavily SBC-funded company is better served by the low
+                # confidence path than by a nonsense number.
+                if _adj > 0:
+                    fwd_base_fcf = _adj
+                else:
+                    _fcf_bridge["reverted"] = "adjusted base was <= 0"
+            _fcf_bridge["used"] = round(fwd_base_fcf, 0) if fwd_base_fcf else None
             if is_backbone_moat and not s1_ov:
                 try:
                     re_df = stock.revenue_estimate
@@ -12210,6 +12291,9 @@ def analyze():
             # (banking, biotech, FCF-negative).  Slider UI hides itself in that case.
             "dcf_recompute_basis": dcf_recompute_basis,
             "base_fcf":       base_fcf,
+            # Audit trail for the base cash flow actually fed to the DCF:
+            # reported FCF -> +after-tax interest (FCFF) -> -SBC -> used.
+            "fcf_bridge":     (_fcf_bridge if "_fcf_bridge" in locals() else None),
             "historical_fcf": fcf_series[:5],
             "projected_fcf":  projected,
             "fcf_chart":      fcf_chart,
