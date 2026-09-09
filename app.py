@@ -8493,9 +8493,14 @@ def _analyze_cache_key(ticker, args):
     relevant = sorted((k, args[k]) for k in _KEY_PARAMS if args.get(k) not in (None, ""))
     # Namespace history: v2 dropped the action-word Lynch verdict from the
     # displayed label; v4 superseded payloads carrying the over-aggressive
-    # extreme_mos_flag; v5 removes `verdict_key` (the raw action token) from
-    # the embedded lynch_verdict entirely, so v4 entries must not be served.
-    return f"valus:analyze:v5:{ticker}|{relevant}"
+    # extreme_mos_flag; v5 removed `verdict_key` (the raw action token) from
+    # the embedded lynch_verdict; v6 is the fudge-layer removal -- every v5
+    # payload carries an intrinsic value computed with the strategic floor,
+    # the cash-rich and momentum premiums and the 20% price weight still in,
+    # and serving those next to freshly-computed ones would put two different
+    # valuations of the same company on the same screen (the portfolio MOS
+    # column and the leaderboard read straight out of this cache).
+    return f"valus:analyze:v6:{ticker}|{relevant}"
 
 def _analyze_cache_get(key):
     # 1. Check Redis first (shared across all Vercel instances)
