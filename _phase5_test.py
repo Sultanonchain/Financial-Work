@@ -94,7 +94,14 @@ src = open("app.py").read()
 check('app.py exposes "valus_grade" in compare _thin',
       '"valus_grade":     d.get("valus_grade")' in src)
 check('analyze response sets valus_grade', '"valus_grade":' in src and 'compute_valus_grade(margin_of_safety)' in src)
-check('analyze grade goes through tier reconciler', '_reconcile_grade_with_tier(' in src)
+# The grade used to be post-processed by _reconcile_grade_with_tier, which
+# promoted a D or an F to a B whenever the strategic_discount tier override
+# had fired. Both the override and the reconciler are gone, so the letter
+# grade must now be derived from the margin of safety and nothing else.
+check('grade is not post-processed by a tier reconciler',
+      '_reconcile_grade_with_tier' not in src)
+check('strategic_discount tier is no longer emitted',
+      '"tier":       "strategic_discount"' not in src)
 
 # ── Summary ──────────────────────────────────────────────────────────
 print()

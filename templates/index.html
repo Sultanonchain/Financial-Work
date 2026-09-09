@@ -807,20 +807,12 @@
         </ol>
       </div>
 
-      <!-- Expandable: see all 7 tiers (must match the .tg-row count below) -->
+      <!-- Expandable: see all 6 tiers (must match the .tg-row count below) -->
       <button class="tg-expand" id="tgExpandBtn" type="button" aria-expanded="false">
-        <span>See all 7 verdict tiers</span>
+        <span>See all 6 verdict tiers</span>
         <span class="tg-expand__chev">▾</span>
       </button>
       <div class="tg-list hidden" id="tgFullList">
-        <div class="tg-row tier-positive" data-tier="strategic_discount">
-          <span class="tg-dot"></span>
-          <div class="tg-body">
-            <span class="tg-label">Strategic Discount</span>
-            <span class="tg-mos">Pre-revenue strategic asset</span>
-            <span class="tg-desc">Sovereign-backstopped franchise (defense, CHIPS Act, DOE). DCF undervalues; analyst consensus and policy tailwinds support upside.</span>
-          </div>
-        </div>
         <div class="tg-row tier-positive" data-tier="deep_discount">
           <span class="tg-dot"></span>
           <div class="tg-body">
@@ -1146,6 +1138,20 @@
           <span class="pi-label" data-i18n="res.fairValue">Fair value</span>
           <span class="pi-value iv numeric" id="vIV">N/A</span>
         </div>
+      </div>
+
+      <!-- The fair-value RANGE. This is the headline when it is available:
+           a single number to the cent implies a precision this model does not
+           have (a 1pp move in the discount rate shifts the answer 17-40%), so
+           the band is the answer and #vIV above is its midpoint. -->
+      <div class="iv-band hidden" id="vIvBand">
+        <div class="iv-band__headline" id="vIvBandHeadline"></div>
+        <div class="iv-band__bar">
+          <div class="iv-band__span" id="vIvBandSpan"></div>
+          <div class="iv-band__mid" id="vIvBandMid"></div>
+          <div class="iv-band__price" id="vIvBandPrice"></div>
+        </div>
+        <div class="iv-band__foot" id="vIvBandFoot"></div>
       </div>
 
       <!-- Strategic IV floor breakdown, only shown when survival_floor tier

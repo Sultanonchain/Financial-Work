@@ -1790,6 +1790,61 @@ a.auth-menu__btn { text-decoration: none; }
 /* Market-implied scenario caption — sits between the giant price/IV row
    and the verdict tier badge.  Reframes the gap as a market expectation,
    not a model error. */
+/* ── Fair-value band ──────────────────────────────────────────────────────
+   The headline is now a range, so it gets the visual weight: a sentence in
+   plain English, a bar showing the span with today's price marked against it,
+   and a footnote saying where the width comes from. */
+/* Shown in place of the scenario trio when no band could be computed. */
+.sc-empty {
+  grid-column: 1 / -1;
+  padding: 16px; border-radius: 8px;
+  background: rgba(255,255,255,0.03);
+  font-size: 13px; line-height: 1.55; color: var(--ink-secondary);
+}
+.iv-band {
+  margin: 14px 0 4px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.iv-band.hidden { display: none; }
+.iv-band__headline {
+  font-size: 16px; line-height: 1.45; font-weight: 600;
+  color: var(--ink-primary);
+}
+.iv-band__bar {
+  position: relative;
+  height: 10px; margin: 14px 0 12px;
+  border-radius: var(--radius-pill);
+  background: rgba(255,255,255,0.06);
+}
+.iv-band__span {
+  position: absolute; top: 0; height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--accent-strong);
+}
+/* Midpoint: the old single-number answer, deliberately understated now. */
+.iv-band__mid {
+  position: absolute; top: -3px; width: 2px; height: 16px;
+  background: var(--ink-primary); opacity: 0.85;
+  transform: translateX(-1px);
+}
+/* Today's price, marked against the band. */
+.iv-band__price {
+  position: absolute; top: -5px; width: 10px; height: 20px;
+  border-radius: 3px;
+  background: var(--bg-elevated);
+  border: 2px solid var(--ink-primary);
+  transform: translateX(-5px);
+}
+.iv-band__price.hidden { display: none; }
+.iv-band__foot {
+  font-size: 12.5px; line-height: 1.5; color: var(--ink-secondary);
+}
+@media (max-width: 540px) {
+  .iv-band__headline { font-size: 15px; }
+}
 .iv-scenario {
   display: flex;
   align-items: center;

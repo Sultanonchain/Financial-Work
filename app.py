@@ -3834,66 +3834,13 @@ STRATEGIC_ASSETS = {
 # numbers are deliberately conservative so the layer never single-handedly
 # flips a verdict; it just keeps the model from systematically penalizing
 # strategic assets for the wrong reasons.
-_STRATEGIC_TIER_DELTAS = {
-    # tier:               (wacc_delta, ceiling_lift, iv_floor_mult, label)
-    "semi_sovereignty":   (-0.010, 0.05, 0.85, "Semiconductor Sovereignty"),
-    "defense_prime":      (-0.005, 0.02, 0.90, "Defense Prime"),
-    "energy_sovereignty": (-0.0075, 0.03, 0.88, "Energy Sovereignty"),
-    "critical_material":  (-0.010, 0.05, 0.85, "Critical Materials"),
-    # UAM is speculative, smaller WACC delta but higher ceiling lift
-    # (these are pre-revenue franchises where growth is the whole thesis).
-    # IV floor is lower because pure DCF on pre-revenue eVTOL is meaningless.
-    "urban_air_mobility": (-0.0050, 0.08, 0.75, "Urban Air Mobility"),
+_STRATEGIC_TIER_LABELS = {
+    "semi_sovereignty":   "Semiconductor Sovereignty",
+    "defense_prime":      "Defense Prime",
+    "energy_sovereignty": "Energy Sovereignty",
+    "critical_material":  "Critical Materials",
+    "urban_air_mobility": "Urban Air Mobility",
 }
-
-# Tiers that trigger a "survival floor", Lynch-style override that says
-# pure DCF underestimates these names because government capital and policy
-# anchor survival probability.  Used by the strategic IV floor and verdict
-# phrasing below.
-_SURVIVAL_FLOOR_TIERS = {
-    "semi_sovereignty",
-    "defense_prime",
-    "energy_sovereignty",
-    "critical_material",
-}
-
-# Per-ticker subsidy / grant present-value, USD.  Adds to DCF before per-share
-# conversion so the IV reflects citable government capital that pure DCF
-# never sees.  Conservative: only the announced dollar amount, not implied
-# tax credits.
-STRATEGIC_SUBSIDY_PV = {
-    "INTC": 28_400_000_000,   # $8.5B CHIPS grant + $11B subsidized loan PV + $8.9B US Treasury direct equity stake (~9.9% of INTC, Aug 2025)
-    "MU":    6_100_000_000,   # CHIPS Act grant
-    "TXN":   1_600_000_000,   # CHIPS Act grant
-    "GFS":   1_500_000_000,   # CHIPS Act grant
-    "ON":      300_000_000,   # NY fab DPA framework
-    "MP":      150_000_000,   # DPA Title III rare-earth funding
-    "LEU":     150_000_000,   # DOE HALEU contract value (approx)
-    "BWXT":    300_000_000,   # Naval reactor contract framework
-}
-
-# Tier-level book-value floor multipliers.  Reflects the principle that
-# the U.S. will not let strategically-anchored assets trade at distressed
-# book value: defense primes (sole-source on strategic platforms) get a
-# higher multiplier than commodity-cyclical semi names.
-_STRATEGIC_BOOK_FLOOR_MULT = {
-    "semi_sovereignty":   1.5,
-    "defense_prime":      2.0,
-    "energy_sovereignty": 1.4,
-    "critical_material":  1.5,
-    # UAM tier intentionally absent, pre-revenue eVTOL has no book anchor.
-}
-
-# Per-ticker book-floor overrides: CHIPS Act foundries the DoD has formally
-# designated as "trusted foundries" get the defense-grade 2.0× book multiplier
-# regardless of their semi_sovereignty tier classification.  Same logic as
-# defense primes, sole-source for strategic platforms.
-_STRATEGIC_BOOK_FLOOR_OVERRIDE = {
-    "INTC": 2.0,  # CHIPS Act $19.5B + DoD trusted-foundry pivot under DPA Title III
-    "MU":   2.0,  # CHIPS Act $6.1B + sole US producer of HBM (AI inference bottleneck)
-    "GFS":  2.0,  # CHIPS Act $1.5B foundry
-}
-
 
 def _strategic_classifier(ticker):
     """
@@ -3911,27 +3858,26 @@ def _strategic_classifier(ticker):
     if entry is None:
         return None
     tier, reason = entry
-    deltas = _STRATEGIC_TIER_DELTAS.get(tier)
-    if deltas is None:
+    tier_label = _STRATEGIC_TIER_LABELS.get(tier)
+    if tier_label is None:
         return None
-    wacc_delta, ceiling_lift, iv_floor_mult, tier_label = deltas
+    # Narrative only.  This classifier used to carry four numbers -- a WACC
+    # discount, a sector-ceiling lift, a price-multiple IV floor, and a
+    # per-ticker subsidy present value -- each of which moved the fair value.
+    # They are gone: a curated list of tickers is a thesis, not a cash flow,
+    # and a valuation that a stock is worth more because it appears in a
+    # hand-written dict is not one the number can defend. The reason string
+    # is the part that was always worth showing, so it stays.
     return {
         "is_strategic":     True,
         "strategic_tier":   tier,
         "strategic_label":  tier_label,
         "strategic_reason": reason,
-        "wacc_delta":       wacc_delta,
-        "ceiling_lift":     ceiling_lift,
-        "iv_floor_mult":    iv_floor_mult,
-        "survival_floor":   tier in _SURVIVAL_FLOOR_TIERS,
-        "subsidy_pv":       STRATEGIC_SUBSIDY_PV.get(ticker.upper(), 0),
-        "book_floor_mult":  _STRATEGIC_BOOK_FLOOR_OVERRIDE.get(
-            ticker.upper(), _STRATEGIC_BOOK_FLOOR_MULT.get(tier)),
         "narrative": (
-            f"VALUS recognizes {ticker.upper()} as a strategic US asset, "
-            f"{tier_label}.  Pure DCF systematically undervalues these names "
-            "because the discount rate ignores government backstops and "
-            "policy-driven capital flows."
+            f"{ticker.upper()} is a strategic US asset ({tier_label}). "
+            "Government backstops and policy-driven capital are real, but "
+            "VALUS does not adjust the fair value for them -- treat this as "
+            "context for the number, not part of it."
         ),
     }
 
@@ -3952,74 +3898,6 @@ def _strategic_classifier(ticker):
 #
 # We surface every component in the payload so the override is transparent
 # (the UI shows: DCF model: $X · Strategic floor: $Y · Used: $Z).
-
-def _compute_strategic_iv_floor(ticker, info, dcf_iv, base_fcf, fx_rate,
-                                  net_debt, shares_out, strategic, peers_payload=None):
-    """
-    Returns dict {floor_iv, components, reasons, dcf_iv, applied} or None.
-    Conservative, only fires when at least one citable input is available.
-    """
-    if not strategic or not strategic.get("survival_floor"):
-        return None
-    if not shares_out or shares_out <= 0:
-        return None
-
-    components = {"dcf": round(dcf_iv, 2) if dcf_iv else None}
-    reasons = []
-
-    # 1. Subsidy-adjusted DCF
-    subsidy_iv = None
-    subsidy_pv = strategic.get("subsidy_pv", 0) or 0
-    if dcf_iv and subsidy_pv > 0 and shares_out > 0:
-        subsidy_iv = round(dcf_iv + (subsidy_pv * fx_rate / shares_out), 2)
-        components["subsidy_adj"] = subsidy_iv
-        reasons.append(
-            f"Subsidy-adjusted DCF: ${subsidy_iv:.2f} (DCF ${dcf_iv:.2f} + "
-            f"${subsidy_pv/1e9:.1f}B in citable government capital ÷ "
-            f"{shares_out/1e9:.2f}B shares)."
-        )
-
-    # 2. Book-value floor
-    book_iv = None
-    book_mult = strategic.get("book_floor_mult")
-    book_value_per_share = safe(info.get("bookValue"))
-    if book_value_per_share and book_value_per_share > 0 and book_mult:
-        book_iv = round(book_value_per_share * book_mult, 2)
-        components["book"] = book_iv
-        reasons.append(
-            f"Book floor: ${book_iv:.2f} (book value ${book_value_per_share:.2f}/sh × "
-            f"{book_mult:.1f}×, {strategic['strategic_label']} tier won't trade at distressed book)."
-        )
-
-    # 3. Peer EV/Revenue floor (optional, populated by caller if peers known)
-    peer_iv = None
-    if peers_payload and isinstance(peers_payload, dict):
-        peer_ev_rev = peers_payload.get("peer_median_ev_rev")
-        revenue = safe(info.get("totalRevenue"))
-        if peer_ev_rev and peer_ev_rev > 0 and revenue and revenue > 0:
-            implied_ev = peer_ev_rev * revenue
-            implied_equity = implied_ev - (net_debt or 0)
-            if shares_out > 0:
-                peer_iv = round(max(0, implied_equity / shares_out), 2)
-                components["peer"] = peer_iv
-                if peer_iv > 0:
-                    reasons.append(
-                        f"Peer EV/Revenue floor: ${peer_iv:.2f} "
-                        f"(median peer multiple {peer_ev_rev:.1f}× × ${revenue/1e9:.1f}B revenue)."
-                    )
-
-    candidates = [c for c in [dcf_iv, subsidy_iv, book_iv, peer_iv] if c is not None and c > 0]
-    if not candidates:
-        return None
-    floor_iv = max(candidates)
-    return {
-        "floor_iv":   round(floor_iv, 2),
-        "components": components,
-        "reasons":    reasons,
-        "dcf_iv":     round(dcf_iv, 2) if dcf_iv else None,
-        "applied":    floor_iv > (dcf_iv or 0),
-    }
-
 
 # ── VALUS A-F grade (Phase 5) ───────────────────────────────────────────
 # Derives a simple letter grade from the margin-of-safety (% gap between
@@ -4052,45 +3930,6 @@ _VALUS_GRADE_EXPLANATIONS = {
     "D": "Trading above VALUS fair value, investors are paying for above-trend growth.",
     "F": "Market price is far above VALUS fair value, expectations look stretched.",
 }
-
-
-def _reconcile_grade_with_tier(grade, priced_for):
-    """Override the MOS-derived grade when the priced_for tier carries a
-    stronger editorial signal than raw DCF can express.
-
-    Currently handles one case: ``strategic_discount``.  The strategic-
-    asset framework lifts the IV floor for CHIPS Act / sovereign-backstopped
-    names; if despite that lift the price is still above the floor (negative
-    MOS), the existing code further promotes the tier to "Strategic
-    Discount" based on a low forward P/E heuristic, the editorial call
-    is "DCF underestimates this; the market is discounting a sovereign-
-    moated franchise."
-
-    Without reconciliation the user sees a green "Strategic Discount" tier
-    pill next to a "D, Moderately Overvalued" letter grade.  Both views
-    derive from the same fair-value number; they shouldn't disagree on
-    direction.  When the tier override fires, lift the grade to B with
-    matching label + explanation so the badge, pill, and copy all align.
-    """
-    if not grade or not priced_for:
-        return grade
-    tier = (priced_for or {}).get("tier")
-    if tier == "strategic_discount" and grade.get("grade") in ("D", "F"):
-        return {
-            "grade":       "B",
-            "label":       "Strategic discount",
-            "explanation": (
-                "Pure DCF prices this above fair value, but VALUS's "
-                "strategic-asset framework adjusts for the franchise's "
-                "sovereign backstop (e.g. CHIPS Act, defense prime, sole-"
-                "US producer status).  The market is paying a lower-than-"
-                "warranted multiple, treat as opportunity, not a value trap."
-            ),
-            "mos":         grade.get("mos"),
-            "overridden":  True,    # flag for the explainer modal / debug
-            "raw_grade":   grade.get("grade"),
-        }
-    return grade
 
 
 def compute_valus_grade(margin_of_safety_pct):
@@ -4735,72 +4574,6 @@ def _cash_rich_premium(info, fx_rate, market_cap, base_fcf=None,
 
 # ── Scenario Coherence Enforcer ─────────────────────────────────────────────
 
-def _enforce_scenario_coherence(scenarios, base_iv, price):
-    """
-    Hard-enforce: Bear < Base < Bull with sensible spreads.
-
-    After Reality Reconciliation, scenarios scaled proportionally can produce
-    non-monotonic ordering (Bull < Base) or extreme spreads (Bear at $30 when
-    Base is $228).  This enforces:
-
-      - Bear ≤ Base × 0.85       (max 15% downside from base)
-      - Bear ≥ Base × 0.65       (min 35% downside from base)  ← prevents absurd lows
-      - Bull ≥ Base × 1.10       (min 10% upside from base)
-      - Bull ≤ Base × 1.50       (max 50% upside from base)
-      - Strict: Bear < Base < Bull, always.
-
-    If the model's natural numbers fall in the band, keep them.  If they don't,
-    clamp into the band.  Bear is allowed to sit above current price now, bear means "downside vs fair value", not "downside vs market price".
-
-    Mutates scenarios in place.
-    """
-    if not scenarios or base_iv is None or base_iv <= 0:
-        return scenarios
-
-    base = float(base_iv)
-    bear_floor   = round(base * 0.65, 2)
-    bear_ceiling = round(base * 0.85, 2)
-    bull_floor   = round(base * 1.10, 2)
-    bull_ceiling = round(base * 1.50, 2)
-
-    # Set base
-    scenarios.setdefault("base", {})
-    scenarios["base"]["value"]  = round(base, 2)
-    scenarios["base"]["upside"] = round((base - price) / price * 100, 1) if price else None
-
-    # Bear: clamp into [bear_floor, bear_ceiling]
-    bear_slot = scenarios.get("bear") or {}
-    bear_v    = bear_slot.get("value")
-    if bear_v is None or bear_v >= base:
-        bear_v = bear_ceiling
-    else:
-        bear_v = max(min(bear_v, bear_ceiling), bear_floor)
-    bear_slot["value"]  = round(bear_v, 2)
-    bear_slot["upside"] = round((bear_v - price) / price * 100, 1) if price else None
-    scenarios["bear"] = bear_slot
-
-    # Bull: clamp into [bull_floor, bull_ceiling]
-    bull_slot = scenarios.get("bull") or {}
-    bull_v    = bull_slot.get("value")
-    if bull_v is None or bull_v <= base:
-        bull_v = bull_floor
-    else:
-        bull_v = max(min(bull_v, bull_ceiling), bull_floor)
-    bull_slot["value"]  = round(bull_v, 2)
-    bull_slot["upside"] = round((bull_v - price) / price * 100, 1) if price else None
-    scenarios["bull"] = bull_slot
-
-    # Recompute weighted using the same weights already in scenarios
-    wb = (scenarios.get("base") or {}).get("weight", 60) / 100
-    wu = (scenarios.get("bull") or {}).get("weight", 20) / 100
-    wd = (scenarios.get("bear") or {}).get("weight", 20) / 100
-    weighted = round(wb * base + wu * bull_v + wd * bear_v, 2)
-    scenarios["weighted"]        = weighted
-    scenarios["weighted_upside"] = round((weighted - price) / price * 100, 1) if price else None
-    scenarios["coherence_enforced"] = True
-    return scenarios
-
-
 def _reality_reconciliation(iv, price, analyst_target, implied_g, sector, industry,
                              is_structural_transformer=False, moat_detected=False):
     """
@@ -4818,7 +4591,7 @@ def _reality_reconciliation(iv, price, analyst_target, implied_g, sector, indust
          model alone but flag it.
 
     Blend formula (conservative, model still dominates):
-        new_IV = 0.55 × model_IV + 0.25 × analyst_target + 0.20 × current_price
+        new_IV = 0.6875 × model_IV + 0.3125 × analyst_target
 
     Sector ceilings (max sustainable Stage-1 growth):
         Structural transformer:        50%
@@ -4905,15 +4678,19 @@ def _reality_reconciliation(iv, price, analyst_target, implied_g, sector, indust
                     f"Market implies {implied_g*100:.1f}% (contraction), distress signal, "
                     f"model trusted")
 
-    # ── Reconcile: blend model 55%, analyst 25%, market 20% ──────────────────
-    new_iv = round(0.55 * iv + 0.25 * at + 0.20 * price, 2)
+    # Blend model 68.75%, analyst 31.25% -- the same 55:25 ratio as before,
+    # renormalised after removing the 20% weight on current market price.
+    # That term was the single largest reason the fair value tracked the
+    # price: a valuation that is 20% "whatever it costs today" cannot
+    # meaningfully tell you whether today's price is right.
+    new_iv = round(0.6875 * iv + 0.3125 * at, 2)
     direction = "upward" if new_iv > iv else "downward"
     pct_change = abs(new_iv - iv) / max(iv, 0.01) * 100
     reason = (
         f"Reality Reconciliation ({direction}, {pct_change:.1f}%): model gap "
         f"{abs(gap_pct)*100:.0f}% with credible implied growth "
         f"{(implied_g or 0)*100:.1f}% ≤ {ceiling_label} ceiling. "
-        f"Blend: 55% model · 25% analyst · 20% market."
+        f"Blend: 69% model · 31% analyst consensus."
     )
     return new_iv, True, pre_iv, reason
 
@@ -10668,9 +10445,10 @@ def analyze():
         # Live policy tailwinds further deepen the strategic effect, a
         # CHIPS Act announcement on a strategic name is a stronger signal
         # than the curation alone.
+        # A live policy tailwind used to deepen the strategic WACC discount by
+        # a further 25bp.  Both are gone: it is recorded as context now.
         if strategic and policy_tailwind:
             strategic = dict(strategic)
-            strategic["wacc_delta"] -= 0.0025      # extra 25bp reduction
             strategic["live_policy_amplifier"] = True
 
         # ── Price history (5Y daily, frontend filters to 3M/6M/YTD/1Y/2Y/5Y) ──
@@ -11039,18 +10817,14 @@ def analyze():
                 if not user_tg_override:
                     tg = min(tg, 0.030)
 
-            # ── Strategic Asset WACC reduction ────────────────────────────────
-            # National-security / sovereign-capital names (CHIPS recipients,
-            # defense primes, energy sovereignty, critical materials) have
-            # government backstops that reduce real cost of capital below
-            # what beta-based WACC implies.  Reduction floors at 6.5% so it
-            # never produces nonsensically low discount rates.
+            # Strategic names used to get 50-100bp shaved off WACC here on the
+            # theory that government backstops lower their real cost of
+            # capital.  Removed: a 1pp WACC change moves the fair value by
+            # 17-40%, so this single hand-picked constant was worth more to
+            # the headline number than most of the actual cash-flow forecast.
+            # If the market genuinely prices these names at a lower cost of
+            # capital, that already shows up in their beta.
             strategic_wacc_delta = 0.0
-            if strategic:
-                _wacc_pre = wacc
-                wacc = max(wacc + strategic["wacc_delta"], 0.065)
-                wacc_data["wacc"] = wacc
-                strategic_wacc_delta = round(_wacc_pre - wacc, 4)
 
             # ── Structural Transformer WACC ceiling ───────────────────────────
             # High-beta auto/industrial tickers get a market beta that reflects
@@ -11667,14 +11441,11 @@ def analyze():
 
             scenarios["consensus_anchored"] = True
 
-        # ── Catalyst Momentum Premium ─────────────────────────────────────────
-        # Applied AFTER analyst alignment so the premium stacks on the blended value.
-        # Only fires when a strong positive catalyst was found in the last 7 days.
-        if intrinsic_value is not None and momentum_premium > 0:
-            intrinsic_value  = round(intrinsic_value * (1 + momentum_premium), 2)
-            momentum_applied = True
-            if price:
-                margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
+        # The catalyst momentum premium multiplied the fair value by 1.05-1.10
+        # when a positive headline had appeared in the previous seven days.
+        # A news story is not a cash flow. The catalyst itself is still
+        # detected and still shown on the page; it no longer moves the number.
+        momentum_applied = False
 
         # ── Absolute Zero Floor ───────────────────────────────────────────────
         if intrinsic_value is not None:
@@ -11944,35 +11715,19 @@ def analyze():
         # target / cash-only / distressed P/B).  Multiplying a distressed
         # anchor by a cash-rich premium defeats the whole "low confidence"
         # signal and inflates the IV with no model basis.
-        if _cr_prem > 0 and intrinsic_value is not None and iv_confidence != "low":
-            intrinsic_value = round(intrinsic_value * (1 + _cr_prem), 2)
-            margin_of_safety = round((intrinsic_value - price) / price * 100, 1) if price else None
-            if scenarios:
-                _factor = (1 + _cr_prem)
-                for _k in ("base", "bull", "bear"):
-                    _slot = scenarios.get(_k)
-                    if _slot and _slot.get("value") is not None:
-                        _slot["value"]  = round(_slot["value"] * _factor, 2)
-                        _slot["upside"] = round((_slot["value"] - price) / price * 100, 1) if price else None
-                if scenarios.get("weighted") is not None:
-                    scenarios["weighted"] = round(scenarios["weighted"] * _factor, 2)
-                    scenarios["weighted_upside"] = round((scenarios["weighted"] - price) / price * 100, 1) if price else None
+        # The cash-rich premium multiplied the fair value again for companies
+        # holding a lot of net cash. That cash is already in the model: net
+        # debt is subtracted from enterprise value to get to equity value, so
+        # a net-cash balance sheet raises the DCF result on its own. Counting
+        # it a second time as a percentage premium was double-counting.
+        # is_cash_rich / cash_pct_of_mcap / the narrative all still ship.
 
         # ── Debt + Momentum Classifier ─────────────────────────────────────────
         debt_momentum = _debt_momentum_classifier(info, balance_sheet, fcf_series, price_history)
-        if debt_momentum.get("premium_pct", 0) > 0 and intrinsic_value is not None and iv_confidence != "low":
-            _factor = (1 + debt_momentum["premium_pct"])
-            intrinsic_value = round(intrinsic_value * _factor, 2)
-            margin_of_safety = round((intrinsic_value - price) / price * 100, 1) if price else None
-            if scenarios:
-                for _k in ("base", "bull", "bear"):
-                    _slot = scenarios.get(_k)
-                    if _slot and _slot.get("value") is not None:
-                        _slot["value"]  = round(_slot["value"] * _factor, 2)
-                        _slot["upside"] = round((_slot["value"] - price) / price * 100, 1) if price else None
-                if scenarios.get("weighted") is not None:
-                    scenarios["weighted"] = round(scenarios["weighted"] * _factor, 2)
-                    scenarios["weighted_upside"] = round((scenarios["weighted"] - price) / price * 100, 1) if price else None
+        # Same treatment for the debt-momentum premium: deleveraging is a real
+        # signal and the classifier still runs and still reports, but a company
+        # paying down debt shows up in the cash-flow forecast rather than in a
+        # multiplier bolted onto the answer.
 
         # ── IV Sanity Clamp ───────────────────────────────────────────────────
         # Single chokepoint every IV-producing path goes through.  Floor at
@@ -12016,9 +11771,17 @@ def analyze():
         if _iv_collapsed:
             iv_confidence = "low"
 
-        # ── Scenario Coherence Enforcer (Bear < Base < Bull, sane spreads) ────
+        # The scenario coherence enforcer used to clamp bear into
+        # [base x 0.65, base x 0.85] and bull into [base x 1.10, base x 1.50],
+        # which manufactured a tidy-looking spread the model had not produced.
+        # Bear and bull are separate DCF runs; they are now reported as they
+        # come out. The base value is still synced to the headline so the three
+        # numbers describe the same valuation.
         if scenarios and intrinsic_value is not None:
-            scenarios = _enforce_scenario_coherence(scenarios, intrinsic_value, price)
+            scenarios.setdefault("base", {})
+            scenarios["base"]["value"]  = round(float(intrinsic_value), 2)
+            scenarios["base"]["upside"] = (
+                round((intrinsic_value - price) / price * 100, 1) if price else None)
 
         # ── "Priced For" Verdict ──────────────────────────────────────────────
         _ceiling, _ceiling_label = _sector_growth_ceiling(
@@ -12028,74 +11791,19 @@ def analyze():
         )
         # Strategic asset ceiling lift, sovereign capital lets these names
         # plausibly grow above their nominal sector ceiling.
-        if strategic and _ceiling is not None:
-            _ceiling = _ceiling + strategic["ceiling_lift"]
-            _ceiling_label = f"{_ceiling_label} + Strategic"
+        # (The strategic ceiling lift that used to run here is removed with the
+        # rest of the strategic math; the sector ceiling is now the sector's.)
 
-        # Strategic IV floor, when DCF says the stock is meaningfully
-        # overvalued but the company is a curated strategic asset AND the
-        # market's forward multiple is below its sector average (the MU
-        # case: "lowest forward P/E in S&P"), the model raises IV toward
-        # the floor.  This refuses to print a distress verdict on a name
-        # the government is structurally backstopping.
+        # The strategic IV floor lived here.  It computed three floors
+        # (subsidy-adjusted DCF, a book-value multiple, a peer EV/Revenue
+        # multiple, plus a price-multiple floor of price x 0.85-0.90) and took
+        # the MAX against the model's own answer -- so by construction it could
+        # only ever raise the fair value, never lower it.  On LMT that produced
+        # an intrinsic value of $1,044 against a $528 price: a +98% margin of
+        # safety that came from the floor, not from the cash flows.  Deleted.
+        # The strategic classification survives as narrative on the payload.
         strategic_floor_applied = False
         strategic_floor_payload = None
-        if (strategic and intrinsic_value is not None and price and price > 0):
-            forward_pe   = safe(info.get("forwardPE"))
-            sector_fwd   = safe(info.get("trailingPE"))   # rough proxy when no sector avg
-            cheap_signal = (
-                (forward_pe is not None and forward_pe > 0 and forward_pe < 20) or
-                (analyst_target_price and analyst_target_price > price * 1.05)
-            )
-            # New: substantive floor for survival_floor tiers, combines
-            # subsidy-adjusted DCF, book-value floor, and (when peers
-            # available) peer EV/Revenue floor.  Surfaces the math.
-            _shares_for_floor = safe(bal_data.get("shares"), 0) if bal_data else 0
-            strategic_floor_payload = _compute_strategic_iv_floor(
-                ticker=ticker, info=info, dcf_iv=intrinsic_value,
-                base_fcf=base_fcf, fx_rate=fx_rate,
-                net_debt=net_debt, shares_out=_shares_for_floor,
-                strategic=strategic,
-            )
-            # IV becomes the MAX of: DCF, new subsidy/book/peer floor, AND
-            # the legacy price-multiple floor (which still gates on
-            # cheap_signal).  Taking max guarantees this commit can never
-            # *lower* IV vs. the pre-commit behavior, strategic floors
-            # only ever lift the number.
-            floor_candidates = [intrinsic_value]
-            if strategic_floor_payload and strategic_floor_payload.get("floor_iv"):
-                floor_candidates.append(strategic_floor_payload["floor_iv"])
-            legacy_floor = price * strategic["iv_floor_mult"]
-            if intrinsic_value < legacy_floor and cheap_signal:
-                floor_candidates.append(legacy_floor)
-            new_floor = max(floor_candidates)
-            # Mirror the chosen floor into the breakdown payload so the UI
-            # always shows the legacy multiple when it's the winning method.
-            if (strategic_floor_payload is not None
-                    and new_floor > (strategic_floor_payload.get("floor_iv") or 0)):
-                strategic_floor_payload["floor_iv"] = round(new_floor, 2)
-                strategic_floor_payload["components"]["legacy_price_mult"] = round(legacy_floor, 2)
-                strategic_floor_payload["reasons"].append(
-                    f"Legacy price-multiple floor: ${legacy_floor:.2f} "
-                    f"(price ${price:.2f} × {strategic['iv_floor_mult']:.2f}, "
-                    f"protects against distress verdicts on cheap-multiple sovereign names)."
-                )
-                strategic_floor_payload["applied"] = new_floor > (intrinsic_value or 0)
-            if new_floor is not None and new_floor > intrinsic_value:
-                _iv_pre = intrinsic_value
-                intrinsic_value = round(new_floor, 2)
-                margin_of_safety = round((intrinsic_value - price) / price * 100, 1)
-                strategic_floor_applied = True
-                if scenarios:
-                    _factor = intrinsic_value / _iv_pre if _iv_pre else 1.0
-                    for _k in ("base", "bull", "bear"):
-                        _slot = scenarios.get(_k)
-                        if _slot and _slot.get("value") is not None:
-                            _slot["value"]  = round(_slot["value"] * _factor, 2)
-                            _slot["upside"] = round((_slot["value"] - price) / price * 100, 1)
-                    if scenarios.get("weighted") is not None:
-                        scenarios["weighted"] = round(scenarios["weighted"] * _factor, 2)
-                        scenarios["weighted_upside"] = round((scenarios["weighted"] - price) / price * 100, 1)
 
         priced_for = _priced_for_verdict(
             implied_g       = (implied_growth_pct / 100) if implied_growth_pct is not None else None,
@@ -12119,6 +11827,11 @@ def analyze():
         #      yet; the franchise thesis is the whole story.  Trigger when
         #      the strategic floor was applied AND analyst target sits
         #      meaningfully above current price (sell-side already sees it).
+        # This block used to REPLACE the verdict tier with a green "Strategic
+        # Discount" whenever a listed name printed a negative margin of safety
+        # and a low forward P/E -- so the tier stopped describing the number
+        # printed next to it.  It now only produces a note.
+        strategic_note = None
         if (strategic and priced_for and margin_of_safety is not None
                 and margin_of_safety < 0):
             forward_pe = safe(info.get("forwardPE"))
@@ -12136,24 +11849,21 @@ def analyze():
             )
             if mature_trigger or pre_rev_trigger:
                 if mature_trigger:
-                    narrative = (
-                        f"Forward P/E {forward_pe:.1f} on a {strategic['strategic_label']} asset, "
-                        "market discounting a sovereign-backstopped franchise.  Pure DCF underestimates "
-                        "value here; treat as opportunity, not value trap."
+                    strategic_note = (
+                        f"Forward P/E of {forward_pe:.1f} on a "
+                        f"{strategic['strategic_label']} name. The market may be "
+                        "discounting a government-backstopped franchise, which a "
+                        "pure cash-flow model does not capture. VALUS does not "
+                        "adjust the fair value for it."
                     )
                 else:
                     pct = ((analyst_target_price - price) / price * 100)
-                    narrative = (
-                        f"Pre-revenue {strategic['strategic_label']} franchise, pure DCF undervalues "
-                        f"these names because earnings haven't materialised yet.  Analyst consensus "
-                        f"sees {pct:+.0f}% upside; sovereign-backstop thesis intact."
+                    strategic_note = (
+                        f"Pre-revenue {strategic['strategic_label']} franchise, so "
+                        f"a cash-flow model has little to work with. Analysts see "
+                        f"{pct:+.0f}% upside. VALUS does not adjust the fair value "
+                        "for either fact."
                     )
-                priced_for = {
-                    "tier":       "strategic_discount",
-                    "label":      "Strategic Discount",
-                    "color":      "green",
-                    "narrative":  narrative,
-                }
         is_mag7 = _is_mag7(ticker)
 
         # ── Verdict Summary (clean numbered "why" explanation) ────────────────
@@ -12372,20 +12082,27 @@ def analyze():
                 },
                 {
                     "step": 8,
-                    "label": "Cash-Rich Premium",
-                    "value": _cr_prem * 100 if _cr_prem else 0,
-                    "format": "delta_pct",
-                    "active": bool(_cr_prem and _cr_prem > 0),
-                    "detail": cash_rich_narrative or "Below 10% net cash threshold, no premium applied.",
+                    "label": "Balance-sheet cash",
+                    "value": None,
+                    "format": "none",
+                    "active": False,
+                    "detail": (cash_rich_narrative + " This is context only: net "
+                               "cash is already subtracted from enterprise value "
+                               "in step 5, so it is not added again here."
+                               ) if cash_rich_narrative else
+                              "No unusual net-cash position.",
                 },
                 {
                     "step": 9,
-                    "label": "Debt Momentum",
-                    "value": (debt_momentum.get("premium_pct", 0) or 0) * 100,
-                    "format": "delta_pct",
-                    "active": bool(debt_momentum and debt_momentum.get("premium_pct", 0) > 0),
-                    "detail": (debt_momentum.get("narrative") if debt_momentum else
-                               "No deleveraging signal detected."),
+                    "label": "Debt trend",
+                    "value": None,
+                    "format": "none",
+                    "active": False,
+                    "detail": ((debt_momentum.get("narrative") + " Reported as "
+                                "context; deleveraging shows up in the cash-flow "
+                                "forecast rather than as a premium on the answer.")
+                               if debt_momentum and debt_momentum.get("narrative")
+                               else "No deleveraging signal detected."),
                 },
                 {
                     "step": 10,
@@ -12528,6 +12245,82 @@ def analyze():
             except Exception:
                 sensitivity_grid = None
 
+        # ── Fair-value RANGE ──────────────────────────────────────────────────
+        # The headline used to be a single number to the cent. It never
+        # deserved that precision: a 1 percentage-point change in the discount
+        # rate moves this model's answer by 17-40%, which is wider than most of
+        # the mispricings the number is used to identify.
+        #
+        # The 3x3 grid above already prices the company across +/-1pp of WACC
+        # and +/-0.5pp of terminal growth. Those are not exotic scenarios, they
+        # are the ordinary uncertainty in two inputs nobody can observe. So the
+        # range IS the answer, and the point estimate is just its centre.
+        #
+        # The grid runs the pure DCF, while the headline may have come through
+        # FIN 415 or a multiples path, so the grid is used for its *shape* and
+        # rescaled onto whatever the headline actually is. The scale is bounded
+        # and the range is force-widened to contain the headline, so the number
+        # on the page can never sit outside its own range.
+        iv_range_low = iv_range_high = iv_range_width_pct = None
+        if (sensitivity_grid and intrinsic_value and intrinsic_value > 0
+                and iv_confidence != "low"):
+            try:
+                _flat = [v for _row in sensitivity_grid["values"] for v in _row
+                         if v is not None and v > 0]
+                _centre = sensitivity_grid["values"][1][1]   # unshifted WACC + TG
+                if len(_flat) >= 5 and _centre and _centre > 0:
+                    _scale = max(0.2, min(intrinsic_value / _centre, 5.0))
+                    _lo = min(_flat) * _scale
+                    _hi = max(_flat) * _scale
+                    _lo = min(_lo, intrinsic_value)
+                    _hi = max(_hi, intrinsic_value)
+                    # Whole dollars above $10: cents on a range this wide are
+                    # false precision twice over.
+                    _r = (lambda v: round(v) if v >= 10 else round(v, 2))
+                    iv_range_low, iv_range_high = _r(_lo), _r(_hi)
+                    iv_range_width_pct = round(
+                        (iv_range_high - iv_range_low) / intrinsic_value * 100, 1)
+            except Exception:
+                iv_range_low = iv_range_high = iv_range_width_pct = None
+
+        # Bear / base / bull are re-expressed on the same band. They used to be
+        # independent DCF runs at different growth rates, which near the
+        # WACC-minus-terminal-growth cliff produced bear cases at a thirteenth
+        # of the base value (LMT: bear $81 against base $1,047). A downside
+        # case that implies a 92% loss is not information. Anchoring all three
+        # to the sensitivity band means the scenario strip and the headline
+        # range can never tell the user two different stories.
+        if scenarios is not None and iv_range_low and iv_range_high:
+            for _k, _v in (("bear", iv_range_low), ("base", intrinsic_value),
+                           ("bull", iv_range_high)):
+                _slot = scenarios.get(_k) or {}
+                _slot["value"]  = round(float(_v), 2)
+                _slot["upside"] = (round((_v - price) / price * 100, 1)
+                                   if price else None)
+                _slot["basis"]  = "sensitivity"
+                scenarios[_k] = _slot
+            _wb = (scenarios.get("base") or {}).get("weight", 60) / 100
+            _wu = (scenarios.get("bull") or {}).get("weight", 20) / 100
+            _wd = (scenarios.get("bear") or {}).get("weight", 20) / 100
+            _wt = round(_wb * intrinsic_value + _wu * iv_range_high
+                        + _wd * iv_range_low, 2)
+            scenarios["weighted"] = _wt
+            scenarios["weighted_upside"] = (
+                round((_wt - price) / price * 100, 1) if price else None)
+        elif scenarios is not None:
+            # No band means no honest downside or upside case either. The raw
+            # scenario runs are what produced bull values BELOW base on names
+            # where the grid is unavailable (banks on the book-value path,
+            # anything missing a Stage-2 rate). Showing a "bull case" that is
+            # worse than the base case is worse than showing nothing, so the
+            # strip is suppressed and the reason is stated.
+            scenarios = {
+                "unavailable": True,
+                "reason": ("VALUS could not test this valuation across a range "
+                           "of discount and growth rates, so it is not showing "
+                           "a downside or upside case for this company."),
+            }
+
         # ── Reconcile the "Try your own assumptions" slider with the headline ──
         # dcf_recompute_basis is captured early, straight off run_dcf_single,
         # BEFORE FIN 415 replaces intrinsic_value and the sector/consensus
@@ -12615,6 +12408,11 @@ def analyze():
             "net_debt":          net_debt if dcf_available else ((safe(info.get("totalDebt"), 0) or 0) - (safe(info.get("totalCash"), 0) or 0)) * fx_rate,
             "scenarios":         scenarios,
             "sensitivity_grid":  sensitivity_grid,
+            # The headline range. Where these are present the UI leads with
+            # them and demotes intrinsic_value to the midpoint.
+            "iv_range_low":      iv_range_low,
+            "iv_range_high":     iv_range_high,
+            "iv_range_width_pct": iv_range_width_pct,
             # ── FIN 415 FCFE model outputs ────────────────────────────────────
             "fin415_used":          fin415_used,
             "fin415_ke":            round(ke * 100, 2) if fin415_used else None,
@@ -12737,14 +12535,14 @@ def analyze():
             "extreme_mos_flag":  _iv_collapsed or _mos_unreliable(margin_of_safety, iv_confidence, ticker),
             # ── "Priced For" Verdict + Verdict Summary ────────────────────
             "priced_for":              priced_for,
-            # ── VALUS A-F letter grade (derived from MOS, then reconciled
-            #    with the priced_for tier so a "Strategic Discount" pill
-            #    can't end up paired with a "D" badge, see
-            #    _reconcile_grade_with_tier for the full rationale) ─────
-            "valus_grade":             _reconcile_grade_with_tier(
-                                           compute_valus_grade(margin_of_safety),
-                                           priced_for,
-                                       ),
+            # ── VALUS A-F letter grade, straight from the margin of safety.
+            #    It used to be post-processed against the priced_for tier so a
+            #    green "Strategic Discount" pill could not sit next to a "D"
+            #    badge -- which resolved the contradiction by overwriting the
+            #    grade rather than by removing the override that caused it.
+            #    Both are gone; the badge and the number now agree because
+            #    they are the same calculation. ─────────────────────────────
+            "valus_grade":             compute_valus_grade(margin_of_safety),
             "verdict_summary":         verdict_summary,
             "sector_growth_ceiling_pct": round(_ceiling * 100, 1) if _ceiling else None,
             "sector_growth_ceiling_label": _ceiling_label,
@@ -12791,6 +12589,7 @@ def analyze():
             "strategic_label":           strategic["strategic_label"]  if strategic else None,
             "strategic_reason":          strategic["strategic_reason"] if strategic else None,
             "strategic_narrative":       strategic["narrative"]        if strategic else None,
+            "strategic_note":            strategic_note,
             "strategic_wacc_delta_pp":   round(strategic_wacc_delta * 100, 2) if strategic else 0.0,
             "strategic_floor_applied":   strategic_floor_applied,
             "strategic_floor":           strategic_floor_payload,

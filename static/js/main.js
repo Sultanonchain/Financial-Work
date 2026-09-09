@@ -213,7 +213,6 @@ const TIER_CLASSES = {
   miracle:            "tier-negative",
   decline:            "tier-negative",
   distress:           "tier-positive",  // distressed = market overly pessimistic = opportunity
-  strategic_discount: "tier-positive",  // strategic asset trading at low forward multiple
 };
 
 function tierClassFor(tier) {
@@ -796,6 +795,7 @@ function renderHeroVerdict(d) {
   const iv    = d.intrinsic_value || 0;
   animateNumber($("vPrice"), 0, price, 600, v => fmtPrice(v));
   animateNumber($("vIV"),    0, iv,    600, v => fmtPrice(v));
+  renderIvBand(d);
 
   // MOS
   const mos = d.margin_of_safety;
@@ -979,6 +979,66 @@ function renderHeroVerdict(d) {
 
 // Populates the inline confidence + implied-growth + 52-week range row.
 // All three are independent, each hidden when its data is missing.
+// The fair-value band. Where the backend could test the valuation across
+// +/-1pp of discount rate and +/-0.5pp of terminal growth, that band is the
+// honest answer and the point estimate is only its midpoint. Where it could
+// not, the band is hidden rather than faked.
+function renderIvBand(d) {
+  const wrap = document.getElementById("vIvBand");
+  if (!wrap) return;
+  const lo = d.iv_range_low, hi = d.iv_range_high, mid = d.intrinsic_value;
+  const px = d.current_price;
+  if (lo == null || hi == null || !mid || hi <= lo) {
+    wrap.classList.add("hidden");
+    return;
+  }
+  wrap.classList.remove("hidden");
+
+  document.getElementById("vIvBandHeadline").textContent =
+    `VALUS thinks this is worth roughly ${fmtPrice(lo)} to ${fmtPrice(hi)} a share.`;
+
+  // Plot lo..hi across the bar, widening the axis if the price sits outside
+  // the band so the marker never falls off the end.
+  const axLo = Math.min(lo, px != null ? px : lo);
+  const axHi = Math.max(hi, px != null ? px : hi);
+  const span = (axHi - axLo) || 1;
+  const pos  = v => Math.max(0, Math.min(100, ((v - axLo) / span) * 100));
+  const spanEl = document.getElementById("vIvBandSpan");
+  spanEl.style.left  = `${pos(lo)}%`;
+  spanEl.style.width = `${Math.max(1, pos(hi) - pos(lo))}%`;
+  document.getElementById("vIvBandMid").style.left = `${pos(mid)}%`;
+  const priceEl = document.getElementById("vIvBandPrice");
+  if (px != null) {
+    priceEl.style.left = `${pos(px)}%`;
+    priceEl.classList.remove("hidden");
+    priceEl.title = `Today's price ${fmtPrice(px)}`;
+  } else {
+    priceEl.classList.add("hidden");
+  }
+
+  // Say why the band is the width it is, and say plainly where the price sits
+  // relative to it — that is the actual question the page exists to answer.
+  const parts = [];
+  if (px != null) {
+    if (px < lo)      parts.push(`Today's price of ${fmtPrice(px)} is below that whole range.`);
+    else if (px > hi) parts.push(`Today's price of ${fmtPrice(px)} is above that whole range.`);
+    else              parts.push(`Today's price of ${fmtPrice(px)} sits inside that range.`);
+  }
+  parts.push(
+    "The range comes from moving the discount rate a percentage point either " +
+    "way and the long-run growth rate half a point either way. Nobody can " +
+    "observe those two numbers, so this is the ordinary uncertainty in the estimate."
+  );
+  const tv = d.terminal_value_share_pct;
+  if (tv != null && tv > 70) {
+    parts.push(
+      `It is wide here because ${tv}% of the value sits beyond year ten, ` +
+      "where small changes to those assumptions compound."
+    );
+  }
+  document.getElementById("vIvBandFoot").textContent = parts.join(" ");
+}
+
 function renderHeroInsights(d) {
   // ── Confidence ──
   const confWrap = document.getElementById("viConfidenceWrap");
@@ -1416,6 +1476,18 @@ function renderScenarios(d) {
   const sc = d.scenarios || {};
   const grid = $("scGrid");
 
+  // The backend suppresses the trio when it could not test the valuation
+  // across a range of rates. Say so rather than rendering three N/As.
+  if (sc.unavailable) {
+    grid.innerHTML =
+      `<div class="sc-empty">${escHtml(sc.reason ||
+        "VALUS is not showing a downside or upside case for this company.")}</div>`;
+    $("scWeightNote").textContent = "";
+    $("scWeighted").textContent = "N/A";
+    $("scWeightedDelta").textContent = "";
+    return;
+  }
+
   $("scWeightNote").textContent = sc.weight_basis ? `Weights: ${sc.weight_basis}` : "";
 
   // Sector-aware case-narratives so users understand what each scenario assumes
@@ -1444,7 +1516,19 @@ function renderScenarios(d) {
     return "VALUS's central forecast, Stage 1 growth tapers to Stage 2, then to terminal at sector ceiling. Discounted at the model WACC.";
   }
 
-  const meta = {
+  // When the values come off the sensitivity band they are not growth
+  // stories, they are the same forecast priced at a higher and a lower
+  // discount rate. Describing them as "AI demand normalises" would put a
+  // narrative on a number that does not contain one.
+  const fromBand = (sc.base && sc.base.basis === "sensitivity");
+  const meta = fromBand ? {
+    bear: { label: "Lower end", valClass: "negative", priorityIdx: 0,
+            case: "The same forecast, discounted at a rate one percentage point higher and with long-run growth half a point lower. Nothing about the business changes here, only the two assumptions nobody can observe." },
+    base: { label: "Midpoint",  valClass: "neutral",  priorityIdx: 1,
+            case: "VALUS's central estimate: Stage 1 growth tapering to Stage 2 and then to the long-run rate, discounted at the model's cost of capital." },
+    bull: { label: "Upper end", valClass: "positive", priorityIdx: 2,
+            case: "The same forecast at a discount rate one percentage point lower and long-run growth half a point higher. Again, the business is unchanged; only the assumptions move." },
+  } : {
     bear: { label: "Bear case",  case: bearCase(), valClass: "negative", priorityIdx: 0 },
     base: { label: "Base case",  case: baseCase(), valClass: "neutral",  priorityIdx: 1 },
     bull: { label: "Bull case",  case: bullCase(), valClass: "positive", priorityIdx: 2 },
@@ -5166,8 +5250,6 @@ const TIER_META = {
                    desc: "Market expects flawless execution. Premium pricing requires growth, margins, and capital discipline to all work together, limited margin of error if any leg slips." },
   miracle:       { label: "Priced for Miracle",       mos: "MOS < −50% or speculative growth", color: "tier-negative",
                    desc: "Market is pricing in extraordinary outcomes that fewer than 1% of public companies achieve over a decade. Speculative, driven by momentum, not fundamentals." },
-  strategic_discount: { label: "Strategic Discount", mos: "Pre-revenue strategic asset", color: "tier-positive",
-                   desc: "Pure DCF undervalues this name because earnings haven't materialised yet. Sovereign-backstopped franchise (defense / CHIPS Act / DOE), analyst consensus and policy tailwinds support upside that the cashflow model can't see." },
 };
 
 function setupTierGlossary() {
