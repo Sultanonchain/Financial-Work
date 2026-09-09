@@ -1738,16 +1738,19 @@ function renderHaikuVerdict(d) {
     assetPlay:   "Asset Play",
   }[lv.category] || (lv.category || "Lynch");
 
-  // Map the internal valuation token to existing tier-color CSS so it
-  // matches the hero theme.  `verdict_key` is the raw token (kept only for
-  // coloring); `verdict` is the neutral label we actually display.
-  const verdictClass = ({
-    Buy:        "tier-positive",
-    Accumulate: "tier-positive",
-    Hold:       "tier-info",
-    Watch:      "tier-warning",
-    Avoid:      "tier-negative",
-  })[lv.verdict_key || lv.verdict] || "tier-info";
+  // Colour comes from the server's neutral `tier` (positive|info|warning|
+  // negative).  The old `verdict_key` carried the raw action token ("Buy",
+  // "Avoid") and no longer exists anywhere in the system; the label fallback
+  // below covers a payload cached before the namespace bump.
+  const verdictClass =
+    ({ positive: "tier-positive", info: "tier-info",
+       warning: "tier-warning", negative: "tier-negative" })[lv.tier] ||
+    ({ "Undervalued":          "tier-positive",
+       "Modestly Undervalued": "tier-positive",
+       "Fairly Valued":        "tier-info",
+       "Slightly Overvalued":  "tier-warning",
+       "Overvalued":           "tier-negative" })[lv.verdict] ||
+    "tier-info";
 
   const cat  = document.getElementById("lynchCategory");
   const verd = document.getElementById("lynchVerdict");
@@ -1763,7 +1766,7 @@ function renderHaikuVerdict(d) {
   }
   if (cat)  cat.textContent  = catLabel;
   if (verd) {
-    verd.textContent = lv.verdict || "Fairly Valued";
+    verd.textContent = lv.verdict || "Fairly Valued";   // never an action word
     verd.className   = "lynch-verdict " + verdictClass;
   }
   if (thes) thes.textContent = lv.thesis || "";

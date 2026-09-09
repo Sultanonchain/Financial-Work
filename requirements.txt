@@ -1,7 +1,12 @@
 flask>=3.0.0
 flask-cors>=4.0.0
 flask-limiter>=3.5.0
-yfinance>=0.2.40
+# Upper bound is deliberate: the range was unbounded, and a transitive
+# upgrade silently broke /api/history (a TypeError out of the history
+# scraper, deterministic on every call). 1.2.x is the line this codebase is
+# tested against; re-verify /api/history, /api/statements and /api/analyze
+# before widening it.
+yfinance>=1.2.0,<2.0
 numpy>=1.26.0
 pandas>=2.0.0
 gunicorn>=21.2.0

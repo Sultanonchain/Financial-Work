@@ -99,21 +99,38 @@ def _inject_asset_version():
 #     in" symptom.
 #   - In local dev we use a deterministic fallback so sessions survive
 #     a `python3 app.py` restart.
+# The guard is inverted deliberately: it used to fire only when VERCEL was
+# set, which meant a gunicorn deploy from the shipped render.yaml / Procfile
+# silently signed sessions with the repo-committed literal below.  Since user
+# ids are readable from /api/leaderboard, that let anyone forge a session
+# cookie for any account, or set valus_unlimited.  Now production is the
+# default and dev must opt in explicitly.
+# Single source of truth for what counts as a ticker symbol.  Anything that
+# reaches yfinance, the search-popularity store or a rendered page must pass
+# this first: 1-12 chars, letter-initial, uppercase alphanumerics plus dot and
+# hyphen (BRK.B, RDS-A).
+_VALID_TICKER_RE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,11}$")
+
+_IS_DEV = os.environ.get("VALUS_DEV") == "1"
 _secret = os.environ.get("SECRET_KEY")
 if not _secret:
-    if os.environ.get("VERCEL"):
+    if not _IS_DEV:
         raise RuntimeError(
-            "SECRET_KEY environment variable is required in production. "
-            "Without it Flask sessions/OAuth state break across lambda "
-            "instances, causing intermittent sign-in failures. Set a "
-            "long random string in the Vercel project env."
+            "SECRET_KEY environment variable is required. Without it Flask "
+            "sessions are signed with a key committed to this repository, so "
+            "anyone can forge a session for any user. Set a long random "
+            "string in the deploy environment, or set VALUS_DEV=1 for local "
+            "development."
         )
     _secret = "valus-dev-only-fixed-key-do-not-use-in-prod"
 app.secret_key = _secret
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=bool(os.environ.get("VERCEL")),  # secure cookies on prod only
+    # Same inversion: secure cookies everywhere except an explicit local dev
+    # run, so a non-Vercel production deploy does not send the session
+    # cookie over plaintext HTTP.
+    SESSION_COOKIE_SECURE=not _IS_DEV,
     # 30-day persistent login: when auth_callback sets session.permanent = True,
     # the signed cookie survives browser restarts and follows the user across
     # devices for 30 days. Without this, sessions expire on browser close, # which is the "I have to sign in every time I open the site" symptom.
@@ -247,6 +264,13 @@ def limit_medium():
     return "60 per minute; 1000 per day" if _is_signed_in() else "20 per minute; 200 per day"
 def limit_light():
     return "120 per minute; 2000 per day" if _is_signed_in() else "30 per minute; 300 per day"
+def limit_default():
+    # Backstop for every route without an explicit decorator.  Generous enough
+    # that no legitimate session notices, tight enough that an unauthenticated
+    # client cannot sit on an expensive endpoint (/api/leaderboard fans out to
+    # thousands of Redis round-trips per call).  default_limits used to be
+    # empty, which left 24 /api/ routes uncapped.
+    return "240 per minute; 6000 per day" if _is_signed_in() else "90 per minute; 1500 per day"
 def limit_valuations():
     # Batched read endpoint: the Investor Hub MOS column fires several small
     # POSTs per investor view (one per 5-ticker batch).  Give it more headroom
@@ -259,9 +283,13 @@ limiter = Limiter(
     key_func=_rate_limit_key,
     app=app,
     storage_uri=_limiter_storage or "memory://",
-    default_limits=[],
+    default_limits=[limit_default],
     headers_enabled=True,
 )
+# Static assets in local dev (Vercel serves /static itself in production) and
+# the Stripe webhook, which legitimately bursts on redelivery and must never
+# be told 429 -- Stripe would keep retrying a request we are refusing.
+limiter.exempt(app.view_functions["static"])
 
 # ── Google OAuth (optional, gracefully disabled when env vars absent) ─
 _oauth = None
@@ -360,7 +388,15 @@ def _read_subscription(user_sub):
 
 
 def _write_subscription(user_sub, record):
-    """Persist subscription dict for a user. record={} clears them to free."""
+    """Persist subscription dict for a user. record={} clears them to free.
+
+    Raises KVUnavailable when KV is configured but the write fails.  This used
+    to be swallowed: the record went to process-local memory, the webhook
+    returned 200, Stripe never retried, and the subscription died with the
+    lambda — a user who had paid simply never got VALUS+.  Letting it
+    propagate makes the webhook 5xx so Stripe redelivers.  The portfolio layer
+    already works this way.
+    """
     if not user_sub:
         return
     key = SUBSCRIPTION_KEY_FMT.format(sub=user_sub)
@@ -371,8 +407,9 @@ def _write_subscription(user_sub, record):
             else:
                 _kv.delete(key)
             return
-        except Exception:
-            pass
+        except Exception as e:
+            raise KVUnavailable(f"subscription write failed for {user_sub}: {e}")
+    # No KV configured at all (local dev): in-memory is the intended store.
     if record:
         _SUBSCRIPTION_MEM[user_sub] = dict(record)
     else:
@@ -698,10 +735,10 @@ def _fetch_edgar_8k(ticker: str) -> list:
             f"action=getcompany&CIK={ticker}&type=8-K"
             f"&dateb=&owner=include&count=5&output=atom"
         )
-        resp = requests.get(
-            url, timeout=6,
-            headers={"User-Agent": "VALUS Research tool@valus.ai Accept-Encoding: gzip"}
-        )
+        # Was a hardcoded, malformed UA citing valus.ai (not a domain this
+        # project owns).  SEC's fair-access policy asks for a real contact;
+        # every other SEC call site already uses _SEC_UA.
+        resp = requests.get(url, timeout=6, headers={"User-Agent": _SEC_UA})
         if resp.status_code != 200:
             return []
         root = ET.fromstring(resp.text)
@@ -984,28 +1021,53 @@ _LYNCH_CACHE_TTL = 5 * 24 * 3600   # 5 days, must cover weekend (Fri-close → M
 _ANTHROPIC_COOLDOWN_UNTIL = 0.0
 
 # ── Verdict vocabulary ───────────────────────────────────────────────────
-# The internal scoring logic reasons in action-style tokens (Buy / Hold /
-# Avoid …) because the Peter-Lynch heuristics are framed that way.  But
-# VALUS is an EDUCATIONAL tool and is NOT a registered investment adviser:
-# shipping an explicit buy/sell call on a named security reads as a
-# personalized recommendation and is the single biggest legal-exposure item
-# for the product.  So we translate every internal token to a neutral
-# *valuation assessment* before it ever leaves the server or hits the cache.
-# The raw token is preserved as `verdict_key` purely so the frontend can pick
-# a matching color, it is never shown to the user as a label.
-_VERDICT_DISPLAY = {
-    "Buy":        "Undervalued",
-    "Accumulate": "Modestly Undervalued",
-    "Hold":       "Fairly Valued",
-    "Watch":      "Slightly Overvalued",
-    "Avoid":      "Overvalued",
-}
+# VALUS is an EDUCATIONAL tool and is NOT a registered investment adviser.  An
+# explicit buy/sell call on a named security reads as a personalized
+# recommendation and is the single biggest legal-exposure item for the
+# product, so the action tokens (Buy / Hold / Avoid …) do not exist anywhere
+# in this system: not in the prompt, not in the parsed reply, not on the wire,
+# not in the cache.  Every verdict is a *valuation assessment* on one axis.
+#
+# Previously the tokens were generated and then translated at the last moment,
+# with the raw token still shipped as `verdict_key` for frontend colouring.
+# That left a stored, retrievable artifact reading e.g. {"verdict_key":"Avoid"}
+# for a named ticker.  Colour now travels as a neutral `tier` instead.
+_VALUATION_VERDICTS = (
+    # (label, tier)  — ordered most undervalued → most overvalued
+    ("Undervalued",          "positive"),
+    ("Modestly Undervalued", "positive"),
+    ("Fairly Valued",        "info"),
+    ("Slightly Overvalued",  "warning"),
+    ("Overvalued",           "negative"),
+)
+_VALID_VERDICT_LABELS = {label for label, _ in _VALUATION_VERDICTS}
+_VERDICT_TIER = dict(_VALUATION_VERDICTS)
+_VERDICT_ORDER = {label: i for i, (label, _) in enumerate(_VALUATION_VERDICTS)}
+
+# The neutral middle, used wherever a verdict must be clamped or defaulted.
+_VERDICT_NEUTRAL = "Fairly Valued"
 
 
-def _verdict_label(token):
-    """Map an internal action token to the neutral valuation label shown to
-    users.  Unknown tokens fall back to the neutral middle."""
-    return _VERDICT_DISPLAY.get(token, "Fairly Valued")
+def _verdict_tier(label):
+    """Neutral colour bucket for a valuation label: positive|info|warning|
+    negative.  This is what the frontend keys its theme off."""
+    return _VERDICT_TIER.get(label, "info")
+
+
+def _verdict_floor_at_neutral(label):
+    """Clamp an overvalued call back to the neutral middle.  Used by the
+    regime cap and the strategic backstop, both of which previously reasoned
+    in action tokens."""
+    if _VERDICT_ORDER.get(label, 2) > _VERDICT_ORDER[_VERDICT_NEUTRAL]:
+        return _VERDICT_NEUTRAL
+    return label
+
+
+def _verdict_cap_at_neutral(label):
+    """Clamp an undervalued call down to the neutral middle."""
+    if _VERDICT_ORDER.get(label, 2) < _VERDICT_ORDER[_VERDICT_NEUTRAL]:
+        return _VERDICT_NEUTRAL
+    return label
 
 
 def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
@@ -1036,12 +1098,14 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
     epoch = _market_epoch()
     # Cache namespace is versioned so a prompt/model change supersedes entries
     # cached under the old version rather than serving stale verdicts for up to
-    # 5 days.  Bumped to v4 for the Sonnet upgrade + valuation-numerics prompt.
-    bucket = (ticker.upper(), epoch, "v4")
+    # 5 days.  v4: Sonnet upgrade + valuation-numerics prompt.  v5: action
+    # tokens removed from the prompt and the payload — entries written under v4
+    # still carry `verdict_key`, so they must not be served.
+    bucket = (ticker.upper(), epoch, "v5")
     cached = _LYNCH_CACHE.get(bucket)
     if cached and (time.time() - cached[0]) < _LYNCH_CACHE_TTL:
         return cached[1]
-    redis_key = f"valus:lynch:v4:{bucket[0]}:{epoch}"
+    redis_key = f"valus:lynch:v5:{bucket[0]}:{epoch}"
     if _kv:
         try:
             raw = _kv.get(redis_key)
@@ -1211,7 +1275,11 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
             "  In all text fields, do NOT use em-dashes or en-dashes; use commas\n"
             "  or periods instead. Keep wording plain and easy to read.\n"
             "  category: one of slowGrower|stalwart|fastGrower|cyclical|turnaround|assetPlay\n"
-            "  verdict:  one of Buy|Accumulate|Hold|Watch|Avoid\n"
+            "  verdict:  one of Undervalued|Modestly Undervalued|Fairly Valued|\n"
+            "            Slightly Overvalued|Overvalued.  This is an assessment of\n"
+            "            price against value, NOT an instruction to trade.  Never\n"
+            "            emit Buy, Sell, Hold, Accumulate, Avoid or any other\n"
+            "            action word in this or any other field.\n"
             "  thesis:   <= 240 chars, plain English, Lynch-flavored.  DESCRIBE\n"
             "            the valuation and the business, do NOT issue direct\n"
             "            commands to buy, sell, or hold.  This is educational\n"
@@ -1232,11 +1300,12 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
             "    fill).  Negative wacc_delta = sovereign capital lowers cost of\n"
             "    equity (CHIPS Act, gov't equity stake, DPA-protected revenue).\n"
             "    Use zeros when no edge exists, do NOT pad. Stay inside the bounds.\n"
-            "Be honest.  If numbers are weak AND no backstop applies AND regime is\n"
-            "stable, say Avoid.  If a backstop applies, the verdict floor is HOLD, \n"
-            "NEVER Avoid, NEVER Watch on a backstopped name.  Lead the bull case\n"
-            "with the backstop.  If regime is momentum_runup or squeeze_risk, cap\n"
-            "verdict at Hold/Watch and lead with what the tape is doing.\n"
+            "Be honest.  If the numbers are weak AND no backstop applies AND the\n"
+            "regime is stable, say Overvalued.  If a backstop applies, the verdict\n"
+            "floor is Fairly Valued, never Overvalued or Slightly Overvalued on a\n"
+            "backstopped name; lead the bull case with the backstop.  If the regime\n"
+            "is momentum_runup or squeeze_risk, do not go above Fairly Valued and\n"
+            "lead with what the tape is doing.\n"
         )
         full_prompt = prompt + snap_extra + instructions
 
@@ -1304,7 +1373,7 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
 
         _VALID_CATS = {"slowGrower", "stalwart", "fastGrower",
                        "cyclical", "turnaround", "assetPlay"}
-        _VALID_VERDICTS = {"Buy", "Accumulate", "Hold", "Watch", "Avoid"}
+        # No action tokens: the model is asked for a valuation band directly.
         cat = str(parsed.get("category", "")).strip()
         verdict = str(parsed.get("verdict", "")).strip()
 
@@ -1327,19 +1396,21 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         if regime_out not in _VALID_REGIMES:
             regime_out = (tape_signals or {}).get("regime") or "stable"
 
-        # Enforce the cap: momentum_runup / squeeze_risk can't be Buy/Accumulate
-        # even if the model ignored the prompt.
-        verdict_final = verdict if verdict in _VALID_VERDICTS else "Hold"
-        if regime_out in ("momentum_runup", "squeeze_risk") and verdict_final in ("Buy", "Accumulate"):
-            verdict_final = "Hold"
+        # A model that ignores the enum falls back to the neutral middle rather
+        # than to a token that no longer exists.
+        verdict_final = verdict if verdict in _VALID_VERDICT_LABELS else _VERDICT_NEUTRAL
 
-        # Strategic-backstop floor: sovereign capital makes failure
-        # off-the-table for these names, so Avoid/Watch is never the right
-        # call.  Floor at Hold.  Does NOT override Buy/Accumulate, only
-        # clamps the downside.
+        # Regime cap: a melt-up or a squeeze is not the moment to call
+        # something cheap, whatever the model said.
+        if regime_out in ("momentum_runup", "squeeze_risk"):
+            verdict_final = _verdict_cap_at_neutral(verdict_final)
+
+        # Strategic-backstop floor: sovereign capital takes failure off the
+        # table for these names, so an overvalued call is not the right read.
+        # Floors at the neutral middle; never overrides an undervalued call.
         is_backstopped = bool(strategic_info and strategic_info.get("is_strategic"))
-        if is_backstopped and verdict_final in ("Avoid", "Watch"):
-            verdict_final = "Hold"
+        if is_backstopped:
+            verdict_final = _verdict_floor_at_neutral(verdict_final)
 
         bull_points = _coerce_str_list(parsed.get("bull_points"))
         # Lead the bull case with the backstop when one applies, so the
@@ -1381,8 +1452,10 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
 
         result = {
             "category":           cat if cat in _VALID_CATS else None,
-            "verdict":            _verdict_label(verdict_final),
-            "verdict_key":        verdict_final,   # internal token → frontend color only
+            "verdict":            verdict_final,
+            # Neutral colour bucket (positive|info|warning|negative).  Replaces
+            # the old `verdict_key`, which shipped the raw action token.
+            "tier":               _verdict_tier(verdict_final),
             "thesis":             str(parsed.get("thesis", ""))[:260],
             "bull_points":        bull_points,
             "bear_points":        _coerce_str_list(parsed.get("bear_points")),
@@ -1417,25 +1490,26 @@ def _lynch_fallback_verdict(ticker, sector, mos, strategic_info,
     is_strategic = bool(strategic_info and strategic_info.get("is_strategic"))
     regime = regime or "stable"
 
-    # Verdict from MOS bands
+    # Valuation band from MOS.  Cut-points match _priced_for_verdict so the
+    # card and the tier badge cannot disagree about the same stock.
     if mos is None:
-        verdict = "Hold"
+        verdict = _VERDICT_NEUTRAL
     elif mos >= 40:
-        verdict = "Buy"
+        verdict = "Undervalued"
     elif mos >= 15:
-        verdict = "Accumulate"
+        verdict = "Modestly Undervalued"
     elif mos >= -10:
-        verdict = "Hold"
+        verdict = "Fairly Valued"
     elif mos >= -25:
-        verdict = "Watch"
+        verdict = "Slightly Overvalued"
     else:
-        verdict = "Avoid"
+        verdict = "Overvalued"
 
     # Same clamps as the Claude path
-    if regime in ("momentum_runup", "squeeze_risk") and verdict in ("Buy", "Accumulate"):
-        verdict = "Hold"
-    if is_strategic and verdict in ("Avoid", "Watch"):
-        verdict = "Hold"
+    if regime in ("momentum_runup", "squeeze_risk"):
+        verdict = _verdict_cap_at_neutral(verdict)
+    if is_strategic:
+        verdict = _verdict_floor_at_neutral(verdict)
 
     bull_points, bear_points = [], []
     sb_str = None
@@ -1461,8 +1535,8 @@ def _lynch_fallback_verdict(ticker, sector, mos, strategic_info,
     epoch = _market_epoch()
     return {
         "category":           None,
-        "verdict":            _verdict_label(verdict),
-        "verdict_key":        verdict,   # internal token → frontend color only
+        "verdict":            verdict,
+        "tier":               _verdict_tier(verdict),
         "thesis":             thesis,
         "bull_points":        bull_points[:3],
         "bear_points":        bear_points[:3],
@@ -2621,38 +2695,58 @@ def get_quarterly_balance_data(stock, info, fx_rate):
     return result
 
 
-def get_fx_rate(from_ccy: str, to_ccy: str) -> float:
-    """
-    Return the exchange rate: 1 from_ccy = X to_ccy.
-    E.g. get_fx_rate('EUR','USD') ≈ 1.09
-    Falls back to 1.0 if unavailable.
+_FX_CACHE_TTL = 6 * 3600     # rates move; a process can live much longer
+
+
+def get_fx_rate_detailed(from_ccy: str, to_ccy: str):
+    """Return (rate, source) where source is 'same' | 'live' | 'inverse' |
+    'unavailable'.
+
+    A failure returns (1.0, 'unavailable') and is deliberately NOT cached.
+    Previously any failure degraded to a bare 1.0 that was indistinguishable
+    from a real rate, and _fx_cache was keyed only by the currency pair with
+    no TTL — so one blip pinned 1.0 for the life of the process and every ADR
+    that reports in a non-USD currency (NOK, SAP, TM, SHEL, BABA, ASML) was
+    mis-valued by the entire FX ratio, silently.
     """
     if from_ccy == to_ccy:
-        return 1.0
+        return 1.0, "same"
     key = f"{from_ccy}{to_ccy}"
-    if key in _fx_cache:
-        return _fx_cache[key]
+    hit = _fx_cache.get(key)
+    if hit and (time.time() - hit[0]) < _FX_CACHE_TTL:
+        return hit[1], hit[2]
     try:
-        ticker_sym = f"{from_ccy}{to_ccy}=X"
-        fi = yf.Ticker(ticker_sym).fast_info
-        rate = float(fi.get("lastPrice") or fi.get("regularMarketPrice") or 1.0)
-        if rate and not np.isnan(rate) and 0.0001 < rate < 100000:
-            _fx_cache[key] = rate
-            return rate
+        fi = yf.Ticker(f"{from_ccy}{to_ccy}=X").fast_info
+        raw = fi.get("lastPrice") or fi.get("regularMarketPrice")
+        if raw is not None:
+            rate = float(raw)
+            if rate and not np.isnan(rate) and 0.0001 < rate < 100000:
+                _fx_cache[key] = (time.time(), rate, "live")
+                return rate, "live"
     except Exception:
         pass
     # Try inverse
     try:
-        ticker_sym2 = f"{to_ccy}{from_ccy}=X"
-        fi2 = yf.Ticker(ticker_sym2).fast_info
-        inv = float(fi2.get("lastPrice") or fi2.get("regularMarketPrice") or 1.0)
-        if inv and not np.isnan(inv) and inv > 0:
-            rate = 1.0 / inv
-            _fx_cache[key] = rate
-            return rate
+        fi2 = yf.Ticker(f"{to_ccy}{from_ccy}=X").fast_info
+        raw2 = fi2.get("lastPrice") or fi2.get("regularMarketPrice")
+        if raw2 is not None:
+            inv = float(raw2)
+            if inv and not np.isnan(inv) and 0.0001 < inv < 100000:
+                rate = 1.0 / inv
+                _fx_cache[key] = (time.time(), rate, "inverse")
+                return rate, "inverse"
     except Exception:
         pass
-    return 1.0
+    # Never cached: the next request gets a real attempt rather than
+    # inheriting this failure for the process lifetime.
+    print(f"[valus] fx: no rate for {from_ccy}->{to_ccy}, falling back to 1.0")
+    return 1.0, "unavailable"
+
+
+def get_fx_rate(from_ccy: str, to_ccy: str) -> float:
+    """Exchange rate: 1 from_ccy = X to_ccy.  See get_fx_rate_detailed() for
+    the provenance a caller needs to tell a real 1.0 from a failed lookup."""
+    return get_fx_rate_detailed(from_ccy, to_ccy)[0]
 
 PERIOD_MAP = {
     "1d":  ("1d",  "5m"),
@@ -6798,7 +6892,7 @@ def stock_page(ticker):
     executing JS. Bootstraps users into the SPA via /?t=<ticker>.
     """
     t = (ticker or "").strip().upper()
-    if not t or not re.match(r"^[A-Z][A-Z0-9.\-]{0,11}$", t):
+    if not t or not _VALID_TICKER_RE.match(t):
         return redirect("/stocks", code=302)
 
     # Try the warm analyze cache first so we render with real numbers when
@@ -7213,7 +7307,7 @@ def account_delete():
 
     # 4. Public leaderboard rows authored by this user.
     try:
-        entries = _read_leaderboard()
+        entries = _read_leaderboard(strict=True)
         kept = [e for e in entries if e.get("user_sub") != sub]
         removed["leaderboard_rows"] = len(entries) - len(kept)
         if removed["leaderboard_rows"]:
@@ -7325,6 +7419,9 @@ def subscribe():
 
 
 @app.route("/api/stripe/webhook", methods=["POST"])
+# Never rate-limited: a 429 to Stripe is a request we are refusing that Stripe
+# will keep retrying, and the signature check below is the real gate.
+@limiter.exempt
 def stripe_webhook():
     """Receive subscription lifecycle events from Stripe and persist them.
 
@@ -7368,6 +7465,14 @@ def stripe_webhook():
     etype = event.get("type") if isinstance(event, dict) else event["type"]
     obj   = (event.get("data") or {}).get("object") if isinstance(event, dict) \
             else event["data"]["object"]
+    event_id = (event.get("id") if isinstance(event, dict) else event["id"]) or ""
+
+    # Idempotency.  Stripe redelivers on any non-2xx (and we now return 5xx on
+    # a failed write), so without this a redelivered
+    # checkout.session.completed could restore access after a cancellation.
+    if event_id and _stripe_event_seen(event_id):
+        return jsonify({"received": True, "duplicate": True})
+
     try:
         if etype == "checkout.session.completed":
             # Pull the user_sub from client_reference_id (set when we created
@@ -7391,6 +7496,8 @@ def stripe_webhook():
                         "current_period_end": _sub_period_end(sub),
                         "since":              int(time.time()),
                     })
+                except KVUnavailable:
+                    raise          # storage problem, not a Stripe problem
                 except Exception:
                     # Stripe API blip: do NOT grant "active" without any payment
                     # confirmation. Write "incomplete" so is_valus_plus won't
@@ -7428,13 +7535,62 @@ def stripe_webhook():
                 cust_id = obj.get("customer")
                 user_sub = _find_user_by_customer(cust_id) if cust_id else None
             if user_sub:
-                _write_subscription(user_sub, {})
+                # Was `_write_subscription(user_sub, {})`, which deleted the
+                # key outright and erased customer_id — permanently breaking
+                # _find_user_by_customer for that customer, so none of their
+                # later webhooks could be attributed.  Keep the identifiers,
+                # drop the entitlement.
+                existing = _read_subscription(user_sub)
+                _write_subscription(user_sub, {
+                    "status":             "canceled",
+                    "customer_id":        existing.get("customer_id") or obj.get("customer"),
+                    "subscription_id":    existing.get("subscription_id") or obj.get("id"),
+                    "current_period_end": _sub_period_end(obj) or existing.get("current_period_end"),
+                    "canceled_at":        int(time.time()),
+                })
+    except KVUnavailable as e:
+        # The write did NOT persist.  A 200 here tells Stripe the event is
+        # handled and it never retries, so the user's paid subscription is
+        # lost.  5xx makes Stripe redeliver with its own backoff.
+        print(f"[valus] stripe webhook storage unavailable: {e}")
+        return jsonify({"error": "storage_unavailable"}), 503
     except Exception as e:
         print(f"[valus] stripe webhook handler errored: {type(e).__name__}: {e}")
         traceback.print_exc()
-        # Always 200 OK to Stripe so it doesn't retry forever on bugs we
-        # own.  We've already logged for ops triage.
+        # 200 OK on bugs we own, so Stripe doesn't retry forever on something
+        # a redelivery cannot fix.  Already logged for ops triage.
+        return jsonify({"received": True})
+    if event_id:
+        _stripe_mark_event_seen(event_id)
     return jsonify({"received": True})
+
+
+# Processed-event ledger for webhook idempotency.  KV when available (survives
+# lambda recycling, which is the case that matters); an in-process set is the
+# local-dev fallback.
+_STRIPE_EVENT_MEM = set()
+_STRIPE_EVENT_TTL = 7 * 24 * 3600     # Stripe retries for up to ~3 days
+
+
+def _stripe_event_seen(event_id: str) -> bool:
+    if _kv:
+        try:
+            return bool(_kv.get(f"valus:stripe:evt:{event_id}"))
+        except Exception:
+            # Treat an unreadable ledger as "not seen": re-processing a
+            # subscription write is idempotent, dropping one is not.
+            return False
+    return event_id in _STRIPE_EVENT_MEM
+
+
+def _stripe_mark_event_seen(event_id: str) -> None:
+    if _kv:
+        try:
+            _kv.setex(f"valus:stripe:evt:{event_id}", _STRIPE_EVENT_TTL, "1")
+            return
+        except Exception:
+            pass
+    _STRIPE_EVENT_MEM.add(event_id)
 
 
 def _find_user_by_customer(customer_id: str):
@@ -7499,6 +7655,13 @@ def subscription_cancel():
             "cancel_at_period_end": True,
         })
         return jsonify({"ok": True, "cancels_at": _sub_period_end(updated)})
+    except KVUnavailable:
+        # Stripe has the cancellation but we could not record it.  Say so
+        # rather than reporting success against a write that did not land.
+        return jsonify({
+            "error": "Cancellation was submitted but we could not save it. "
+                     "Refresh in a moment, or contact support.",
+        }), 503
     except Exception as e:
         return jsonify({"error": str(e)[:200]}), 500
 
@@ -7540,6 +7703,8 @@ def history():
     period = request.args.get("period", "1y").lower()
     if not ticker:
         return jsonify({"error": "ticker required"}), 400
+    if not _VALID_TICKER_RE.match(ticker):
+        return jsonify({"error": "invalid ticker"}), 400
     yf_period, yf_interval = PERIOD_MAP.get(period, ("1y", "1d"))
     try:
         hist = yf.Ticker(ticker).history(period=yf_period, interval=yf_interval)
@@ -7956,6 +8121,8 @@ def statements():
     ticker = request.args.get("ticker", "").strip().upper()
     if not ticker:
         return jsonify({"error": "ticker required"}), 400
+    if not _VALID_TICKER_RE.match(ticker):
+        return jsonify({"error": "invalid ticker"}), 400
     try:
         stock = yf.Ticker(ticker)
         info  = stock.info
@@ -8057,7 +8224,7 @@ def _record_search(scope: str, ident: str, ticker: str) -> None:
             pass
     _SEARCH_LIMIT_MEM[key] = list(seen)
 
-def _check_anon_search_limit(req, ticker: str):
+def _check_anon_search_limit(req, ticker: str, commit: bool = True):
     """Returns None to allow, or (response, status) tuple to block.
 
     Policy:
@@ -8113,8 +8280,37 @@ def _check_anon_search_limit(req, ticker: str):
             "signed_in":   scope == "user",
             "is_plus":     False,
         }), 429)
-    _record_search(scope, ident, ticker)
+    # Callers that can still fail after this point (an unresolvable ticker, an
+    # upstream error) pass commit=False and call _commit_search() once the
+    # analysis actually succeeded.  Charging first is how a typo cost a user
+    # one of five daily lookups.
+    if commit:
+        _record_search(scope, ident, ticker)
     return None
+
+
+def _commit_search(req, ticker: str) -> None:
+    """Charge one daily search, and only now let the ticker influence public
+    surfaces (trending chips, recents).  Safe to call more than once: the
+    quota is a set of unique tickers per day."""
+    if _INTERNAL_CALL.get():
+        return
+    if session.get("valus_unlimited"):
+        return
+    user = session.get("user") or {}
+    if not is_valus_plus(user):
+        if user.get("sub"):
+            _record_search("user", user["sub"], ticker)
+        else:
+            _record_search("anon", _client_ip(req), ticker)
+    # Popularity tracking. Deliberately after success: a ticker that 404s is
+    # not something to advertise on the homepage.
+    try:
+        _track_ticker_search(ticker)
+        if user.get("sub"):
+            _record_recent_ticker(user["sub"], ticker)
+    except Exception:
+        app.logger.exception("search tracking failed for %s", ticker)
 
 
 # ── Search popularity tracking ────────────────────────────────────────────
@@ -8384,19 +8580,40 @@ def _ttl_for_ticker(ticker):
 
 _KEY_PARAMS = ("growth1", "growth2", "terminal", "years")
 
+# ?fresh=1 budget: per-user, per-hour.  Deliberately small — the cache TTL is
+# an hour, so this is enough to re-pull a handful of names you are actively
+# watching and not enough to loop.
+_FORCE_FRESH_MAX_PER_HOUR = 12
+_FORCE_FRESH_MEM = {}      # {ident: [timestamps]}
+
+
+def _allow_force_fresh(user) -> bool:
+    ident = (user or {}).get("sub") or f"ip:{_client_ip(request)}"
+    now = time.time()
+    hits = [t for t in _FORCE_FRESH_MEM.get(ident, []) if now - t < 3600]
+    if len(hits) >= _FORCE_FRESH_MAX_PER_HOUR:
+        _FORCE_FRESH_MEM[ident] = hits
+        return False
+    hits.append(now)
+    _FORCE_FRESH_MEM[ident] = hits
+    # Bound the dict on a long-lived worker.
+    if len(_FORCE_FRESH_MEM) > 2000:
+        for k in [k for k, v in _FORCE_FRESH_MEM.items() if not v or now - v[-1] > 3600][:1000]:
+            _FORCE_FRESH_MEM.pop(k, None)
+    return True
+
+
 def _analyze_cache_key(ticker, args):
     # Only compute-affecting params belong in the key. Folding in arbitrary
     # query args (?fresh, ?_=123, junk) fragmented the cache and let any client
     # bust/evict it; restrict to the whitelist so plain requests share the
     # canonical key with the cron/valuations/leaderboard.
     relevant = sorted((k, args[k]) for k in _KEY_PARAMS if args.get(k) not in (None, ""))
-    # Namespace bumped to v2 so cached analyze payloads carrying the old
-    # action-word Lynch verdict ("Buy"/"Avoid") are not served after the
-    # neutral-label rollout.
-    # v4: recompute so cached payloads carrying the old over-aggressive
-    # extreme_mos_flag (which wrongly hid high-confidence DCFs like FIVN) are
-    # superseded by the recalibrated data-error flag.
-    return f"valus:analyze:v4:{ticker}|{relevant}"
+    # Namespace history: v2 dropped the action-word Lynch verdict from the
+    # displayed label; v4 superseded payloads carrying the over-aggressive
+    # extreme_mos_flag; v5 removes `verdict_key` (the raw action token) from
+    # the embedded lynch_verdict entirely, so v4 entries must not be served.
+    return f"valus:analyze:v5:{ticker}|{relevant}"
 
 def _analyze_cache_get(key):
     # 1. Check Redis first (shared across all Vercel instances)
@@ -8664,12 +8881,27 @@ LEADERBOARD_FILE = "/tmp/.valus_leaderboard.json"
 LEADERBOARD_KEY  = "valus:leaderboard:v1"
 _LEADERBOARD_MEM = []
 
-def _read_leaderboard():
-    # KV first (multi-instance durability)
-    raw = kv_get(LEADERBOARD_KEY)
-    if raw:
-        try: return _json.loads(raw)
-        except Exception: pass
+def _read_leaderboard(strict=False):
+    """Read the leaderboard blob.
+
+    strict=True is for mutations: it raises KVUnavailable when KV is
+    configured but unreadable, instead of quietly returning the /tmp mirror or
+    an empty list.  Without it, a transient KV read failure made the caller
+    believe the leaderboard was empty and the write-back replaced ~200 real
+    entries with one — while the user saw a success toast.
+    """
+    if _kv:
+        try:
+            raw = _kv.get(LEADERBOARD_KEY)
+        except Exception as e:
+            if strict:
+                raise KVUnavailable(f"leaderboard read failed: {e}")
+            raw = None
+        if raw:
+            try: return _json.loads(raw)
+            except Exception:
+                if strict:
+                    raise KVUnavailable("leaderboard blob is not valid JSON")
     # /tmp file
     if os.path.exists(LEADERBOARD_FILE):
         try:
@@ -8683,8 +8915,11 @@ def _write_leaderboard(entries):
     global _LEADERBOARD_MEM
     _LEADERBOARD_MEM = list(entries)
     serialized = _json.dumps(entries)
-    # KV first, write-through
-    kv_set(LEADERBOARD_KEY, serialized)
+    # KV first, write-through.  kv_set returns False on failure; a mutation
+    # that reports success while the durable copy is untouched is how the
+    # leaderboard appeared to accept a submission and then lose it.
+    if _kv and not kv_set(LEADERBOARD_KEY, serialized):
+        raise KVUnavailable("leaderboard write failed")
     # /tmp mirror so local dev still works without KV
     try:
         with open(LEADERBOARD_FILE, "w") as f:
@@ -8735,7 +8970,7 @@ def leaderboard_submit():
     if pid and not _PF_ID_RE.match(pid):
         return jsonify({"error": "invalid portfolio id"}), 400
 
-    entries = _read_leaderboard()
+    entries = _read_leaderboard(strict=True)
     legacy_token = (body.get("legacy_user_token") or "").strip()[:64]
 
     # Drop (a) this user's prior entry for the SAME portfolio (pid match),
@@ -8798,7 +9033,7 @@ def leaderboard_delete():
     body = request.get_json(silent=True) or {}
     pid      = (body.get("pid") or "").strip()
     entry_id = (body.get("entry_id") or "").strip()
-    entries = _read_leaderboard()
+    entries = _read_leaderboard(strict=True)
     before = len(entries)
 
     if entry_id:
@@ -8859,6 +9094,18 @@ class KVUnavailable(Exception):
     """KV is configured but the operation errored.  Translates to 503 at
     the route boundary so durable data isn't clobbered by an ephemeral
     fallback."""
+
+
+@app.errorhandler(KVUnavailable)
+def _handle_kv_unavailable(e):
+    """Any route that lets a KVUnavailable escape returns 503 rather than a
+    500 or, worse, a 200 over data that was never written."""
+    app.logger.warning("KV unavailable: %s", e)
+    return jsonify({
+        "error":   "storage_unavailable",
+        "message": "We couldn't reach storage just now. Nothing was changed, "
+                   "please try again in a moment.",
+    }), 503
 
 
 def _pf_new_id():
@@ -9931,7 +10178,7 @@ def leaderboard_claim():
     legacy_token = (body.get("user_token") or "").strip()[:64]
     if not legacy_token:
         return jsonify({"ok": True, "claimed": 0})
-    entries = _read_leaderboard()
+    entries = _read_leaderboard(strict=True)
     claimed = 0
     for e in entries:
         if e.get("user_token") == legacy_token and not e.get("user_sub"):
@@ -10158,20 +10405,23 @@ def analyze():
     ticker = request.args.get("ticker", "").strip().upper()
     if not ticker:
         return jsonify({"error": "Ticker is required"}), 400
+    # Format gate, applied before anything else touches the value.  Without it
+    # arbitrary attacker-chosen text reached _track_ticker_search() and could
+    # be rendered as a clickable "Trending today" chip on the homepage, and
+    # special characters produced an uncaught 500 out of yfinance.
+    if not _VALID_TICKER_RE.match(ticker):
+        return jsonify({"error": f"'{ticker[:16]}' is not a valid ticker symbol."}), 400
 
     _current_user = session.get("user")
     # Daily search-limit gate. VALUS+ subscribers bypass; free tiers
     # (anon 5/day per IP, signed-in 8/day per Google sub) are enforced.
-    gate = _check_anon_search_limit(request, ticker)
+    #
+    # check-only: the quota used to commit here, so a typo ("APPL", "TESLA",
+    # "GOOGL.") burned one of five daily lookups before we knew whether the
+    # ticker resolved at all.  _commit_search() runs on the success paths.
+    gate = _check_anon_search_limit(request, ticker, commit=False)
     if gate is not None:
         return gate
-
-    # Popularity tracking (skip internal cron warm-up calls so trending
-    # reflects real user interest, not background refresh).
-    if not _INTERNAL_CALL.get():
-        _track_ticker_search(ticker)
-        if _current_user and _current_user.get("sub"):
-            _record_recent_ticker(_current_user["sub"], ticker)
 
     # Cache lookup. VALUS+ subscribers may pass ?fresh=1 to bypass cache
     # and force a fresh pull (free users can't, would exhaust upstream
@@ -10180,6 +10430,10 @@ def analyze():
     _force_fresh = (
         _has_full_access(_current_user)
         and request.args.get("fresh", "").lower() in ("1", "true", "yes")
+        # ?fresh=1 bypasses the cache entirely, so each one is a full upstream
+        # pull plus a paid AI call.  Unbounded, a single tab on a refresh loop
+        # burns the shared Yahoo rate-limit headroom for every user.
+        and _allow_force_fresh(_current_user)
     )
     _cached = None if _force_fresh else _analyze_cache_get(_ck)
     if _cached is not None:
@@ -10243,6 +10497,7 @@ def analyze():
                                   "weighted intrinsic value of its underlying holdings."),
             }
             _analyze_cache_set(_ck, etf_payload)
+            _commit_search(request, ticker)
             return jsonify(etf_payload)
 
         cashflow      = stock.cashflow
@@ -10255,7 +10510,17 @@ def analyze():
         # For foreign ADRs (e.g. NOK reports in EUR, trades in USD) we must convert.
         financial_ccy = info.get("financialCurrency") or info.get("currency") or "USD"
         trading_ccy   = info.get("currency") or "USD"
-        fx_rate = get_fx_rate(financial_ccy, trading_ccy)   # e.g. EUR→USD ≈ 1.09
+        fx_rate, fx_source = get_fx_rate_detailed(financial_ccy, trading_ccy)  # e.g. EUR→USD ≈ 1.09
+        if fx_source == "unavailable":
+            # Every statement figure is about to be converted at 1.0. Say so
+            # rather than presenting an unconverted valuation as a real one.
+            dcf_conf_warnings_fx = (
+                f"Could not fetch the {financial_ccy}/{trading_ccy} exchange rate, so "
+                f"figures reported in {financial_ccy} are shown unconverted. Treat the "
+                f"fair value as unreliable for this company until the rate returns."
+            )
+        else:
+            dcf_conf_warnings_fx = None
 
         # Sector / industry, needed early for industry guardrails
         sector   = info.get("sector",   "")
@@ -12059,6 +12324,10 @@ def analyze():
         # the reliability context before reading the contextual sector notes.
         for warn_text in dcf_conf_warnings:
             dcf_notes.insert(0, {"type": "warn", "text": warn_text})
+        # A failed FX lookup outranks every other caveat: it can be wrong by
+        # the entire currency ratio.
+        if dcf_conf_warnings_fx:
+            dcf_notes.insert(0, {"type": "warn", "text": dcf_conf_warnings_fx})
 
         # ── Analyst Consensus Cross-Reference Note ────────────────────────────
         # Explain large divergences between VALUS model IV and sell-side consensus.
@@ -12072,17 +12341,22 @@ def analyze():
         # ── Terminal Value % warning ──────────────────────────────────────────
         # High TV% means the valuation is almost entirely driven by a terminal
         # assumption rather than observable near-term cash flows.
-        if (enterprise_value and pv_terminal and enterprise_value > 0
-                and pv_terminal / enterprise_value > 0.85):
-            tv_pct_val = round(pv_terminal / enterprise_value * 100, 1)
-            dcf_notes.append({
-                "type": "warn",
-                "text": (
-                    f"Terminal value accounts for {tv_pct_val}% of enterprise value. "
-                    "The valuation is highly sensitive to WACC and terminal growth assumptions, "
-                    "small changes in either can materially shift the fair value estimate."
-                ),
-            })
+        terminal_value_share = None
+        if enterprise_value and pv_terminal and enterprise_value > 0:
+            terminal_value_share = round(pv_terminal / enterprise_value * 100, 1)
+            # Threshold lowered from 85%: above roughly 70% the fair value is
+            # mostly an assumption about year 11 onward rather than anything
+            # observable, and that is precisely when the user needs telling.
+            if terminal_value_share > 70:
+                dcf_notes.append({
+                    "type": "warn",
+                    "text": (
+                        f"Terminal value accounts for {terminal_value_share}% of enterprise "
+                        "value, so most of this fair value rests on what happens after year "
+                        "10 rather than on cash flows anyone can observe today. Small changes "
+                        "to the discount rate or the terminal growth rate move it a lot."
+                    ),
+                })
 
         # ── Default growth source note ────────────────────────────────────────
         if growth_source and "Default" in growth_source:
@@ -12248,6 +12522,12 @@ def analyze():
             "financial_currency": financial_ccy,
             "trading_currency":   trading_ccy,
             "fx_rate":            round(fx_rate, 4) if fx_rate != 1.0 else None,
+            "fx_rate_source":     fx_source,
+            # Always reported, not only when it trips the warning, so the
+            # number can be shown on every result.
+            "terminal_value_share_pct": terminal_value_share,
+            "fx_reporting_ccy":   financial_ccy,
+            "fx_trading_ccy":     trading_ccy,
             "wacc":          round(wacc_data.get("wacc", 0) * 100, 2) if wacc_data else None,
             "cost_of_equity":round(wacc_data.get("coe", 0)  * 100, 2) if wacc_data else None,
             "cost_of_debt":  round(wacc_data.get("cod", 0)  * 100, 2) if wacc_data else None,
@@ -12478,6 +12758,7 @@ def analyze():
 
         cleaned = clean(result)
         _analyze_cache_set(_ck, cleaned)
+        _commit_search(request, ticker)
         resp = jsonify(cleaned)
         resp.headers["X-Valus-Cache"] = "MISS"
         return resp
