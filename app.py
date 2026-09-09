@@ -284,6 +284,13 @@ limiter = Limiter(
     app=app,
     storage_uri=_limiter_storage or "memory://",
     default_limits=[limit_default],
+    # Internal self-dispatch runs inside test_request_context, which has no
+    # client IP, so every internal call collapses onto one "ip:127.0.0.1"
+    # bucket.  Without this exemption the new default limit would re-create
+    # exactly the starvation that the per-route limiter fix removed: the
+    # portfolio MOS column, /api/compare and homepage Top Picks all fan out
+    # through that path and would compete for one anonymous quota.
+    default_limits_exempt_when=lambda: _INTERNAL_CALL.get(),
     headers_enabled=True,
 )
 # Static assets in local dev (Vercel serves /static itself in production) and
