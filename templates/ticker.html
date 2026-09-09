@@ -26,6 +26,10 @@
     window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
   </script>
   <script defer src="/_vercel/analytics/script.js"></script>
+  <!-- Accessibility settings bootstrap: blocking, before first paint, so
+       contrast / dyslexia font / text size do not flash or silently revert
+       on the pages that never load main.js. -->
+  <script src="/static/js/settings-boot.js?v={{ asset_v }}"></script>
 </head>
 <body>
 
@@ -49,7 +53,7 @@
   </div>
 </header>
 
-<main class="container" style="padding: 32px 0 48px; max-width: 880px;">
+<main class="container" style="padding-top:32px;padding-bottom:48px;max-width:880px;">
 
   <nav aria-label="Breadcrumb" style="font-size:13px;color:var(--ink-muted);margin-bottom:16px;">
     <a href="/" style="color:inherit;text-decoration:none;">VALUS</a>

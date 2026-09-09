@@ -267,7 +267,18 @@ function isBTCTicker(t) {
 }
 function normalizeBTCTicker(t) { return isBTCTicker(t) ? "BTC-USD" : t; }
 
+// Monotonic token for in-flight analyses.  Every await inside analyze() is
+// followed by a `seq !== _ANALYZE_SEQ` bail-out, so a slow first request can
+// never repaint the page under a ticker the user has since navigated away
+// from.  The AbortController additionally cancels the superseded fetch.
+let _ANALYZE_SEQ = 0;
+let _ANALYZE_ABORT = null;
+
 async function analyze(ticker, params = {}) {
+  const seq = ++_ANALYZE_SEQ;
+  if (_ANALYZE_ABORT) { try { _ANALYZE_ABORT.abort(); } catch (e) {} }
+  const ctl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+  _ANALYZE_ABORT = ctl;
   // Disable the Analyze button + swap label so a slow Yahoo response can't
   // be double-fired by an impatient click.
   const _btn = document.getElementById("analyzeBtn");
@@ -294,8 +305,9 @@ async function analyze(ticker, params = {}) {
   }
 
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, ctl ? { signal: ctl.signal } : undefined);
     const data = await res.json();
+    if (seq !== _ANALYZE_SEQ) return;          // superseded by a newer analyze()
     if (res.status === 429) {
       hideLoading();
       showRateLimit(data);
@@ -324,10 +336,15 @@ async function analyze(ticker, params = {}) {
       renderResults(data);
     }
   } catch (err) {
+    // An aborted request is a superseded one, not a failure the user caused.
+    if (err && err.name === "AbortError") return;
+    if (seq !== _ANALYZE_SEQ) return;
     hideLoading();
     showError(err.message || "Failed to load analysis");
   } finally {
-    if (_btn) { _btn.disabled = false; _btn.textContent = _btnLabel || "Analyze"; }
+    // Only the newest run owns the button; a stale run must not re-enable it
+    // while a fresher analysis is still loading.
+    if (seq === _ANALYZE_SEQ && _btn) { _btn.disabled = false; _btn.textContent = _btnLabel || "Analyze"; }
   }
 }
 
@@ -979,7 +996,12 @@ function renderHeroInsights(d) {
     confHint.textContent = reason ? String(reason).trim() : "";
     confWrap.hidden = false;
   } else {
-    confWrap.hidden = true;
+    // Clear as well as hide: these elements are reused across tickers, so a
+    // value left in place is one CSS change away from being visible again
+    // under the wrong company.
+    if (confEl)   { confEl.textContent = ""; confEl.className = "hero-insight__value"; }
+    if (confHint) confHint.textContent = "";
+    if (confWrap) confWrap.hidden = true;
   }
 
   // ── Market-implied scenario line (under the fair-value block) ──
@@ -1024,7 +1046,9 @@ function renderHeroInsights(d) {
     }
     igWrap.hidden = false;
   } else {
-    igWrap.hidden = true;
+    if (igEl)   { igEl.textContent = ""; igEl.className = "hero-insight__value"; }
+    if (igHint) igHint.textContent = "";
+    if (igWrap) igWrap.hidden = true;
   }
 
   // ── 52-week range marker ──
@@ -1039,7 +1063,13 @@ function renderHeroInsights(d) {
     document.getElementById("viRangeHigh").textContent = `$${fmt(hi, 2)}`;
     rWrap.hidden = false;
   } else {
-    rWrap.hidden = true;
+    const mk = document.getElementById("viRangeMarker");
+    if (mk) mk.style.left = "0%";
+    const rl = document.getElementById("viRangeLow");
+    const rh = document.getElementById("viRangeHigh");
+    if (rl) rl.textContent = "";
+    if (rh) rh.textContent = "";
+    if (rWrap) rWrap.hidden = true;
   }
 }
 
@@ -1546,8 +1576,14 @@ function renderDrawerContent(d) {
 
   try { renderComparablesCard(d); } catch (e) { console.error("[cmp]", e); }
   try { renderNotes(d); } catch (e) { console.error("[notes]", e); }
-  try { if (d.price_history) renderPriceChart(d.price_history); } catch (e) { console.error("[priceChart]", e); }
-  try { if (d.fcf_chart)     renderDcfChart(d.fcf_chart); }       catch (e) { console.error("[dcfChart]", e); }
+  try {
+    if (d.price_history && d.price_history.length) renderPriceChart(d.price_history);
+    else teardownPriceChart();
+  } catch (e) { console.error("[priceChart]", e); }
+  try {
+    if (d.fcf_chart) renderDcfChart(d.fcf_chart);
+    else teardownDcfChart();
+  } catch (e) { console.error("[dcfChart]", e); }
   try { fetchAndRenderValuationHistory(d.ticker); } catch (e) { console.error("[valHist]", e); }
   try { renderProjectionTable(d); } catch (e) { console.error("[projTable]", e); }
   // Financial statements are now lazy-loaded on first drawer open (see above).
@@ -2468,6 +2504,10 @@ function renderValuationHistoryChart(payload) {
     const arrowX = Math.max(12, Math.min(r.left + r.width / 2 - left, tw - 12));
     el.style.setProperty("--tip-arrow-x", `${Math.round(arrowX)}px`);
   }
+  // Track the element a tap opened, so a second tap on the same trigger
+  // closes it and a tap anywhere else dismisses it.
+  let openedByTouch = null;
+
   document.addEventListener("mouseover", (e) => {
     const t = e.target.closest("[data-tip]");
     if (t) show(t);
@@ -2480,8 +2520,53 @@ function renderValuationHistoryChart(payload) {
     const t = e.target.closest("[data-tip]");
     if (t) show(t);
   });
-  document.addEventListener("focusout", () => hide());
-  window.addEventListener("scroll", hide, true);
+  // A tap that opened a tooltip also moves focus; don't let the resulting
+  // focusout immediately close what the tap just opened.
+  document.addEventListener("focusout", () => { if (!openedByTouch) hide(); });
+
+  // Touch / pointer support.  Without this the entire glossary is unreachable
+  // on a phone: there is no hover, and these spans are not focusable either.
+  document.addEventListener("click", (e) => {
+    const t = e.target.closest("[data-tip]");
+    if (!t) { openedByTouch = null; hide(); return; }
+    // Don't hijack a real control (a link or button that also carries a tip).
+    if (t.matches("a[href], button, input, select, textarea")) { show(t); return; }
+    e.preventDefault();
+    if (openedByTouch === t) { openedByTouch = null; hide(); }
+    else { openedByTouch = t; show(t); }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { openedByTouch = null; hide(); }
+  });
+  window.addEventListener("scroll", () => { openedByTouch = null; hide(); }, true);
+
+  // Make every tip trigger keyboard- and screen-reader-reachable, including
+  // ones rendered later (the assumptions grid, notes, verdict chips).
+  function _augment(root) {
+    (root.querySelectorAll ? root.querySelectorAll("[data-tip]") : []).forEach(el => {
+      if (el.dataset.tipA11y) return;
+      el.dataset.tipA11y = "1";
+      if (el.matches("a[href], button, input, select, textarea")) return;
+      if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "0");
+      if (!el.hasAttribute("role"))     el.setAttribute("role", "button");
+      const txt = el.getAttribute("data-tip");
+      if (txt && !el.hasAttribute("aria-label")) {
+        el.setAttribute("aria-label", `${(el.textContent || "").trim()}: ${txt}`);
+      }
+    });
+  }
+  document.addEventListener("DOMContentLoaded", () => _augment(document));
+  new MutationObserver(() => _augment(document)).observe(
+    document.documentElement, { childList: true, subtree: true });
+  // Space/Enter on a focused span behaves like the tap path.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const t = e.target.closest && e.target.closest('[data-tip][role="button"]');
+    if (!t) return;
+    e.preventDefault();
+    if (openedByTouch === t) { openedByTouch = null; hide(); }
+    else { openedByTouch = t; show(t); }
+  });
 })();
 function _alignAssumptionTooltips() { /* legacy no-op, floating-tip handles clamping */ }
 
@@ -2519,7 +2604,8 @@ function _renderPriceStats(slice) {
 
 function renderPriceChart(history) {
   const canvas = $("priceChart");
-  if (!canvas || !history || history.length === 0) return;
+  if (!canvas || !history || history.length === 0) { teardownPriceChart(); return; }
+  $("priceChartCard")?.classList.remove("hidden");
   _PRICE_HISTORY_FULL = history;
 
   // Wire range tabs once
@@ -2643,11 +2729,30 @@ function projectScenario(d, scenario) {
 
 let _DCF_CHART_SCENARIO = "base";
 
+// Destroy-and-hide for the two result charts.  renderResults() calls these
+// whenever the new ticker has no data for a chart; without them the previous
+// company's canvas, footer (g1/WACC) and cached price history stayed visible
+// under the new company's name — analyse AAPL, then JPM, and AAPL's ten-year
+// projection sat above a table correctly reading "No projection data."
+function teardownDcfChart() {
+  if (dcfChartInstance) { try { dcfChartInstance.destroy(); } catch (e) {} dcfChartInstance = null; }
+  const f = $("dcfChartFooter"); if (f) f.innerHTML = "";
+  const c = $("dcfChartCard");   if (c) c.classList.add("hidden");
+}
+
+function teardownPriceChart() {
+  if (priceChartInstance) { try { priceChartInstance.destroy(); } catch (e) {} priceChartInstance = null; }
+  _PRICE_HISTORY_FULL = [];
+  const s = $("priceChartStats"); if (s) s.innerHTML = "";
+  const c = $("priceChartCard");  if (c) c.classList.add("hidden");
+}
+
 function renderDcfChart(fcfData) {
   // fcfData is the server-shipped { projected: { labels, values, pvs } } for base.
   // We override with per-scenario client-computed data when toggled.
   const canvas = $("dcfChart");
   if (!canvas || !_LAST_DATA) return;
+  $("dcfChartCard")?.classList.remove("hidden");
   const ctx = canvas.getContext("2d");
   if (dcfChartInstance) dcfChartInstance.destroy();
 
@@ -2668,7 +2773,7 @@ function renderDcfChart(fcfData) {
   } else {
     // Compute client-side for bear or bull
     const sim = projectScenario(_LAST_DATA, which);
-    if (!sim) return;
+    if (!sim) { teardownDcfChart(); return; }
     labels = sim.labels;
     projected = sim.projected;
     discounted = sim.discounted;
@@ -2678,7 +2783,7 @@ function renderDcfChart(fcfData) {
                  `<span><strong>Total PV</strong> $${fmt(sim.totalPv, 1)}B</span>`;
   }
 
-  if (!labels || labels.length === 0 || projected.length === 0) return;
+  if (!labels || labels.length === 0 || projected.length === 0) { teardownDcfChart(); return; }
 
   // Color theme per scenario
   const themes = {
@@ -2944,32 +3049,78 @@ function setupSearch() {
   const form  = $("searchForm");
   const dd    = $("searchDropdown");
   let timer = null;
+  let active = -1;               // index of the arrow-key-highlighted option
+
+  // The container already declared role="listbox" but its children were plain
+  // divs with no role="option" and no keyboard path, so suggestions were
+  // mouse-only and screen readers announced an empty list.
+  input.setAttribute("role", "combobox");
+  input.setAttribute("aria-autocomplete", "list");
+  input.setAttribute("aria-controls", "searchDropdown");
+  input.setAttribute("aria-expanded", "false");
+
+  function closeDropdown() {
+    dd.classList.add("hidden");
+    input.setAttribute("aria-expanded", "false");
+    input.removeAttribute("aria-activedescendant");
+    active = -1;
+  }
+
+  function setActive(i) {
+    const opts = Array.from(dd.querySelectorAll(".search-result"));
+    if (!opts.length) return;
+    active = (i + opts.length) % opts.length;
+    opts.forEach((el, n) => {
+      const on = n === active;
+      el.classList.toggle("is-active", on);
+      el.setAttribute("aria-selected", on ? "true" : "false");
+      if (on) {
+        input.setAttribute("aria-activedescendant", el.id);
+        el.scrollIntoView({ block: "nearest" });
+      }
+    });
+  }
 
   input.addEventListener("input", () => {
     clearTimeout(timer);
     const q = input.value.trim();
-    if (!q) { dd.classList.add("hidden"); return; }
+    if (!q) { closeDropdown(); return; }
     timer = setTimeout(async () => {
       const results = await searchSuggestions(q);
-      if (results.length === 0) { dd.classList.add("hidden"); return; }
-      dd.innerHTML = results.slice(0, 8).map(r =>
-        `<div class="search-result" data-ticker="${escHtml(r.symbol || r.ticker)}">
+      if (results.length === 0) { closeDropdown(); return; }
+      dd.innerHTML = results.slice(0, 8).map((r, i) =>
+        `<div class="search-result" role="option" aria-selected="false"
+              id="searchOpt${i}" data-ticker="${escHtml(r.symbol || r.ticker)}">
           <span class="search-result__ticker">${escHtml(r.symbol || r.ticker)}</span>
           <span class="search-result__name">${escHtml(r.name || r.shortname || '')}</span>
         </div>`
       ).join("");
       dd.classList.remove("hidden");
+      input.setAttribute("aria-expanded", "true");
+      active = -1;
       dd.querySelectorAll(".search-result").forEach(el => {
         el.onclick = () => {
           input.value = el.dataset.ticker;
-          dd.classList.add("hidden");
+          closeDropdown();
           submit();
         };
       });
     }, 180);
   });
 
-  input.addEventListener("blur", () => setTimeout(() => dd.classList.add("hidden"), 200));
+  input.addEventListener("keydown", (e) => {
+    const open = !dd.classList.contains("hidden");
+    if (e.key === "Escape") { closeDropdown(); return; }
+    if (!open) return;
+    if (e.key === "ArrowDown")    { e.preventDefault(); setActive(active + 1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActive(active - 1); }
+    else if (e.key === "Enter" && active >= 0) {
+      const el = dd.querySelectorAll(".search-result")[active];
+      if (el) { e.preventDefault(); input.value = el.dataset.ticker; closeDropdown(); submit(); }
+    }
+  });
+
+  input.addEventListener("blur", () => setTimeout(closeDropdown, 200));
 
   form.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -2983,7 +3134,7 @@ function setupSearch() {
     // setTimeout fired ~180ms after Enter would re-open the dropdown
     // on top of the freshly-loaded analysis.
     if (timer) { clearTimeout(timer); timer = null; }
-    dd.classList.add("hidden");
+    closeDropdown();
     input.blur();
     const params = {};
     const yrs = $("advYrs").value;
@@ -3179,17 +3330,58 @@ function pfUpdateBadge() {
 // ── Server sync ─────────────────────────────────────────────────────
 // Immediately POST one portfolio's items.  Both the (pid, items) pair are
 // fixed by the caller, so this can never write the wrong portfolio's items.
+// Portfolios whose latest local state has not been confirmed by the server.
+// pfPullFromServer must not overwrite these, or an unsaved add is silently
+// reverted the next time identity refreshes.
+const _PF_DIRTY = new Map();
+const _PF_RETRY_TIMERS = new Map();
+const _PF_RETRY_ATTEMPTS = new Map();
+
+function _pfScheduleRetry(pid, items) {
+  if (_PF_RETRY_TIMERS.has(pid)) return;      // one chain per portfolio
+  const n = (_PF_RETRY_ATTEMPTS.get(pid) || 0) + 1;
+  if (n > 5) { _PF_RETRY_ATTEMPTS.delete(pid); return; }
+  _PF_RETRY_ATTEMPTS.set(pid, n);
+  const delay = Math.min(30000, 1000 * Math.pow(2, n));   // 2s, 4s … 30s
+  _PF_RETRY_TIMERS.set(pid, setTimeout(() => {
+    _PF_RETRY_TIMERS.delete(pid);
+    // Re-read: the user may have changed the portfolio since the failed write.
+    const s = pfState();
+    const p = s.portfolios[pid];
+    pfFlushSync(pid, p ? (p.items || []) : items);
+  }, delay));
+}
+
 async function pfFlushSync(pid, items) {
   if (!_ME || !pid) return;
   _PF_SYNC_TIMERS.delete(pid);
   try {
-    await fetch(`/api/portfolio?pid=${encodeURIComponent(pid)}`, {
+    const res = await fetch(`/api/portfolio?pid=${encodeURIComponent(pid)}`, {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ items }),
     });
-  } catch (e) { /* offline / transient, local copy still authoritative */ }
+    if (res.ok) { _PF_DIRTY.delete(pid); return; }
+    // 404: this pid no longer exists server-side (deleted on another device).
+    // Re-pull rather than retrying a write that can never land.
+    if (res.status === 404) {
+      _PF_DIRTY.delete(pid);
+      try { await pfPullFromServer(); } catch (e) {}
+      return;
+    }
+    // 5xx (KV unavailable): the write did NOT persist.  Mark the portfolio
+    // dirty so pfPullFromServer refuses to overwrite it, tell the user, and
+    // retry with backoff instead of reporting a save that never happened.
+    _PF_DIRTY.set(pid, items);
+    _pfScheduleRetry(pid, items);
+    showToast("Could not save to your account. Retrying…", "error");
+  } catch (e) {
+    // Offline / transient: local copy is authoritative, but it is still
+    // unflushed, so it must not be clobbered by a server pull.
+    _PF_DIRTY.set(pid, items);
+    _pfScheduleRetry(pid, items);
+  }
 }
 
 function pfSyncToServer(pid) {
@@ -3288,6 +3480,12 @@ async function pfPullFromServer() {
     const localActivePid = localState.active_pid;
     const nextActive = (localActivePid && localActivePid in serverPortfolios)
       ? localActivePid : defaultPid;
+    // A portfolio with an unflushed write is newer than whatever the server
+    // has.  Replacing it here is exactly how an "added, then gone on reload"
+    // holding disappears, so keep the local items for those pids only.
+    for (const [pid, items] of _PF_DIRTY.entries()) {
+      if (pid in serverPortfolios) serverPortfolios[pid].items = items;
+    }
     pfWriteState({ schema: 2, active_pid: nextActive, portfolios: serverPortfolios });
 
     // Repaint an already-open portfolio page so a pull (sign-in / refreshMe /
@@ -3761,6 +3959,9 @@ async function openWatchlistPage() {
   $("error")?.classList.add("hidden");
   $("watchlistPage")?.classList.remove("hidden");
   renderWatchlistPage();
+  // Repaint immediately from the stored snapshot, then re-price in the
+  // background and repaint again when the live numbers land.
+  refreshWatchlistPrices();
   setViewHash("watchlist");
   window.scrollTo({ top: 0, behavior: "instant" });
 }
@@ -3778,6 +3979,64 @@ function closeWatchlistPage() {
   setViewHash("");
 }
 
+// Re-price every watchlist holding through the same batch endpoint the
+// portfolio uses, so a name added months ago stops showing its add-day price
+// and margin of safety as if they were current.  Mirrors
+// refreshPortfolioPrices(); unreliable valuations come back mos=null and are
+// never persisted as a number.
+let _WL_REFRESHING = false;
+
+async function refreshWatchlistPrices() {
+  if (_WL_REFRESHING) return;
+  const items = wlRead();
+  if (!items.length) return;
+  _WL_REFRESHING = true;
+  try {
+    const r = await fetch("/api/valuations", {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tickers: items.map(i => i.ticker) }),
+    });
+    if (!r.ok) return;
+    const d = await r.json().catch(() => ({}));
+    const vals = d.valuations || {};
+    if (!Object.keys(vals).length) return;
+    // Re-read rather than reusing the pre-fetch snapshot, so an add/remove
+    // made while the request was in flight is not reverted.
+    const current = wlRead();
+    const updated = current.map(it => {
+      const v = vals[it.ticker];
+      if (!v) return it;
+      return {
+        ...it,
+        price:    (v.price != null ? v.price : it.price),
+        iv:       (v.iv    != null ? v.iv    : it.iv),
+        mos:      v.reliable ? v.mos : null,
+        reliable: v.reliable,
+        tier:     v.tier  || it.tier,
+        grade:    v.reliable ? (v.grade || null) : null,
+        pricedAt: Date.now(),
+      };
+    });
+    wlWrite(updated);
+    if (!$("watchlistPage")?.classList.contains("hidden")) renderWatchlistPage();
+  } catch (e) {
+    /* offline: rows keep rendering their "as of" date, which is the point */
+  } finally {
+    _WL_REFRESHING = false;
+  }
+}
+
+// "as of" stamp for a row whose numbers have not been re-priced this session.
+// Anything older than an hour is labelled rather than shown bare.
+function _wlAsOf(it) {
+  const ts = it.pricedAt || it.addedAt;
+  if (!ts) return "";
+  if (Date.now() - ts < 3600 * 1000) return "";
+  const d = new Date(ts);
+  return `as of ${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+}
+
 function renderWatchlistPage() {
   const items = wlRead().slice().sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
   const list  = $("watchlistList");
@@ -3793,13 +4052,14 @@ function renderWatchlistPage() {
     const mos      = (typeof it.mos === "number") ? it.mos : null;
     const priceTxt = (typeof it.price === "number") ? fmtPrice(it.price) : "N/A";
     const ivTxt    = (typeof it.iv    === "number") ? fmtPrice(it.iv)    : "N/A";
+    const asOf     = _wlAsOf(it);
     return `
       <div class="pf-item" data-wl-row="${escHtml(it.ticker)}">
         <button class="pf-item__ticker" data-wl-open="${escHtml(it.ticker)}" type="button">
           ${escHtml(it.ticker)}
         </button>
         <span class="pf-item__name">${escHtml(it.name || "")}</span>
-        <span class="pf-item__price">${priceTxt}</span>
+        <span class="pf-item__price">${priceTxt}${asOf ? `<em class="pf-item__asof">${asOf}</em>` : ""}</span>
         <span class="pf-item__price">${ivTxt}</span>
         <span class="pf-item__grade-cell">${itemGradeChip(it)}</span>
         <button class="pf-item__remove" data-wl-remove="${escHtml(it.ticker)}"
@@ -4095,7 +4355,7 @@ function renderPortfolioPage() {
   list.innerHTML = items.map(it => {
     return `
       <div class="pf-item" data-pf-ticker="${escHtml(it.ticker)}">
-        <span class="pf-item__ticker">${escHtml(it.ticker)}</span>
+        <button type="button" class="pf-item__ticker" data-pf-open="${escHtml(it.ticker)}">${escHtml(it.ticker)}</button>
         <span class="pf-item__name">${escHtml(it.name || "")}</span>
         <span class="pf-item__price">${it.price != null ? fmtPrice(it.price) : NA}</span>
         <span class="pf-item__grade-cell">${itemGradeChip(it)}</span>
@@ -4104,14 +4364,22 @@ function renderPortfolioPage() {
     `;
   }).join("");
 
+  const _pfOpen = (t) => {
+    if (!t) return;
+    closePortfolioPage();
+    $("tickerInput").value = t;
+    analyze(t);
+  };
   list.querySelectorAll(".pf-item").forEach(row => {
     row.onclick = (e) => {
       if (e.target.closest("[data-pf-remove]")) return;
-      closePortfolioPage();
-      const t = row.dataset.pfTicker;
-      $("tickerInput").value = t;
-      analyze(t);
+      _pfOpen(row.dataset.pfTicker);
     };
+  });
+  // The ticker is a real button now, so Enter/Space reach it.  Stop its click
+  // from also bubbling to the row handler and analysing twice.
+  list.querySelectorAll("[data-pf-open]").forEach(b => {
+    b.onclick = (e) => { e.stopPropagation(); _pfOpen(b.dataset.pfOpen); };
   });
   list.querySelectorAll("[data-pf-remove]").forEach(btn => {
     btn.onclick = (e) => {
@@ -4876,9 +5144,9 @@ function setupTemplatesTabs() {
 
 // Tier metadata for the focused glossary modal, single source of truth
 const TIER_META = {
-  distress:      { label: "Priced for Distress",      mos: "MOS > +50%",            color: "tier-positive",
-                   desc: "Market is overly pessimistic. Trading well below fair value, often during macro fear or sector rotation. Meaningful upside if fundamentals stabilise." },
-  deep_discount: { label: "Priced for Deep Discount", mos: "MOS +40% to +50%",      color: "tier-positive",
+  // No `distress` entry: _priced_for_verdict never returns it — deep_discount
+  // is an open-ended `mos >= 40` band, so nothing can land above it.
+  deep_discount: { label: "Priced for Deep Discount", mos: "MOS +40% or more",      color: "tier-positive",
                    desc: "Significantly undervalued, strong signal if VALUS's growth assumptions hold. Worth a quality check to avoid value traps." },
   discount:      { label: "Priced for Discount",      mos: "MOS +15% to +40%",      color: "tier-positive",
                    desc: "Trading below fundamental value. Modest opportunity zone, model and analysts both see room above current price." },
@@ -6668,7 +6936,10 @@ async function loadLeaderboard(showSpinner = true) {
       sort: _LB_SORT,
       items: items.map(e => [e.id, e.avg_mos, e.ticker_count]),
     });
-    if (fp === _LB_LAST_FINGERPRINT) return;
+    // `showSpinner` means the user explicitly asked for a refresh and the
+    // list was already cleared above; skipping the render there leaves an
+    // empty leaderboard on screen.  Only poll-driven calls may early-return.
+    if (fp === _LB_LAST_FINGERPRINT && !showSpinner) return;
     _LB_LAST_FINGERPRINT = fp;
     renderLeaderboard(items);
   } catch {
@@ -6773,7 +7044,9 @@ function setupLeaderboard() {
     closeLeaderboardPage();
     openPortfolioPage();
   });
-  $("lbRefreshBtn")?.addEventListener("click", loadLeaderboard);
+  // Wrap: addEventListener passes the click Event as arg 0, which arrived as
+  // `showSpinner` and made the truthiness accidental rather than intended.
+  $("lbRefreshBtn")?.addEventListener("click", () => loadLeaderboard(true));
   // Restore the persisted sort (sessionStorage) so refresh keeps the user's
   // current filter, defaults to avg_mos otherwise.
   try {
@@ -6989,24 +7262,28 @@ function renderSharedList(items) {
     const mosClass = it.mos == null ? "neutral" : (it.mos > 5 ? "positive" : (it.mos < -5 ? "negative" : "neutral"));
     return `
       <div class="pf-item" data-pf-ticker="${escHtml(it.ticker)}">
-        <span class="pf-item__ticker">${escHtml(it.ticker)}</span>
+        <button type="button" class="pf-item__ticker" data-pf-open="${escHtml(it.ticker)}">${escHtml(it.ticker)}</button>
         <span class="pf-item__name">${escHtml(it.name || "")}</span>
         <span class="pf-item__price">${it.price != null ? fmtPrice(it.price) : NA}</span>
         <span class="pf-item__mos ${mosClass}">${it.mos != null ? fmtPct(it.mos) : NA}</span>
       </div>
     `;
   }).join("");
+  const _sharedOpen = (t) => {
+    if (!t) return;
+    // Leave shared view; analyze the picked stock
+    _IS_SHARED_VIEW = false;
+    $("pfSharedBanner").classList.add("hidden");
+    $("portfolioPage").classList.add("hidden");
+    document.querySelector(".hero")?.classList.remove("hidden");
+    $("tickerInput").value = t;
+    analyze(t);
+  };
   list.querySelectorAll(".pf-item").forEach(row => {
-    row.onclick = () => {
-      const t = row.dataset.pfTicker;
-      // Leave shared view; analyze the picked stock
-      _IS_SHARED_VIEW = false;
-      $("pfSharedBanner").classList.add("hidden");
-      $("portfolioPage").classList.add("hidden");
-      document.querySelector(".hero")?.classList.remove("hidden");
-      $("tickerInput").value = t;
-      analyze(t);
-    };
+    row.onclick = () => _sharedOpen(row.dataset.pfTicker);
+  });
+  list.querySelectorAll("[data-pf-open]").forEach(b => {
+    b.onclick = (e) => { e.stopPropagation(); _sharedOpen(b.dataset.pfOpen); };
   });
 
   // Summary: count + avg MOS + undervalued + best
@@ -7121,6 +7398,10 @@ function readURLParams() {
   };
 }
 
+// Resolves once the first /api/me round-trip has settled.  Anything that
+// branches on _ME must await this or it reads null on a cold load.
+let _ME_READY = null;
+
 async function bootFromURL() {
   const { ticker, portfolio, view } = readURLParams();
   if (portfolio) {
@@ -7131,10 +7412,16 @@ async function bootFromURL() {
     }
   }
   if (ticker) {
+    // Deliberately not awaiting _ME_READY: analysing a ticker works signed-out,
+    // so blocking here would only delay the first paint.
     $("tickerInput").value = ticker;
     analyze(ticker);
     return;
   }
+  // Every branch below reads _ME.  Wait for identity before deciding whether
+  // the user is signed in, otherwise a refresh on Portfolio shows the
+  // "Sign in to track your portfolio across devices" prompt to a signed-in user.
+  if (_ME_READY) { try { await _ME_READY; } catch (e) {} }
   // No ticker / no shared portfolio, restore the hash-encoded view so
   // browser refresh on Portfolio / Watchlist / Leaderboard stays put
   // instead of bouncing back to the search hero.
@@ -7195,8 +7482,10 @@ document.addEventListener("DOMContentLoaded", () => {
   pfUpdateBadge();
   wlUpdateBadge();
   pfUpdateSwitcher();
-  // Fetch identity in parallel with bootFromURL, non-blocking
-  refreshMe();
+  // Fetch identity in parallel with bootFromURL.  Kept non-blocking here, but
+  // the promise is retained so bootFromURL can await it before any branch
+  // that reads _ME (Portfolio / Watchlist / Leaderboard all gate on auth).
+  _ME_READY = refreshMe();
   handleStripeRedirect();
   bootFromURL();
   // Browser back/forward should navigate between views.  Only react to

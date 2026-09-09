@@ -40,6 +40,10 @@
     window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
   </script>
   <script defer src="/_vercel/analytics/script.js"></script>
+  <!-- Accessibility settings bootstrap: blocking, before first paint, so
+       contrast / dyslexia font / text size do not flash or silently revert
+       on the pages that never load main.js. -->
+  <script src="/static/js/settings-boot.js?v={{ asset_v }}"></script>
 </head>
 <body>
 <main class="docs-page">

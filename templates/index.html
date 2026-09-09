@@ -27,6 +27,10 @@
     window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
   </script>
   <script defer src="/_vercel/analytics/script.js"></script>
+  <!-- Accessibility settings bootstrap: blocking, before first paint, so
+       contrast / dyslexia font / text size do not flash or silently revert
+       on the pages that never load main.js. -->
+  <script src="/static/js/settings-boot.js?v={{ asset_v }}"></script>
 </head>
 <body>
 
@@ -658,7 +662,7 @@
           <div class="settings-row__hint" data-i18n="set.contrast.hint">Boosts text + border contrast for readability.</div>
         </div>
         <label class="settings-switch">
-          <input type="checkbox" id="settingsContrast"/>
+          <input type="checkbox" id="settingsContrast" aria-label="High contrast"/>
           <span class="settings-switch__track"></span>
         </label>
       </div>
@@ -670,7 +674,7 @@
           <div class="settings-row__hint" data-i18n="set.motion.hint">Disables animations for vestibular sensitivity.</div>
         </div>
         <label class="settings-switch">
-          <input type="checkbox" id="settingsMotion"/>
+          <input type="checkbox" id="settingsMotion" aria-label="Reduce motion"/>
           <span class="settings-switch__track"></span>
         </label>
       </div>
@@ -682,7 +686,7 @@
           <div class="settings-row__hint" data-i18n="set.dyslexia.hint">Wider letter-spacing + high-readability typeface.</div>
         </div>
         <label class="settings-switch">
-          <input type="checkbox" id="settingsDyslexia"/>
+          <input type="checkbox" id="settingsDyslexia" aria-label="Dyslexia-friendly font"/>
           <span class="settings-switch__track"></span>
         </label>
       </div>
@@ -694,7 +698,7 @@
           <div class="settings-row__hint" data-i18n="set.underline.hint">Don't rely on color alone to mark links.</div>
         </div>
         <label class="settings-switch">
-          <input type="checkbox" id="settingsUnderline"/>
+          <input type="checkbox" id="settingsUnderline" aria-label="Always-underline links"/>
           <span class="settings-switch__track"></span>
         </label>
       </div>
@@ -706,7 +710,7 @@
           <div class="settings-row__hint" data-i18n="set.touch.hint">Minimum 44×44px buttons (WCAG 2.2).</div>
         </div>
         <label class="settings-switch">
-          <input type="checkbox" id="settingsTouch"/>
+          <input type="checkbox" id="settingsTouch" aria-label="Larger touch targets"/>
           <span class="settings-switch__track"></span>
         </label>
       </div>
@@ -718,7 +722,7 @@
           <div class="settings-row__hint" data-i18n="set.focus.hint">Thicker outline when navigating with keyboard.</div>
         </div>
         <label class="settings-switch">
-          <input type="checkbox" id="settingsFocus"/>
+          <input type="checkbox" id="settingsFocus" aria-label="Prominent focus rings"/>
           <span class="settings-switch__track"></span>
         </label>
       </div>
@@ -803,20 +807,12 @@
         </ol>
       </div>
 
-      <!-- Expandable: see all 7 tiers -->
+      <!-- Expandable: see all 7 tiers (must match the .tg-row count below) -->
       <button class="tg-expand" id="tgExpandBtn" type="button" aria-expanded="false">
         <span>See all 7 verdict tiers</span>
         <span class="tg-expand__chev">▾</span>
       </button>
       <div class="tg-list hidden" id="tgFullList">
-        <div class="tg-row tier-positive" data-tier="distress">
-          <span class="tg-dot"></span>
-          <div class="tg-body">
-            <span class="tg-label">Priced for Distress</span>
-            <span class="tg-mos">MOS &gt; +50%</span>
-            <span class="tg-desc">Market is overly pessimistic. Trading well below fair value, often during macro fear or sector rotation.</span>
-          </div>
-        </div>
         <div class="tg-row tier-positive" data-tier="strategic_discount">
           <span class="tg-dot"></span>
           <div class="tg-body">
@@ -829,7 +825,7 @@
           <span class="tg-dot"></span>
           <div class="tg-body">
             <span class="tg-label">Priced for Deep Discount</span>
-            <span class="tg-mos">MOS +40% to +50%</span>
+            <span class="tg-mos">MOS +40% or more</span>
             <span class="tg-desc">Significantly undervalued, strong signal if VALUS's growth assumptions hold.</span>
           </div>
         </div>
@@ -1526,28 +1522,28 @@
                   <span class="cd-slider-label">Stage 1 growth · g₁</span>
                   <span class="cd-slider-value numeric" id="cdS1Val">N/A</span>
                 </div>
-                <input type="range" class="dcf-slider cd-slider" id="cdS1" min="0" max="60" step="0.5"/>
+                <input type="range" class="dcf-slider cd-slider" id="cdS1" aria-label="Stage 1 growth rate, percent" min="0" max="60" step="0.5"/>
               </div>
               <div class="cd-slider-row">
                 <div class="cd-slider-head">
                   <span class="cd-slider-label">Stage 2 growth · g₂</span>
                   <span class="cd-slider-value numeric" id="cdS2Val">N/A</span>
                 </div>
-                <input type="range" class="dcf-slider cd-slider" id="cdS2" min="0" max="40" step="0.5"/>
+                <input type="range" class="dcf-slider cd-slider" id="cdS2" aria-label="Stage 2 growth rate, percent" min="0" max="40" step="0.5"/>
               </div>
               <div class="cd-slider-row">
                 <div class="cd-slider-head">
                   <span class="cd-slider-label">Discount rate · WACC</span>
                   <span class="cd-slider-value numeric" id="cdWaccVal">N/A</span>
                 </div>
-                <input type="range" class="dcf-slider cd-slider" id="cdWacc" min="3" max="25" step="0.1"/>
+                <input type="range" class="dcf-slider cd-slider" id="cdWacc" aria-label="Discount rate (WACC), percent" min="3" max="25" step="0.1"/>
               </div>
               <div class="cd-slider-row">
                 <div class="cd-slider-head">
                   <span class="cd-slider-label">Terminal growth · g_T</span>
                   <span class="cd-slider-value numeric" id="cdTgVal">N/A</span>
                 </div>
-                <input type="range" class="dcf-slider cd-slider" id="cdTg" min="0.5" max="6" step="0.1"/>
+                <input type="range" class="dcf-slider cd-slider" id="cdTg" aria-label="Terminal growth rate, percent" min="0.5" max="6" step="0.1"/>
               </div>
             </div>
           </div>
@@ -1602,7 +1598,7 @@
           </div>
 
           <!-- DCF projection chart + interactive year scrubber -->
-          <div class="card">
+          <div class="card" id="dcfChartCard">
             <div class="section-title-row">
               <div class="section-title">10-year cash-flow projection</div>
               <div class="dcf-scenario-toggle" role="tablist" id="dcfScenarioToggle">
@@ -1661,7 +1657,7 @@
           </div>
 
           <!-- Price chart -->
-          <div class="card">
+          <div class="card" id="priceChartCard">
             <div class="price-chart-head">
               <div>
                 <div class="section-title" style="margin-bottom:4px;">Price history</div>

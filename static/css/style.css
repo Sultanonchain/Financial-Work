@@ -15,7 +15,9 @@
   /* ─ Ink ──────────────────────────────────────────────────────────── */
   --ink-primary:    #f5f7fa;
   --ink-secondary:  #b6bdcb;
-  --ink-muted:      #6b7382;
+  /* Raised from #6b7382, which fell below WCAG AA (4.5:1) against the app
+     background across ~107 declarations, including every stat label. */
+  --ink-muted:      #8892a3;
   --ink-subtle:     #3f4756;
 
   /* ─ Brand + semantic colors ───────────────────────────────────────── */
@@ -803,7 +805,7 @@ a.auth-menu__btn { text-decoration: none; }
   border-bottom: 1px solid rgba(255,255,255,0.04);
 }
 .search-result:last-child { border-bottom: none; }
-.search-result:hover, .search-result.active { background: var(--accent-soft); }
+.search-result:hover, .search-result.active, .search-result.is-active { background: var(--accent-soft); }
 .search-result__ticker {
   font-family: var(--font-mono);
   font-weight: 600;
@@ -1682,6 +1684,16 @@ a.auth-menu__btn { text-decoration: none; }
   border-radius: var(--radius);
   transition: all 200ms var(--ease-out);
 }
+/* The grade chip column.  Previously had no rules at all anywhere, which is
+   why it auto-flowed onto its own row inside the narrow-screen grid below and
+   ballooned every holding to four stacked lines. */
+.pf-item__grade-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  white-space: nowrap;
+}
 .pf-item:hover {
   background: rgba(255,255,255,0.03);
   border-color: rgba(255,255,255,0.08);
@@ -1754,9 +1766,10 @@ a.auth-menu__btn { text-decoration: none; }
     row-gap: 6px;
   }
   .pf-item__name { grid-column: 2 / 4; }
-  .pf-item__price, .pf-item__mos {
+  .pf-item__price, .pf-item__mos, .pf-item__grade-cell {
     grid-row: 2;
   }
+  .pf-item__grade-cell { justify-content: flex-start; }
   .pf-item__remove { grid-row: 1 / 3; }
   .portfolio-summary { grid-template-columns: 1fr 1fr; }
   .portfolio-summary__row:last-child { grid-column: 1 / 3; }
@@ -2963,6 +2976,13 @@ table.dt tfoot td { font-weight: 600; color: var(--ink-primary); border-top: 1px
   position: relative;
   padding: var(--space-3) 0 var(--space-2);
 }
+/* `outline: none` below removed the only focus indicator from the product's
+   headline interaction — a WCAG 2.4.7 failure.  Restore it for keyboard users
+   without bringing back the mouse-click ring. */
+.dcf-slider:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
 .dcf-slider {
   -webkit-appearance: none;
   appearance: none;
@@ -3588,6 +3608,17 @@ a:focus-visible {
   border-top: 1px solid rgba(255,255,255,0.05);
   padding-top: 14px;
 }
+/* `display:flex` beats the user-agent `[hidden]{display:none}` rule, so the
+   JS setting `.hidden = true` had no visual effect and a stale 52-week range
+   stayed under the next ticker.  Re-assert it at equal specificity. */
+.hero-insight[hidden] { display: none; }
+
+/* "as of <date>" stamp on watchlist rows whose price snapshot is stale. */
+.pf-item__asof {
+  display: block; font-style: normal;
+  font-size: 10px; color: var(--ink-muted);
+  letter-spacing: 0.02em;
+}
 .hero-insight {
   display: flex; flex-direction: column; gap: 2px;
   padding: 8px 12px; border-radius: 8px;
@@ -3596,13 +3627,13 @@ a:focus-visible {
 }
 .hero-insight__label {
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
-  color: #6b7382; font-weight: 600;
+  color: var(--ink-muted); font-weight: 600;
 }
 .hero-insight__value {
   font-size: 16px; font-weight: 700; color: #f5f7fa;
   font-variant-numeric: tabular-nums;
 }
-.hero-insight__hint { font-size: 11px; color: #8892a3; }
+.hero-insight__hint { font-size: 11px; color: var(--ink-muted); }
 .hero-insight__value.conf-high     { color: #34d399; }
 .hero-insight__value.conf-medium   { color: #60a5fa; }
 .hero-insight__value.conf-low      { color: #fbbf24; }
@@ -4178,10 +4209,21 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
        interactive element. ────────────────────────────────────────────── */
 :root.touch-on button,
 :root.touch-on a.copy-btn,
-:root.touch-on .header-btn,
-:root.touch-on input[type="checkbox"] + .settings-switch__track {
+:root.touch-on .header-btn {
   min-height: 44px;
   min-width: 44px;
+}
+/* The switch track is a painted 40x22 pill inside a fixed-height row; forcing
+   min-height:44px on it made all seven settings toggles render 46x46 in a
+   40x22 slot and overlap the row below.  Extend the *hit area* instead and
+   leave the visual size alone. */
+:root.touch-on .settings-switch { position: relative; }
+:root.touch-on .settings-switch::after {
+  content: "";
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 44px; height: 44px;
 }
 
 /* ── Prominent focus rings ─ thicker outline + glow for keyboard users. ─ */

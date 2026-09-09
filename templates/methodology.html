@@ -13,6 +13,10 @@
     window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
   </script>
   <script defer src="/_vercel/analytics/script.js"></script>
+  <!-- Accessibility settings bootstrap: blocking, before first paint, so
+       contrast / dyslexia font / text size do not flash or silently revert
+       on the pages that never load main.js. -->
+  <script src="/static/js/settings-boot.js?v={{ asset_v }}"></script>
 </head>
 <body>
 
@@ -33,7 +37,7 @@
   </div>
 </header>
 
-<main class="container" style="padding:32px 0 48px;max-width:780px;">
+<main class="container" style="padding-top:32px;padding-bottom:48px;max-width:780px;">
 
   <h1 style="font-size:32px;font-weight:700;line-height:1.2;margin:0 0 8px;">Methodology</h1>
   <p style="color:var(--ink-muted);font-size:15px;margin:0 0 28px;line-height:1.55;">Every assumption VALUS makes when pricing a stock, in detail. Educational only, not investment advice.</p>
