@@ -1769,6 +1769,11 @@ function renderHaikuVerdict(d) {
     verd.textContent = lv.verdict || "Fairly Valued";   // never an action word
     verd.className   = "lynch-verdict " + verdictClass;
   }
+  const plainEl = document.getElementById("lynchPlain");
+  if (plainEl) {
+    plainEl.textContent = lv.plain || "";
+    plainEl.classList.toggle("hidden", !lv.plain);
+  }
   if (thes) thes.textContent = lv.thesis || "";
   if (bulls) bulls.innerHTML = (lv.bull_points || [])
     .map(p => `<li>${escHtml(p)}</li>`).join("");

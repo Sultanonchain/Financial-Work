@@ -3795,6 +3795,15 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
   color: var(--tier-accent, #60a5fa);
   border: 1px solid var(--tier-strong, rgba(96,165,250,0.40));
 }
+/* The plain-language reading. Deliberately larger and lighter-weight than the
+   analyst thesis below it: this is the sentence a non-finance reader is meant
+   to land on first. */
+.lynch-plain {
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ink-primary);
+  margin-bottom: 10px;
+}
 .lynch-thesis {
   font-size: 13.5px; color: #d8dde6; line-height: 1.5;
   margin: 6px 0 16px; padding: 12px 14px;

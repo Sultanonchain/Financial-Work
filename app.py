@@ -1087,10 +1087,6 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
             print("[valus] lynch: ANTHROPIC_API_KEY not set in this runtime, "
                   "using DCF fallback verdict")
         return None
-    # Respect an active cooldown after a recent 429/529, skip the call.
-    if time.time() < _ANTHROPIC_COOLDOWN_UNTIL:
-        return None
-
     # Cache bucket, re-key only at the next market open (9:30 ET) or close
     # (4:00 ET) on a trading day.  Same epoch persists through the weekend.
     # Within an epoch, the verdict is frozen so live-price ticks don't burn
@@ -1116,8 +1112,15 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         except Exception:
             pass
 
-    # Compact the inputs so the prompt stays small, Haiku is cheap but the
-    # Anthropic JSON-mode parser is more reliable on focused context.
+    # Cooldown after a recent 429/529 — checked HERE, below the cache lookups
+    # rather than above them.  It used to gate the whole function, so for five
+    # minutes after one rate-limited call every ticker fell through to the DCF
+    # fallback even when a good verdict was sitting in cache.
+    if time.time() < _ANTHROPIC_COOLDOWN_UNTIL:
+        return None
+
+    # Compact the inputs so the prompt stays small; a focused context makes the
+    # structured-output extraction more reliable and keeps the bill down.
     qm_lines = []
     for m in (quality_metrics or [])[:6]:
         try:
@@ -1173,55 +1176,11 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
     tape_block = "\n".join(tape_lines) if tape_lines else "  (no tape data available)"
 
     try:
+        # Per-ticker context only.  Everything that is the same for every
+        # ticker lives in _LYNCH_SYSTEM so the cached prefix stays byte-stable.
         prompt = (
-            "You are a buyside analyst trained in Peter Lynch's method from "
-            "One Up On Wall Street.  Issue ONE verdict on this stock from the "
-            "snapshot below.  Write like Lynch, short plain sentences, no "
-            "sell-side jargon, blunt where the numbers are blunt.\n\n"
-            "LYNCH'S SIX CATEGORIES, pick the one that fits best:\n"
-            "  slowGrower, large, mature, low single-digit growth, dividend.\n"
-            "  stalwart, multibillion, 10-12% growth, recession-resilient.\n"
-            "  fastGrower, small/aggressive 20%+ growth, tenbagger territory.\n"
-            "  cyclical, earnings rise/fall with macro (autos, airlines, semis).\n"
-            "  turnaround, battered names that may rebound.\n"
-            "  assetPlay, hidden assets (real estate, cash, brand) understated.\n\n"
-            "LYNCH HEURISTICS (use the numerics, don't paraphrase):\n"
-            "  • PEG ≤ 0.5 with rising earnings → strong; PEG ≥ 1.5 → trim regardless of story.\n"
-            "  • FastGrower needs ≥20% revenue growth AND debt/equity < 0.5.\n"
-            "    Debt-fueled growth is the #1 trap, call it out.\n"
-            "  • Cyclical at peak margins + bullish headline = sell signal, not buy.\n"
-            "  • Stalwarts realistically deliver 30-50% over 1-2 years, not 10x.\n"
-            "  • Turnaround thesis is invalid without ≥18 months of cash runway.\n"
-            "  • Diworsification, hot-stock hype, analyst chase = red flags.\n\n"
-            "STRATEGIC BACKSTOP RULE (critical):\n"
+            "STRATEGIC BACKSTOP STATUS FOR THIS TICKER:\n"
             f"{strat_block}\n\n"
-            "REGIME RULE (critical, read this carefully):\n"
-            "  The TAPE block tells you what the stock is actually doing.\n"
-            "  When tape and fundamentals disagree, NAME THE DISAGREEMENT.  Do\n"
-            "  not parrot the IV when the tape says something else is going on.\n"
-            "  Apply the regime hint as follows:\n\n"
-            "    momentum_runup, Stock is melting up on flow, not earnings.\n"
-            "                       Lead the thesis by NAMING the move\n"
-            "                       ('momentum melt-up', 'FOMO bid', 'AI-themed\n"
-            "                       chase'). State separately what the\n"
-            "                       fundamentals say.  DO NOT issue Avoid based\n"
-            "                       on IV alone, you can't time tops.  Verdict\n"
-            "                       caps at Hold or Watch.  Never Buy a parabola.\n\n"
-            "    squeeze_risk, High short %, volume spike.  Tape is being\n"
-            "                       moved by positioning, not fundamentals.\n"
-            "                       Verdict caps at Hold or Watch.  Refuse a\n"
-            "                       decisive call and say so plainly.\n\n"
-            "    post_runup_pullback, Big 6-month move, recent pullback.  Easy\n"
-            "                       money is gone but the regime change may be\n"
-            "                       real.  Hold or Accumulate based on quality.\n\n"
-            "    broken, Down hard, near 52w low.  If quality metrics\n"
-            "                       are intact, this is Lynch turnaround\n"
-            "                       territory, say so explicitly and check the\n"
-            "                       cash-runway rule above.\n\n"
-            "    stable, Judge normally on DCF + quality.\n\n"
-            "  HONESTY RULE: When the tape contradicts the DCF, the thesis MUST\n"
-            "  acknowledge it.  No glossing.  Better to be a useful skeptic than\n"
-            "  a confidently-wrong machine.\n\n"
             "TAPE:\n"
             f"{tape_block}\n\n"
             "SNAPSHOT:\n"
@@ -1270,50 +1229,38 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         if _mcap   is not None: snap_extra += f"  Market cap: ${_mcap/1e9:.1f}B\n"
         snap_extra += "\n"
 
-        instructions = (
-            "Return ONLY a single-line JSON object with these keys (no prose):\n"
-            "  In all text fields, do NOT use em-dashes or en-dashes; use commas\n"
-            "  or periods instead. Keep wording plain and easy to read.\n"
-            "  category: one of slowGrower|stalwart|fastGrower|cyclical|turnaround|assetPlay\n"
-            "  verdict:  one of Undervalued|Modestly Undervalued|Fairly Valued|\n"
-            "            Slightly Overvalued|Overvalued.  This is an assessment of\n"
-            "            price against value, NOT an instruction to trade.  Never\n"
-            "            emit Buy, Sell, Hold, Accumulate, Avoid or any other\n"
-            "            action word in this or any other field.\n"
-            "  thesis:   <= 240 chars, plain English, Lynch-flavored.  DESCRIBE\n"
-            "            the valuation and the business, do NOT issue direct\n"
-            "            commands to buy, sell, or hold.  This is educational\n"
-            "            analysis, not investment advice.\n"
-            "  bull_points: array of 2-3 strings (each <= 70 chars)\n"
-            "  bear_points: array of 2-3 strings (each <= 70 chars)\n"
-            "  sovereign_backstop: short string if a strategic backstop applies, else null\n"
-            "  regime:   one of stable|momentum_runup|squeeze_risk|post_runup_pullback|broken\n"
-            "            (use the TAPE regime hint unless you can defend a different one)\n"
-            "  dcf_tweaks: object with three keys describing how the DCF should be\n"
-            "    nudged to reflect facts the pure-math DCF misses (news, AI\n"
-            "    demand cycle, sovereign capital, sentiment regime):\n"
-            "      growth_delta_pp: number in [-3.0, +3.0]  (delta to Stage 1 growth, percentage points)\n"
-            "      wacc_delta_pp:   number in [-1.0, +1.0]  (delta to WACC, percentage points)\n"
-            "      rationale:       string <= 120 chars explaining the dial moves\n"
-            "    Positive growth_delta = catalysts you see in the news/tape that\n"
-            "    the DCF growth rate doesn't capture (HBM ramp, AI cycle, foundry\n"
-            "    fill).  Negative wacc_delta = sovereign capital lowers cost of\n"
-            "    equity (CHIPS Act, gov't equity stake, DPA-protected revenue).\n"
-            "    Use zeros when no edge exists, do NOT pad. Stay inside the bounds.\n"
-            "Be honest.  If the numbers are weak AND no backstop applies AND the\n"
-            "regime is stable, say Overvalued.  If a backstop applies, the verdict\n"
-            "floor is Fairly Valued, never Overvalued or Slightly Overvalued on a\n"
-            "backstopped name; lead the bull case with the backstop.  If the regime\n"
-            "is momentum_runup or squeeze_risk, do not go above Fairly Valued and\n"
-            "lead with what the tape is doing.\n"
-        )
-        full_prompt = prompt + snap_extra + instructions
+        user_turn = prompt + snap_extra
 
         body = {
-            "model":       "claude-sonnet-4-6",
-            "max_tokens":  700,
-            "temperature": 0,
-            "messages":    [{"role": "user", "content": full_prompt}],
+            # Sonnet 5. Note the two things that had to change with it:
+            #   * `temperature` is rejected outright (400) on this model, so
+            #     determinism now comes from the prompt and the schema.
+            #   * adaptive thinking is ON by default here, and `max_tokens`
+            #     caps thinking plus response text together. This call is a
+            #     structured extraction, not a reasoning task, so thinking is
+            #     explicitly disabled and effort held low: predictable cost,
+            #     no risk of a reply that is all thinking and a truncated
+            #     JSON body.
+            "model":      "claude-sonnet-5",
+            "max_tokens": 1200,
+            "thinking":   {"type": "disabled"},
+            "output_config": {
+                "effort": "low",
+                # Structured outputs: the API validates the reply against the
+                # schema before returning it, which is what lets the parsing
+                # below be a plain json.loads instead of fence-stripping and
+                # brace-scanning a free-text response.
+                "format": {"type": "json_schema", "schema": _LYNCH_SCHEMA},
+            },
+            # The system block is byte-identical across tickers and is marked
+            # cacheable; the per-ticker snapshot goes in the user turn, after
+            # the breakpoint, so it never invalidates the cached prefix.
+            "system": [{
+                "type": "text",
+                "text": _LYNCH_SYSTEM,
+                "cache_control": {"type": "ephemeral"},
+            }],
+            "messages": [{"role": "user", "content": user_turn}],
         }
         # 429 (rate limit) / 529 (overloaded) resilience: retry once after a
         # short backoff, and if it still fails set a global cooldown so we
@@ -1457,6 +1404,9 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
             # the old `verdict_key`, which shipped the raw action token.
             "tier":               _verdict_tier(verdict_final),
             "thesis":             str(parsed.get("thesis", ""))[:260],
+            # Same judgement, written for someone who does not know what a DCF
+            # is.  The card leads with this and keeps `thesis` as the detail.
+            "plain":              str(parsed.get("plain", ""))[:320],
             "bull_points":        bull_points,
             "bear_points":        _coerce_str_list(parsed.get("bear_points")),
             "sovereign_backstop": sb_str,
@@ -1464,7 +1414,7 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
             "dcf_tweaks":         dcf_tweaks_out,
             "as_of_epoch":        epoch,
             "as_of_label":        _market_epoch_label(epoch),
-            "model":              "claude-sonnet-4-6",
+            "model":              "claude-sonnet-5",
         }
         _LYNCH_CACHE[bucket] = (time.time(), result)
         if _kv:
@@ -1480,6 +1430,129 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         print(f"[valus] lynch {ticker}: verdict generation failed, "
               f"{type(e).__name__}: {str(e)[:200]}")
         return None
+
+
+# ── Lynch verdict: static system prompt + response schema ────────────────
+# Everything here is identical for every ticker, so it is hoisted out of the
+# request builder and marked cacheable.  Sonnet's minimum cacheable prefix is
+# 1024 tokens; this block clears it, so after the first call of each cache
+# window the whole thing bills at cache-read rates instead of full input.
+# Keep it byte-stable: interpolating anything per-ticker here silently
+# disables caching for every request.
+_LYNCH_SYSTEM = (
+    "You are a buyside analyst trained in Peter Lynch's method from "
+    "One Up On Wall Street.  Issue ONE valuation assessment on the stock in "
+    "the snapshot.  Write like Lynch, short plain sentences, no sell-side "
+    "jargon, blunt where the numbers are blunt.\n\n"
+    "LYNCH'S SIX CATEGORIES, pick the one that fits best:\n"
+    "  slowGrower, large, mature, low single-digit growth, dividend.\n"
+    "  stalwart, multibillion, 10-12% growth, recession-resilient.\n"
+    "  fastGrower, small/aggressive 20%+ growth, tenbagger territory.\n"
+    "  cyclical, earnings rise/fall with macro (autos, airlines, semis).\n"
+    "  turnaround, battered names that may rebound.\n"
+    "  assetPlay, hidden assets (real estate, cash, brand) understated.\n\n"
+    "LYNCH HEURISTICS (use the numerics, don't paraphrase):\n"
+    "  • PEG <= 0.5 with rising earnings is strong; PEG >= 1.5 is expensive "
+    "regardless of story.\n"
+    "  • FastGrower needs >=20% revenue growth AND debt/equity < 0.5.\n"
+    "    Debt-fuelled growth is the #1 trap, call it out.\n"
+    "  • Cyclical at peak margins plus a bullish headline is a warning, not "
+    "confirmation.\n"
+    "  • Stalwarts realistically deliver 30-50% over 1-2 years, not 10x.\n"
+    "  • A turnaround thesis is invalid without >=18 months of cash runway.\n"
+    "  • Diworsification, hot-stock hype, analyst chase are red flags.\n\n"
+    "STRATEGIC BACKSTOP RULE (critical):\n"
+    "  The user turn states whether a sovereign backstop applies to this\n"
+    "  ticker.  When one does, sovereign capital (CHIPS Act grants, DPA Title\n"
+    "  III contracts, energy-sovereignty PPAs, direct US government equity)\n"
+    "  takes failure off the table.  Treat near-term FCF weakness as\n"
+    "  transitory, LEAD the bull case with the backstop rather than burying\n"
+    "  it, and never go below 'Fairly Valued' on that ticker.\n\n"
+    "REGIME RULE (critical, read this carefully):\n"
+    "  The TAPE block tells you what the stock is actually doing.\n"
+    "  When tape and fundamentals disagree, NAME THE DISAGREEMENT.  Do\n"
+    "  not parrot the intrinsic value when the tape says something else is\n"
+    "  going on.  Apply the regime hint as follows:\n\n"
+    "    momentum_runup, the stock is melting up on flow, not earnings.\n"
+    "                       Lead the thesis by NAMING the move ('momentum\n"
+    "                       melt-up', 'FOMO bid', 'AI-themed chase'), then\n"
+    "                       state separately what the fundamentals say.  Do\n"
+    "                       not call it Overvalued on intrinsic value alone,\n"
+    "                       tops are not timeable.  Do not go above\n"
+    "                       'Fairly Valued'.\n\n"
+    "    squeeze_risk, high short interest and a volume spike.  The tape is\n"
+    "                       being moved by positioning, not fundamentals.  Do\n"
+    "                       not go above 'Fairly Valued', and say plainly that\n"
+    "                       a decisive read is not available here.\n\n"
+    "    post_runup_pullback, a big 6-month move followed by a pullback.  The\n"
+    "                       easy move is gone but the change may be real.\n"
+    "                       Judge on quality.\n\n"
+    "    broken, down hard, near the 52-week low.  If the quality metrics are\n"
+    "                       intact this is Lynch turnaround territory, say so\n"
+    "                       explicitly and check the cash-runway rule above.\n\n"
+    "    stable, judge normally on the DCF and the quality scorecard.\n\n"
+    "  HONESTY RULE: when the tape contradicts the DCF, the thesis MUST\n"
+    "  acknowledge it.  No glossing.  Better a useful sceptic than a\n"
+    "  confidently-wrong machine.\n\n"
+    "OUTPUT RULES:\n"
+    "  Do not use em-dashes or en-dashes anywhere; use commas or periods.\n"
+    "  Keep wording plain enough for someone with no finance background.\n"
+    "  `verdict` is an assessment of price against value, NOT an instruction\n"
+    "  to trade.  Never emit Buy, Sell, Hold, Accumulate, Avoid or any other\n"
+    "  action word in any field.  `thesis` DESCRIBES the valuation and the\n"
+    "  business; it never tells the reader what to do with their money.  This\n"
+    "  is educational analysis, not investment advice.\n"
+    "  `plain` is the same judgement written for someone who does not know\n"
+    "  what a DCF is: no ratios, no jargon, two short sentences.\n"
+    "  For `dcf_tweaks`, a positive growth_delta_pp means catalysts in the\n"
+    "  news or tape that the DCF growth rate does not capture (an HBM ramp,\n"
+    "  the AI cycle, foundry fill).  A negative wacc_delta_pp means sovereign\n"
+    "  capital lowering the cost of equity.  Use zeros when there is no edge,\n"
+    "  do not pad, and stay inside the stated bounds.\n"
+    "  Be honest.  If the numbers are weak, no backstop applies and the regime\n"
+    "  is stable, say Overvalued.\n"
+)
+
+# Structured output schema.  The API validates the model's reply against this
+# before it reaches us, which removes the fenced-JSON stripping and brace-scan
+# recovery this function used to need.  Schema limits: every object needs
+# additionalProperties:false, and nullable fields use anyOf rather than a type
+# array.
+_LYNCH_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "category": {"type": "string", "enum": [
+            "slowGrower", "stalwart", "fastGrower",
+            "cyclical", "turnaround", "assetPlay"]},
+        "verdict": {"type": "string", "enum": [
+            "Undervalued", "Modestly Undervalued", "Fairly Valued",
+            "Slightly Overvalued", "Overvalued"]},
+        "thesis": {"type": "string"},
+        "plain":  {"type": "string"},
+        "bull_points": {"type": "array", "items": {"type": "string"}},
+        "bear_points": {"type": "array", "items": {"type": "string"}},
+        "sovereign_backstop": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        "regime": {"type": "string", "enum": [
+            "stable", "momentum_runup", "squeeze_risk",
+            "post_runup_pullback", "broken"]},
+        "dcf_tweaks": {"anyOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "growth_delta_pp": {"type": "number"},
+                    "wacc_delta_pp":   {"type": "number"},
+                    "rationale":       {"type": "string"},
+                },
+                "required": ["growth_delta_pp", "wacc_delta_pp", "rationale"],
+                "additionalProperties": False,
+            },
+            {"type": "null"},
+        ]},
+    },
+    "required": ["category", "verdict", "thesis", "plain", "bull_points",
+                 "bear_points", "sovereign_backstop", "regime", "dcf_tweaks"],
+    "additionalProperties": False,
+}
 
 
 def _lynch_fallback_verdict(ticker, sector, mos, strategic_info,
@@ -1528,9 +1601,33 @@ def _lynch_fallback_verdict(ticker, sector, mos, strategic_info,
     if is_strategic:
         thesis_parts.append(strategic_info.get("strategic_label", "Strategic asset"))
     if mos is not None:
-        thesis_parts.append(f"DCF MOS {mos:+.0f}%")
-    thesis_parts.append("AI commentary unavailable; verdict from DCF facts only.")
+        thesis_parts.append(f"DCF margin of safety {mos:+.0f}%")
+    thesis_parts.append("Assessment from VALUS's cash-flow model.")
     thesis = " · ".join(thesis_parts)[:260]
+
+    # Plain-language version, written by hand so the card reads like an answer
+    # even when the AI layer is unreachable.
+    if mos is None:
+        plain = ("We could not put a reliable value on this company from its "
+                 "cash flows, so treat any figure on this page as a rough "
+                 "sketch rather than an estimate.")
+    elif mos >= 15:
+        plain = (f"VALUS's model says this company is worth more than it "
+                 f"currently costs, by about {abs(mos):.0f}%. That gap is the "
+                 f"model's opinion, not a fact, and it rests on the growth and "
+                 f"discount-rate assumptions shown further down this page.")
+    elif mos >= -10:
+        plain = ("The price and VALUS's estimate of what this company is worth "
+                 "are close together. On these numbers the market and the "
+                 "model broadly agree.")
+    else:
+        plain = (f"The price is about {abs(mos):.0f}% above what VALUS's model "
+                 f"says the company is worth. That means the market is "
+                 f"expecting more growth than the model assumes, which may or "
+                 f"may not turn out to be right.")
+    if is_strategic:
+        plain += (" This company also has government-backed revenue, which the "
+                  "cash-flow model on its own tends to undercount.")
 
     epoch = _market_epoch()
     return {
@@ -1538,6 +1635,7 @@ def _lynch_fallback_verdict(ticker, sector, mos, strategic_info,
         "verdict":            verdict,
         "tier":               _verdict_tier(verdict),
         "thesis":             thesis,
+        "plain":              plain[:320],
         "bull_points":        bull_points[:3],
         "bear_points":        bear_points[:3],
         "sovereign_backstop": sb_str,
