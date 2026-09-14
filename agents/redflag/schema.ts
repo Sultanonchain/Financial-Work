@@ -71,12 +71,20 @@ export const RedflagMetricsSchema = z.object({
   annualPeriods: z.number().int().nonnegative(),
   /** Years between the latest period and the comparison period (up to 3). */
   spanYears: z.number().int().nonnegative(),
+  /** Basis of the flow ratios, from key figures: trailing twelve months, else the last fiscal year. */
+  flowBasis: z.enum(['ttm', 'annual']).nullable(),
+  flowPeriodEnd: z.string().nullable(),
+  /** Balance sheet that net debt, cash runway and equity come from. */
+  balanceSheetDate: z.string().nullable(),
   fcfToNetIncome: z.number().nullable(),
   sbcPctOfFcf: z.number().nullable(),
   shareCountChangePct: z.number().nullable(),
   netDebt: z.number().nullable(),
   netDebtToOperatingCashFlow: z.number().nullable(),
+  /** From key figures: cash against the larger burn of the trailing twelve months and the last fiscal year. */
   cashRunwayYears: z.number().nullable(),
+  /** Which of the two burns set the runway. */
+  cashBurnBasis: z.enum(['ttm', 'annual']).nullable(),
   operatingMarginPct: z.number().nullable(),
   operatingMarginChangePp: z.number().nullable(),
   revenueCagrPct: z.number().nullable(),

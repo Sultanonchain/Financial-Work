@@ -79,9 +79,19 @@ export const ADVICE_PATTERN = new RegExp(
   'i',
 );
 
-/** Model-written prose: bounded length, no trading advice. */
-export function zProse(maxChars: number) {
-  return z
+/**
+ * Words that accuse the valuation engine or the data of dishonesty. An engine
+ * figure can disagree with the reported figures; "fabricated" claims intent the
+ * site cannot know. Checked on dcf and verdict prose (zProse neutral option).
+ */
+export const ACCUSATORY_PATTERN = /\b(?:fabricat\w*|made[- ]up|bogus)\b/i;
+
+/**
+ * Model-written prose: bounded length, no trading advice. `neutral` also rules
+ * out accusatory wording, for agents that describe the engine's figures.
+ */
+export function zProse(maxChars: number, options: { neutral?: boolean } = {}) {
+  const prose = z
     .string()
     .min(1)
     .max(maxChars)
@@ -90,6 +100,11 @@ export function zProse(maxChars: number) {
         'reads as trading advice; describe price against value and never tell ' +
         'the reader to buy, sell, hold or avoid',
     });
+  return options.neutral
+    ? prose.refine((text) => !ACCUSATORY_PATTERN.test(text), {
+        message: 'calls a figure fabricated or made up; say it does not match the reported figures instead',
+      })
+    : prose;
 }
 
 /** Free users see headline + summary. Premium sees everything. */
@@ -168,6 +183,8 @@ export interface StatementPeriod {
   stockCompensation: number | null;
   totalDebt: number | null;
   cashAndEquivalents: number | null;
+  /** Cash, equivalents and short-term investments, when the filer reports it. Optional for older contexts. */
+  cashAndShortTermInvestments?: number | null;
   shareholdersEquity: number | null;
   dilutedShares: number | null;
 }

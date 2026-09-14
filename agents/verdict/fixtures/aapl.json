@@ -2,7 +2,7 @@
   "name": "verdict-aapl-2026-09-12",
   "description": "Illustrative AAPL-shaped context for tests. Statement figures are approximate; the news items and the model reply are synthetic and were written by hand because no API key was available when this fixture was created. Re-record against the live API with `npm run fixtures:record`.",
   "source": "recorded",
-  "recordedAt": "2026-09-14T17:54:12.602Z",
+  "recordedAt": "2026-09-14T21:39:23.155Z",
   "recordedModel": "claude-sonnet-5",
   "input": {
     "ticker": "AAPL",
@@ -396,9 +396,18 @@
         "status": "ok",
         "data": {
           "headline": {
-            "value": "This valuation rests mainly on a stage one growth rate well above Apple's recent track record, and on a discount rate that determines most of the terminal value.",
+            "value": "The valuation rests mainly on the 8.4% discount rate and a terminal growth rate that sits close to it, with the stage one growth assumption running well above Apple's five year trend.",
             "visibility": "headline",
             "source": "model"
+          },
+          "valuationReliability": {
+            "value": {
+              "reliable": true,
+              "reasons": []
+            },
+            "visibility": "headline",
+            "source": "computed",
+            "note": "Unreliable when the growth path breaks from history, or when two or more of near-term growth, discount rate and starting free cash flow could not be assessed (rated unclear, or missing from the engine)"
           },
           "intrinsicValue": {
             "value": 198.5,
@@ -424,7 +433,7 @@
             "source": "computed"
           },
           "plainEnglish": {
-            "value": "A discounted cash flow estimate tries to guess what a company's future cash will be worth in today's dollars. Here the model assumes Apple's cash flow grows faster than it actually has in the past five years, and small changes to the discount rate used to bring future cash back to today's value swing the answer a lot.",
+            "value": "This estimate depends heavily on how much risk is priced into the discount rate and how fast Apple keeps growing far into the future. Recent revenue and cash flow growth have been much slower than what the model assumes for the next few years.",
             "visibility": "summary",
             "source": "model"
           },
@@ -446,8 +455,8 @@
                 "engineValue": 7,
                 "unit": "pct",
                 "assessment": "aggressive",
-                "reasoning": "The engine assumes 7.00% annual growth for the next stage, more than double the revenue growth and more than four times the free cash flow growth Apple has actually posted over the last five reported years.",
-                "evidence": "Revenue grew 3.28% a year and free cash flow grew 1.54% a year across the five annual periods provided."
+                "reasoning": "7% stage one growth is well above both the five year trend and the recent trailing twelve month pickup, requiring services and margin expansion to keep accelerating.",
+                "evidence": "Revenue growth per year across five periods was 3.28% and free cash flow growth was 1.54%, though trailing twelve month revenue grew 5.8%."
               },
               {
                 "key": "terminal_growth",
@@ -455,8 +464,8 @@
                 "engineValue": 2.5,
                 "unit": "pct",
                 "assessment": "supported",
-                "reasoning": "A 2.50% long run growth rate sits inside the normal range associated with long run nominal economic growth, and is not itself unusual, but combined with the 8.40% discount rate it produces a gap that leaves the terminal period doing most of the work in the total value.",
-                "evidence": "Terminal growth is 2.50% versus a discount rate of 8.40%, and the engine reports terminal value equals 71% of enterprise value."
+                "reasoning": "2 to 3 percent is a reasonable long run terminal rate, but the engine itself flags terminal value at 71% of enterprise value, so this assumption dominates the result.",
+                "evidence": "Terminal growth is set at 2.50% against an 8.40% discount rate, a gap of 5.9 points."
               },
               {
                 "key": "wacc",
@@ -464,17 +473,17 @@
                 "engineValue": 8.4,
                 "unit": "pct",
                 "assessment": "supported",
-                "reasoning": "An 8.40% discount rate looks reasonable for a company with very low leverage, strong free cash flow margins, and no sovereign backstop needed, though there is no explicit risk free rate or beta shown in the context to fully confirm the figure.",
-                "evidence": "Net debt to EBITDA is 0.45x (strong) and free cash flow margin averaged 26.2% over the historical period, both indicating low balance sheet risk."
+                "reasoning": "8.40% seems reasonable for a large, low leverage, high return business, though a large-cap of this quality could arguably support a slightly lower rate.",
+                "evidence": "Net debt to EBITDA is 0.45x, described as strong, and Apple is a large, established company with no sovereign backstop noted."
               },
               {
                 "key": "fcf_base",
                 "label": "Starting free cash flow",
                 "engineValue": 98800000000,
                 "unit": "money",
-                "assessment": "aggressive",
-                "reasoning": "The free cash flow base of $98.80B matches the latest reported annual figure, but stock based compensation, a non cash add back, equals 13.1% of that free cash flow, which can flatter the cash generation picture used as the starting point.",
-                "evidence": "Stock based compensation is 13.1% of the latest reported free cash flow of $98.80B."
+                "assessment": "conservative",
+                "reasoning": "The engine's base is below the more recent trailing twelve month figure, so it is not using the most current, higher cash generation level.",
+                "evidence": "Engine uses $98.80B, matching fiscal year 2025 free cash flow of $98.80B, while trailing twelve month free cash flow is $116.60B."
               },
               {
                 "key": "share_count",
@@ -482,29 +491,28 @@
                 "engineValue": 14840000000,
                 "unit": "shares",
                 "assessment": "supported",
-                "reasoning": "The 14.84B diluted share count used by the engine matches the most recent quarterly figure and continues a clear multi year trend of share count reduction from buybacks, so it is not a stale input.",
-                "evidence": "Diluted shares fell from 16.86B in fiscal 2021 to 15.00B in fiscal 2025 and to 14.84B in the latest quarter."
+                "reasoning": "This matches the most recent reported figure and continues the buyback-driven decline from 15.00B a year earlier.",
+                "evidence": "Engine uses 14.84B shares, matching the latest diluted share count reported for the trailing twelve months."
               }
             ],
             "visibility": "detail",
             "source": "model",
-            "note": "engineValue is copied from the valuation engine; assessment, reasoning and evidence are model-written"
+            "note": "engineValue is copied from the valuation engine; reasoning and evidence are model-written; assessment is set in code from the model's call on whether the engine figure is higher or lower than the evidence supports"
           },
           "dominantSensitivity": {
             "value": {
-              "key": "wacc",
-              "label": "Discount rate",
-              "explanation": "With terminal value already reported at 71% of enterprise value, the discount rate has outsized leverage over the result, and a one percentage point move in a rate like this commonly shifts intrinsic value by 15 to 40 percent."
+              "key": "terminal_growth",
+              "label": "Long-run growth",
+              "explanation": "With terminal value already 71% of enterprise value and only a 5.9 point gap to the discount rate, small changes in the terminal growth assumption swing the valuation far more than any other input."
             },
             "visibility": "detail",
             "source": "model"
           },
           "confidenceReasons": {
             "value": [
-              "Stage one growth of 7.00% is well above the 3.28% revenue and 1.54% free cash flow growth actually reported over five years.",
-              "Terminal value makes up 71% of enterprise value, so the result leans heavily on assumptions about the far future rather than near term results.",
-              "Stock based compensation equal to 13.1% of free cash flow means part of the cash flow base is a non cash add back rather than distributable cash.",
-              "Balance sheet and buyback trends support the net debt and share count inputs, which adds some stability to the estimate."
+              "Terminal value dominates enterprise value at 71%, per the engine's own flagged weakness",
+              "Stage one growth of 7% is notably above the five year revenue and free cash flow trend",
+              "Free cash flow base used is below the more current trailing twelve month figure, understating recent cash generation"
             ],
             "visibility": "detail",
             "source": "model"
@@ -515,7 +523,15 @@
               "revenueCagrPct": 3.28,
               "fcfCagrPct": 1.54,
               "avgFcfMarginPct": 26.2,
-              "latestSbcPctOfFcf": 13.1
+              "latestSbcPctOfFcf": 13.1,
+              "trailing": {
+                "basis": "ttm",
+                "periodEnd": "2026-06-27",
+                "revenue": 440200000000,
+                "freeCashFlow": 116600000000,
+                "operatingMarginPct": 31.9,
+                "revenueVsLastFiscalYearPct": 5.8
+              }
             },
             "visibility": "detail",
             "source": "computed"
@@ -528,7 +544,7 @@
           "attempts": 1,
           "cached": false,
           "latencyMs": 0,
-          "generatedAt": "2026-09-14T15:46:38.070Z",
+          "generatedAt": "2026-09-14T21:39:23.155Z",
           "usage": null
         },
         "error": null
@@ -809,7 +825,7 @@
         "status": "ok",
         "data": {
           "headline": {
-            "value": "Apple's financials look clean overall, with strong cash generation and shrinking share count.",
+            "value": "Apple's numbers look clean, with strong cash conversion and a shrinking share count.",
             "visibility": "headline",
             "source": "model"
           },
@@ -819,16 +835,12 @@
             "source": "model"
           },
           "plainEnglish": {
-            "value": "Apple turns its profits into real cash and is buying back more shares than it issues, which are good signs. Debt is high relative to equity but easily covered by cash flow, so it is not a major worry.",
+            "value": "Apple turns almost all of its profit into real cash, and it is buying back more shares than it issues. Debt is high but easily covered by operating cash flow, so this is not a concern by itself.",
             "visibility": "summary",
             "source": "model"
           },
           "topFlag": {
-            "value": {
-              "code": "leverage",
-              "title": "High debt relative to equity",
-              "severity": "low"
-            },
+            "value": null,
             "visibility": "summary",
             "source": "model"
           },
@@ -836,21 +848,13 @@
             "value": {
               "high": 0,
               "medium": 0,
-              "low": 1
+              "low": 0
             },
             "visibility": "summary",
             "source": "computed"
           },
           "flags": {
-            "value": [
-              {
-                "code": "leverage",
-                "title": "High debt relative to equity",
-                "severity": "low",
-                "evidence": "Debt to equity is 1.38x and net debt is $62.80B, but net debt is only 0.56x operating cash flow.",
-                "whatWouldClearIt": "Continued strong operating cash flow relative to debt would keep this from being a concern."
-              }
-            ],
+            "value": [],
             "visibility": "detail",
             "source": "model"
           },
@@ -858,13 +862,17 @@
             "value": {
               "annualPeriods": 5,
               "spanYears": 3,
-              "fcfToNetIncome": 0.88,
-              "sbcPctOfFcf": 13.1,
+              "flowBasis": "ttm",
+              "flowPeriodEnd": "2026-06-27",
+              "balanceSheetDate": "2026-06-27",
+              "fcfToNetIncome": 0.97,
+              "sbcPctOfFcf": 11.1,
               "shareCountChangePct": -8.1,
-              "netDebt": 62800000000,
-              "netDebtToOperatingCashFlow": 0.56,
+              "netDebt": 64900000000,
+              "netDebtToOperatingCashFlow": 0.5,
               "cashRunwayYears": null,
-              "operatingMarginPct": 32,
+              "cashBurnBasis": null,
+              "operatingMarginPct": 31.9,
               "operatingMarginChangePp": 1.7,
               "revenueCagrPct": 1.82,
               "negativeEquity": false
@@ -880,7 +888,7 @@
           "attempts": 1,
           "cached": false,
           "latencyMs": 0,
-          "generatedAt": "2026-09-14T15:46:38.070Z",
+          "generatedAt": "2026-09-14T21:39:23.155Z",
           "usage": null
         },
         "error": null
@@ -890,19 +898,19 @@
   "modelOutput": {
     "band": "Slightly Overvalued",
     "category": "stalwart",
-    "headline": "Apple trades above a fair estimate built on growth faster than its own recent history.",
-    "thesis": "The engine puts fair value near $198.50, well below the $236.40 price, mainly because it assumes 7% near term growth against revenue growth of about 6.1% actually posted. Terminal value carries 71% of the total, so a modest change in the discount rate swings the answer a lot. Apple's business itself is excellent, with 58.2% return on invested capital and low net debt relative to cash flow, but that quality is already reflected in a trailing PE of 31.2 and a PEG of 2.41. Regulatory overhangs from the EU App Store review and the 2027 DOJ trial add risk the growth rate does not account for.",
-    "plainEnglish": "The price looks a bit ahead of what the business is worth today, based on a careful estimate of future cash. This is a well run company, but you are being asked to pay up for growth that has not shown up in the numbers yet.",
-    "bandRationale": "Stays at the engine's Slightly Overvalued band because the dcf reviewer flags the core growth assumption as aggressive relative to history, which supports rather than softens the overvaluation call, while nothing in catalyst or news is strong enough to shift it further.",
+    "headline": "Apple trades above estimated intrinsic value, with growth assumptions running ahead of its trend.",
+    "thesis": "Apple is priced at $236.40 against an estimated intrinsic value near $198.50, a negative margin of safety of about 16%. The valuation leans on a 7% near term growth assumption that the dcf reviewer calls a stretch against Apple's slower five year trend, and terminal value makes up 71% of the total, so a small change in the long run growth rate moves the answer a lot. The business itself is clean: 31.9% operating margins, $116.60B of free cash flow, shrinking share count, and no red flags in the financials. Regulatory overhangs from the EU App Store review and the 2027 DOJ antitrust trial add risk the current price does not obviously discount.",
+    "plainEnglish": "Apple is a very well run company, but the current stock price already assumes a lot of future growth. Based on the numbers here, you are paying more than the business looks worth today.",
+    "bandRationale": "The band stays at the engine's Slightly Overvalued reading because the dcf reviewer found the valuation reliable but flagged the near term growth assumption as aggressive, which supports rather than reduces the overvaluation signal, and the tape is stable so no adjustment is needed either way.",
     "bullPoints": [
-      "Return on invested capital of 58.2% and free cash flow margin of 23.7% show a genuinely strong business",
-      "Share count down 8.1% over three years from steady buybacks",
-      "Net debt is only 0.45 times EBITDA, a strong balance sheet position"
+      "Operating margin of 31.9% and free cash flow of $116.60B show a highly profitable, cash generative business.",
+      "Share count has shrunk 8.1% over three years, and debt to EBITDA is a strong 0.45x.",
+      "Return on invested capital of 58.2% is excellent, reflecting a durable competitive position."
     ],
     "bearPoints": [
-      "Stage one growth assumption of 7% is more than double actual revenue growth of 6.1%",
-      "PEG ratio of 2.41 is well above the 1.5 level Lynch considered expensive",
-      "EU App Store review and a scheduled 2027 antitrust trial add legal risk not reflected in the growth rate"
+      "The 7% near term growth assumption is above Apple's recent trend, and terminal value is 71% of enterprise value, making the estimate sensitive to small changes.",
+      "PEG ratio of 2.41 is well above the 1.5 level Lynch treats as expensive.",
+      "EU App Store fee review and a scheduled 2027 DOJ antitrust trial add regulatory risk not clearly priced in."
     ],
     "tapeVsFundamentals": "agree",
     "confidence": "medium"
@@ -922,12 +930,12 @@
         "source": "computed"
       },
       "headline": {
-        "value": "Apple trades above a fair estimate built on growth faster than its own recent history.",
+        "value": "Apple trades above estimated intrinsic value, with growth assumptions running ahead of its trend.",
         "visibility": "headline",
         "source": "model"
       },
       "plainEnglish": {
-        "value": "The price looks a bit ahead of what the business is worth today, based on a careful estimate of future cash. This is a well run company, but you are being asked to pay up for growth that has not shown up in the numbers yet.",
+        "value": "Apple is a very well run company, but the current stock price already assumes a lot of future growth. Based on the numbers here, you are paying more than the business looks worth today.",
         "visibility": "summary",
         "source": "model"
       },
@@ -943,18 +951,18 @@
       },
       "bullPoints": {
         "value": [
-          "Return on invested capital of 58.2% and free cash flow margin of 23.7% show a genuinely strong business",
-          "Share count down 8.1% over three years from steady buybacks",
-          "Net debt is only 0.45 times EBITDA, a strong balance sheet position"
+          "Operating margin of 31.9% and free cash flow of $116.60B show a highly profitable, cash generative business.",
+          "Share count has shrunk 8.1% over three years, and debt to EBITDA is a strong 0.45x.",
+          "Return on invested capital of 58.2% is excellent, reflecting a durable competitive position."
         ],
         "visibility": "summary",
         "source": "model"
       },
       "bearPoints": {
         "value": [
-          "Stage one growth assumption of 7% is more than double actual revenue growth of 6.1%",
-          "PEG ratio of 2.41 is well above the 1.5 level Lynch considered expensive",
-          "EU App Store review and a scheduled 2027 antitrust trial add legal risk not reflected in the growth rate"
+          "The 7% near term growth assumption is above Apple's recent trend, and terminal value is 71% of enterprise value, making the estimate sensitive to small changes.",
+          "PEG ratio of 2.41 is well above the 1.5 level Lynch treats as expensive.",
+          "EU App Store fee review and a scheduled 2027 DOJ antitrust trial add regulatory risk not clearly priced in."
         ],
         "visibility": "summary",
         "source": "model"
@@ -965,12 +973,12 @@
         "source": "computed"
       },
       "thesis": {
-        "value": "The engine puts fair value near $198.50, well below the $236.40 price, mainly because it assumes 7% near term growth against revenue growth of about 6.1% actually posted. Terminal value carries 71% of the total, so a modest change in the discount rate swings the answer a lot. Apple's business itself is excellent, with 58.2% return on invested capital and low net debt relative to cash flow, but that quality is already reflected in a trailing PE of 31.2 and a PEG of 2.41. Regulatory overhangs from the EU App Store review and the 2027 DOJ trial add risk the growth rate does not account for.",
+        "value": "Apple is priced at $236.40 against an estimated intrinsic value near $198.50, a negative margin of safety of about 16%. The valuation leans on a 7% near term growth assumption that the dcf reviewer calls a stretch against Apple's slower five year trend, and terminal value makes up 71% of the total, so a small change in the long run growth rate moves the answer a lot. The business itself is clean: 31.9% operating margins, $116.60B of free cash flow, shrinking share count, and no red flags in the financials. Regulatory overhangs from the EU App Store review and the 2027 DOJ antitrust trial add risk the current price does not obviously discount.",
         "visibility": "detail",
         "source": "model"
       },
       "bandRationale": {
-        "value": "Stays at the engine's Slightly Overvalued band because the dcf reviewer flags the core growth assumption as aggressive relative to history, which supports rather than softens the overvaluation call, while nothing in catalyst or news is strong enough to shift it further.",
+        "value": "The band stays at the engine's Slightly Overvalued reading because the dcf reviewer found the valuation reliable but flagged the near term growth assumption as aggressive, which supports rather than reduces the overvaluation signal, and the tape is stable so no adjustment is needed either way.",
         "visibility": "detail",
         "source": "model"
       },
@@ -994,6 +1002,7 @@
         "value": {
           "regimeCap": false,
           "backstopFloor": false,
+          "valuationReliable": true,
           "allowedBands": [
             "Modestly Undervalued",
             "Fairly Valued",

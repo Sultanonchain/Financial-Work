@@ -15,6 +15,16 @@ export type DcfAssumptionKey = (typeof DCF_ASSUMPTION_KEYS)[number];
 const REQUIRED_ASSUMPTIONS: readonly DcfAssumptionKey[] = ['stage1_growth', 'terminal_growth', 'wacc'];
 
 export const ASSESSMENTS = ['supported', 'aggressive', 'conservative', 'unclear'] as const;
+export type Assessment = (typeof ASSESSMENTS)[number];
+
+/**
+ * The model's call on each engine input: is the engine's figure higher or lower
+ * than the evidence supports? run.ts turns it into the public assessment, so the
+ * model never works out the sign (a higher discount rate is conservative). It
+ * comes after reasoning in the schema, so the call is made after the reasoning.
+ */
+export const ENGINE_COMPARISONS = ['in_line', 'higher', 'lower', 'unclear'] as const;
+export type EngineComparison = (typeof ENGINE_COMPARISONS)[number];
 export const HISTORICAL_FIT = ['consistent', 'stretch', 'break', 'unclear'] as const;
 export const CONFIDENCE = ['low', 'medium', 'high'] as const;
 export const ASSUMPTION_UNITS = ['pct', 'money', 'shares'] as const;
@@ -23,28 +33,31 @@ export const ASSUMPTION_UNITS = ['pct', 'money', 'shares'] as const;
 /* Model-facing: what Claude returns. Plain values, no Field envelopes.       */
 /* ────────────────────────────────────────────────────────────────────────── */
 
+/** dcf prose may say an engine figure does not match the reported figures, never that it is fabricated. */
+const prose = (maxChars: number) => zProse(maxChars, { neutral: true });
+
 export const DcfModelSchema = z
   .object({
-    headline: zProse(200),
-    plainEnglish: zProse(400),
+    headline: prose(200),
+    plainEnglish: prose(400),
     historicalFit: z.enum(HISTORICAL_FIT),
     assumptions: z
       .array(
         z.object({
           key: z.enum(DCF_ASSUMPTION_KEYS),
-          assessment: z.enum(ASSESSMENTS),
-          reasoning: zProse(500),
-          evidence: zProse(300),
+          evidence: prose(300),
+          reasoning: prose(500),
+          engineVsEvidence: z.enum(ENGINE_COMPARISONS),
         }),
       )
       .min(3)
       .max(6),
     dominantSensitivity: z.object({
       key: z.enum(DCF_ASSUMPTION_KEYS),
-      explanation: zProse(400),
+      explanation: prose(400),
     }),
     confidence: z.enum(CONFIDENCE),
-    confidenceReasons: z.array(zProse(200)).max(4),
+    confidenceReasons: z.array(prose(200)).max(4),
   })
   .superRefine((out, issues) => {
     const seen = new Set<DcfAssumptionKey>();
@@ -81,6 +94,17 @@ export const DcfHistorySchema = z.object({
   fcfCagrPct: z.number().nullable(),
   avgFcfMarginPct: z.number().nullable(),
   latestSbcPctOfFcf: z.number().nullable(),
+  /** Latest results on the key-figures basis: trailing twelve months, else the last fiscal year. */
+  trailing: z
+    .object({
+      basis: z.enum(['ttm', 'annual']),
+      periodEnd: z.string(),
+      revenue: z.number().nullable(),
+      freeCashFlow: z.number().nullable(),
+      operatingMarginPct: z.number().nullable(),
+      revenueVsLastFiscalYearPct: z.number().nullable(),
+    })
+    .nullable(),
 });
 export type DcfHistory = z.infer<typeof DcfHistorySchema>;
 
@@ -96,6 +120,8 @@ const AssumptionRowSchema = z.object({
 
 export const DcfOutputSchema = z.object({
   headline: zField(z.string()),
+  /** Set in code from the review, so the engine cannot claim confidence the review does not support. */
+  valuationReliability: zField(z.object({ reliable: z.boolean(), reasons: z.array(z.string()) })),
   intrinsicValue: zField(z.number().nullable()),
   valueRange: zField(z.object({ low: z.number(), high: z.number() }).nullable()),
 

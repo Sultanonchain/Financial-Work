@@ -40,16 +40,19 @@ export const STAGE_ONE_SLUGS = ['dcf', 'catalyst', 'news', 'redflag'] as const;
 /* Model-facing                                                               */
 /* ────────────────────────────────────────────────────────────────────────── */
 
+/** Verdict prose may say an engine figure does not match the reported figures, never that it is fabricated. */
+const prose = (maxChars: number) => zProse(maxChars, { neutral: true });
+
 /** run.ts adds the per-ticker rule: band must be in the allowed set. */
 export const VerdictModelSchema = z.object({
   band: z.enum(VALUATION_BANDS),
   category: z.enum(LYNCH_CATEGORIES),
-  headline: zProse(200),
-  thesis: zProse(900),
-  plainEnglish: zProse(350),
-  bandRationale: zProse(500),
-  bullPoints: z.array(zProse(160)).min(1).max(3),
-  bearPoints: z.array(zProse(160)).min(1).max(3),
+  headline: prose(200),
+  thesis: prose(900),
+  plainEnglish: prose(350),
+  bandRationale: prose(500),
+  bullPoints: z.array(prose(160)).min(1).max(3),
+  bearPoints: z.array(prose(160)).min(1).max(3),
   tapeVsFundamentals: z.enum(TAPE_VS_FUNDAMENTALS),
   confidence: z.enum(CONFIDENCE),
 });
@@ -81,6 +84,8 @@ export const VerdictOutputSchema = z.object({
     z.object({
       regimeCap: z.boolean(),
       backstopFloor: z.boolean(),
+      /** False when dcf marked the engine's value unreliable; the engine band is then no anchor. */
+      valuationReliable: z.boolean(),
       allowedBands: z.array(z.enum(VALUATION_BANDS)),
     }),
   ),

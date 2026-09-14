@@ -42,7 +42,7 @@ export const TTL_SECONDS: Record<AgentSlug, number> = {
  */
 // v2: catalyst output split into upcomingCatalysts / historicalAnalogs
 // v3: catalyst items gain kind; upcoming items are always dated
-export const CACHE_VERSION = 'v3';
+export const CACHE_VERSION = 'v4';
 
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Store                                                                      */

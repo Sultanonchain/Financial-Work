@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 
 import { cacheKey, MemoryStore, setCacheStore } from '../_shared/cache.ts';
+import { keyFigures, renderKeyFigures } from '../_shared/figures.ts';
 import { setClock } from '../_shared/format.ts';
 import {
   buildRequest,
@@ -27,6 +28,7 @@ import {
   ADVICE_PATTERN,
   FIELD_SOURCES,
   VISIBILITY_TIERS,
+  zProse,
   type AgentContext,
   type AgentSlug,
   type NewsItem,
@@ -38,10 +40,10 @@ import {
   SHIPPED_WINDOW_DAYS,
   type CatalystOutput,
 } from '../catalyst/schema.ts';
-import { DcfModelSchema } from '../dcf/schema.ts';
+import { DcfModelSchema, type DcfModel, type DcfOutput } from '../dcf/schema.ts';
 import { NewsModelSchema } from '../news/schema.ts';
 import { RedflagModelSchema } from '../redflag/schema.ts';
-import { VerdictModelSchema, type VerdictOutput } from '../verdict/schema.ts';
+import { VALUATION_BANDS, VerdictModelSchema, type VerdictOutput } from '../verdict/schema.ts';
 
 import { collectStatus, renderStatus } from '../scripts/agents-status.ts';
 
@@ -855,7 +857,7 @@ describe('runner', () => {
   it('keys the cache by agent, ticker and UTC date', () => {
     assert.equal(
       cacheKey('news', ' aapl ', new Date('2026-09-12T23:59:59-04:00')),
-      'valus:agent:v3:news:AAPL:2026-09-13',
+      'valus:agent:v4:news:AAPL:2026-09-13',
     );
   });
 });
@@ -1121,5 +1123,363 @@ describe('company section', () => {
     const free = toClientPayload({ ...report, tier: 'free' });
     assert.deepEqual(free.company.stats.forwardPE, { value: 28.6, visibility: 'summary', source: 'api' });
     assert.deepEqual(free.company.facts.ceo, report.company.facts.ceo, 'summary rows stay visible on the free tier');
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Key figures                                                                */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+describe('key figures', () => {
+  // Fixture quarters end 2026-06-27, 2026-03-28, 2025-12-27 and 2025-09-27.
+  it('sums the last four contiguous quarters and reads the latest balance sheet', () => {
+    const f = keyFigures(baseContext().statements);
+
+    assert.equal(f.flowBasis, 'ttm');
+    assert.equal(f.flowPeriodEnd, '2026-06-27');
+    assert.equal(f.revenue, 440.2e9);
+    assert.equal(f.operatingIncome, 140.6e9);
+    assert.equal(f.operatingMarginPct, 31.9);
+    assert.equal(f.balanceSheetDate, '2026-06-27');
+    assert.equal(f.cashBasis, 'cash_and_equivalents');
+    assert.equal(f.netDebt, 64.9e9);
+  });
+
+  it('falls back to the fiscal year without four contiguous quarters, and counts short-term investments as cash', () => {
+    const missing = baseContext().statements;
+    missing.quarterly.splice(2, 1);
+    assert.equal(keyFigures(missing).flowBasis, 'annual');
+
+    const outOfSequence = baseContext().statements;
+    const oldest = outOfSequence.quarterly[3];
+    assert.ok(oldest);
+    oldest.periodEnd = '2025-06-28';
+    const annual = keyFigures(outOfSequence);
+    assert.equal(annual.flowBasis, 'annual');
+    assert.equal(annual.flowPeriodEnd, '2025-09-27');
+    assert.equal(annual.revenue, 416.2e9);
+
+    const withInvestments = baseContext().statements;
+    const latest = withInvestments.quarterly[0];
+    assert.ok(latest);
+    latest.cashAndShortTermInvestments = 60e9;
+    const cash = keyFigures(withInvestments);
+    assert.equal(cash.cashBasis, 'with_short_term_investments');
+    assert.equal(cash.cash, 60e9);
+    assert.equal(cash.netDebt, 36.1e9);
+  });
+
+  it('leaves a flow figure empty rather than mixing bases', () => {
+    const statements = baseContext().statements;
+    const quarter = statements.quarterly[1];
+    assert.ok(quarter);
+    quarter.stockCompensation = null;
+    const f = keyFigures(statements);
+
+    assert.equal(f.flowBasis, 'ttm');
+    assert.equal(f.stockCompensation, null);
+    assert.equal(f.revenue, 440.2e9);
+  });
+
+  it('dcf, redflag and verdict render the same figures; only dcf sees the engine inputs', async () => {
+    const calls = useTransport();
+    const ctx = baseContext();
+    await registry.dcf.run(structuredClone(ctx));
+    await registry.redflag.run(structuredClone(ctx));
+    await registry.verdict.run(verdictContext());
+
+    const block = renderKeyFigures(keyFigures(ctx.statements), ctx.statements.currency);
+    assert.match(block, /revenue \$440\.20B, operating income \$140\.60B \(operating margin 31\.9%\)/);
+    assert.match(block, /net debt \$64\.90B/);
+
+    const users = Object.fromEntries(calls.map((call) => [call.slug, call.user]));
+    for (const slug of ['dcf', 'redflag', 'verdict'] as const) {
+      assert.ok(users[slug]?.includes(block), `${slug} renders the shared key figures`);
+      assert.doesNotMatch(users[slug] ?? '', /Free cash flow margin: /, `${slug} gets no second margin from the scorecard`);
+    }
+    assert.match(users.dcf ?? '', /Net debt used by the engine: /);
+    for (const slug of ['redflag', 'verdict'] as const) {
+      // Line-anchored: reviewer prose quoted from dcf may say "used by the engine".
+      assert.doesNotMatch(users[slug] ?? '', /^(Free cash flow base|Net debt|Shares outstanding) used by the engine: /m);
+      assert.doesNotMatch(users[slug] ?? '', /^debtToEquity:/m, `${slug} gets no vendor debt to equity`);
+    }
+  });
+
+  it('gives dcf the trailing twelve months beside the fiscal years', async () => {
+    const calls = useTransport();
+    const result = await registry.dcf.run(baseContext());
+    const user = calls[0]?.user ?? '';
+
+    assert.match(user, /Results, trailing twelve months to 2026-06-27: revenue \$440\.20B/);
+    assert.match(user, /Revenue for the trailing twelve months to 2026-06-27 against the last fiscal year: \+5\.8%/);
+    const trailing = result.data?.history.value.trailing;
+    assert.equal(trailing?.basis, 'ttm');
+    assert.equal(trailing?.revenue, 440.2e9);
+    assert.equal(trailing?.revenueVsLastFiscalYearPct, 5.8);
+  });
+
+  it('takes the larger burn of the trailing twelve months and the last fiscal year for the runway', () => {
+    // AMC on 2026-09-14: one strong quarter left trailing burn at $22.4M against $365.9M for the fiscal year.
+    const statements = baseContext().statements;
+    const quarterlyFcf = [190.1e6, -174.7e6, 43.3e6, -81.1e6];
+    statements.quarterly.forEach((quarter, i) => {
+      quarter.freeCashFlow = quarterlyFcf[i] ?? null;
+    });
+    const latestQuarter = statements.quarterly[0];
+    const fiscalYear = statements.annual[0];
+    assert.ok(latestQuarter && fiscalYear);
+    latestQuarter.cashAndShortTermInvestments = 778.4e6;
+    fiscalYear.freeCashFlow = -365.9e6;
+
+    const f = keyFigures(statements);
+    assert.deepEqual(
+      [f.cashRunwayStatus, f.cashBurn, f.cashBurnBasis, f.cashBurnPeriodEnd, f.cashRunwayYears],
+      ['burning', 365.9e6, 'annual', '2025-09-27', 2.1],
+    );
+    assert.match(
+      renderKeyFigures(f, 'USD'),
+      /Cash runway: 2\.1 years, cash against free cash flow burn of \$365\.9M a year \(fiscal year to 2025-09-27, the larger burn/,
+    );
+
+    fiscalYear.freeCashFlow = 10e9;
+    assert.equal(keyFigures(statements).cashBurnBasis, 'ttm', 'a trailing burn counts when the fiscal year was positive');
+
+    statements.quarterly.forEach((quarter) => {
+      quarter.freeCashFlow = 1e9;
+    });
+    const positive = keyFigures(statements);
+    assert.deepEqual([positive.cashRunwayStatus, positive.cashRunwayYears], ['not_burning', null]);
+  });
+
+  it('takes missing debt as zero only when the same balance sheet reports cash and equity', () => {
+    const statements = baseContext().statements;
+    const latestQuarter = statements.quarterly[0];
+    assert.ok(latestQuarter);
+    latestQuarter.totalDebt = null;
+
+    const f = keyFigures(statements);
+    assert.deepEqual([f.totalDebt, f.debtAssumedZero, f.netDebt, f.debtToEquity], [0, true, -31.2e9, 0]);
+    assert.match(
+      renderKeyFigures(f, 'USD'),
+      /total debt none reported \(taken as zero\), cash and equivalents \$31\.20B, net debt -\$31\.20B/,
+    );
+
+    latestQuarter.shareholdersEquity = null;
+    const partial = keyFigures(statements);
+    assert.deepEqual([partial.totalDebt, partial.debtAssumedZero, partial.netDebt], [null, false, null]);
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Valuation reliability                                                      */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+describe('valuation reliability', () => {
+  /** The recorded dcf reply on a consistent history, with the named inputs rated unclear. */
+  const dcfReply =
+    (patch: Partial<DcfModel> = {}, unclear: string[] = []) =>
+    (): DcfModel => {
+      const recorded = reply('dcf') as unknown as DcfModel;
+      return {
+        ...recorded,
+        historicalFit: 'consistent',
+        assumptions: recorded.assumptions.map((row) => ({
+          ...row,
+          engineVsEvidence: unclear.includes(row.key)
+            ? ('unclear' as const)
+            : row.engineVsEvidence === 'unclear'
+              ? ('in_line' as const)
+              : row.engineVsEvidence,
+        })),
+        ...patch,
+      };
+    };
+
+  it('a growth path that breaks from history overrides a confident engine', async () => {
+    useTransport({ dcf: dcfReply({ historicalFit: 'break', confidence: 'high' }) });
+    const ctx = baseContext();
+    assert.ok(ctx.valuation);
+    ctx.valuation.confidence = 'high';
+    ctx.valuation.marginOfSafetyPct = 191;
+    const result = await registry.dcf.run(ctx);
+    const d = result.data;
+
+    assert.ok(d, JSON.stringify(result.error));
+    assert.deepEqual(d.valuationReliability.value, {
+      reliable: false,
+      reasons: ["the growth path breaks from the company's own history"],
+    });
+    assert.equal(d.valuationReliability.visibility, 'headline');
+    assert.deepEqual([d.confidence.value, d.confidence.source], ['low', 'computed']);
+    assert.match(d.confidence.note ?? '', /^Forced to low: the growth path breaks/);
+    assert.equal(d.intrinsicValue.value, ctx.valuation.intrinsicValue, 'the engine value stays visible, with a warning');
+    for (const shown of [d.intrinsicValue, d.valueRange, d.marginOfSafetyPct]) {
+      assert.match(shown.note ?? '', /Marked unreliable by the dcf review/);
+    }
+  });
+
+  it('two core inputs rated unclear mark the value unreliable; one does not', async () => {
+    useTransport({ dcf: dcfReply({ confidence: 'medium' }, ['stage1_growth', 'wacc']) });
+    const two = await registry.dcf.run(baseContext());
+    assert.deepEqual(two.data?.valuationReliability.value, {
+      reliable: false,
+      reasons: ['near-term growth and discount rate could not be assessed'],
+    });
+    assert.equal(two.data?.confidence.value, 'low');
+
+    useTransport({ dcf: dcfReply({ confidence: 'medium' }, ['wacc']) });
+    const one = await registry.dcf.run(baseContext());
+    assert.deepEqual(one.data?.valuationReliability.value, { reliable: true, reasons: [] });
+    assert.deepEqual([one.data?.confidence.value, one.data?.confidence.source], ['medium', 'model']);
+    assert.equal(one.data?.intrinsicValue.note, undefined);
+  });
+
+  it('inputs the engine left empty count as not assessable', async () => {
+    useTransport({ dcf: dcfReply() });
+    const ctx = baseContext();
+    assert.ok(ctx.valuation);
+    ctx.valuation.waccPct = null;
+    ctx.valuation.fcfBase = null;
+    const result = await registry.dcf.run(ctx);
+
+    assert.deepEqual(result.data?.valuationReliability.value, {
+      reliable: false,
+      reasons: ['discount rate and starting free cash flow could not be assessed'],
+    });
+  });
+
+  it('an unreliable dcf lifts the engine anchor from the verdict and forces its confidence low', async () => {
+    const ctx = verdictContext();
+    const dcf = ctx.upstream?.dcf?.data as DcfOutput | undefined;
+    assert.ok(dcf && ctx.valuation);
+    dcf.valuationReliability = {
+      value: { reliable: false, reasons: ['test reason'] },
+      visibility: 'headline',
+      source: 'computed',
+    };
+    ctx.valuation.marginOfSafetyPct = 191; // engine band: Undervalued
+
+    const calls = useTransport({ verdict: () => ({ ...reply('verdict'), band: 'Overvalued', confidence: 'high' }) });
+    const result = await registry.verdict.run(ctx);
+
+    assert.equal(result.status, 'ok', JSON.stringify(result.error));
+    assert.equal(result.meta.attempts, 1, 'four steps from the engine band is allowed once the anchor is lifted');
+    assert.equal(result.data?.engineBand.value, 'Undervalued');
+    assert.match(result.data?.engineBand.note ?? '', /Not used as an anchor/);
+    assert.deepEqual(result.data?.guardrails.value, {
+      regimeCap: false,
+      backstopFloor: false,
+      valuationReliable: false,
+      allowedBands: [...VALUATION_BANDS],
+    });
+    assert.deepEqual([result.data?.confidence.value, result.data?.confidence.source], ['low', 'computed']);
+
+    const user = calls[0]?.user ?? '';
+    assert.match(user, /Valuation reliability: the dcf reviewer marked the engine's value unreliable \(test reason\)/);
+    assert.match(user, /## Valuation engine output \(marked unreliable; not evidence\)/);
+    assert.match(user, /Valuation reliability: unreliable \(test reason\)/);
+  });
+
+  it('a dcf result from before the field keeps the engine anchor', async () => {
+    useTransport();
+    const ctx = verdictContext();
+    const dcf = ctx.upstream?.dcf?.data as Partial<DcfOutput> | undefined;
+    assert.ok(dcf);
+    delete dcf.valuationReliability;
+    const result = await registry.verdict.run(ctx);
+
+    assert.equal(result.data?.guardrails.value.valuationReliable, true);
+    assert.equal(result.data?.guardrails.value.allowedBands.length, 4);
+    assert.equal(result.data?.confidence.source, 'model');
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* dcf assessments and wording                                                */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+describe('dcf assessments', () => {
+  type Row = DcfModel['assumptions'][number];
+  const row = (key: Row['key'], engineVsEvidence: Row['engineVsEvidence']): Row => ({
+    key,
+    evidence: 'Figures from the context.',
+    reasoning: 'Compared with the reported figures.',
+    engineVsEvidence,
+  });
+
+  it('sets aggressive or conservative in code from the higher or lower call', async () => {
+    // MU on 2026-09-14: a $1.67B base against $26.17B trailing free cash flow came back "aggressive".
+    useTransport({
+      dcf: () => ({
+        ...reply('dcf'),
+        historicalFit: 'consistent',
+        assumptions: [
+          row('stage1_growth', 'higher'),
+          row('terminal_growth', 'in_line'),
+          row('wacc', 'lower'),
+          row('fcf_base', 'lower'),
+          row('share_count', 'higher'),
+          row('net_debt', 'unclear'),
+        ],
+      }),
+    });
+    const result = await registry.dcf.run(baseContext());
+
+    assert.deepEqual(
+      Object.fromEntries((result.data?.assumptions.value ?? []).map((a) => [a.key, a.assessment])),
+      {
+        stage1_growth: 'aggressive',
+        terminal_growth: 'supported',
+        wacc: 'aggressive',
+        fcf_base: 'conservative',
+        share_count: 'conservative',
+        net_debt: 'unclear',
+      },
+    );
+  });
+
+  it('asks for the call after the reasoning, so the label follows it', () => {
+    assert.deepEqual(Object.keys(DcfModelSchema.shape.assumptions.element.shape), [
+      'key',
+      'evidence',
+      'reasoning',
+      'engineVsEvidence',
+    ]);
+  });
+});
+
+describe('neutral wording', () => {
+  it('sends dcf and verdict prose that calls a figure fabricated back for repair', async () => {
+    const calls = useTransport({
+      dcf: (req) =>
+        req.attempt === 1
+          ? { ...reply('dcf'), headline: 'This value rests on a fabricated free cash flow figure.' }
+          : reply('dcf'),
+      verdict: (req) =>
+        req.attempt === 1
+          ? { ...reply('verdict'), bandRationale: 'The engine call uses a made up cash flow base.' }
+          : reply('verdict'),
+    });
+    const dcf = await registry.dcf.run(baseContext());
+    const verdict = await registry.verdict.run(verdictContext());
+
+    for (const result of [dcf, verdict]) {
+      assert.equal(result.status, 'ok');
+      assert.equal(result.meta.attempts, 2);
+    }
+    for (const slug of ['dcf', 'verdict'] as const) {
+      const repair = calls.find((call) => call.slug === slug && call.attempt === 2);
+      assert.match(repair?.repairHint ?? '', /does not match the reported figures/);
+    }
+  });
+
+  it('applies only where asked: other agents may report an allegation of fabricated figures', () => {
+    const allegation = 'Regulators allege the sales figures were fabricated.';
+    assert.equal(zProse(200).safeParse(allegation).success, true);
+    assert.equal(zProse(200, { neutral: true }).safeParse(allegation).success, false);
+    assert.equal(
+      zProse(200, { neutral: true }).safeParse('The engine figure does not match the reported figures.').success,
+      true,
+    );
   });
 });

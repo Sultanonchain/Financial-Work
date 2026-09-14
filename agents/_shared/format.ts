@@ -190,6 +190,7 @@ const STATEMENT_COLUMNS: ReadonlyArray<[NumericStatementKey, string, 'money' | '
   ['stockCompensation', 'stock comp', 'money'],
   ['totalDebt', 'total debt', 'money'],
   ['cashAndEquivalents', 'cash', 'money'],
+  ['cashAndShortTermInvestments', 'cash + short-term investments', 'money'],
   ['shareholdersEquity', 'equity', 'money'],
   ['dilutedShares', 'diluted shares', 'shares'],
 ];
@@ -199,11 +200,13 @@ export function renderStatements(
   options: { annual?: number; quarterly?: number; columns?: readonly NumericStatementKey[] } = {},
 ): string {
   const currency = statements.currency;
-  const columns = options.columns
+  const requested = options.columns
     ? STATEMENT_COLUMNS.filter(([key]) => options.columns?.includes(key))
     : STATEMENT_COLUMNS;
   const table = (label: string, periods: StatementPeriod[]): string => {
     if (!periods.length) return `${label}: not available`;
+    // A column no period reports is noise, not information.
+    const columns = requested.filter(([key]) => periods.some((period) => isNum(period[key])));
     const header = ['period', ...columns.map(([, name]) => name)].join(' | ');
     const rows = periods.map((period) =>
       [
@@ -250,7 +253,18 @@ export function renderPrices(prices: PriceHistory): string {
   return lines.join('\n');
 }
 
-export function renderValuation(valuation: ValuationSnapshot | null, currency: string | null): string {
+/**
+ * Scorecard entries for margins come from vendor summary fields (yfinance's
+ * operatingMargins is the latest quarter, not a year). Key figures own margins
+ * (_shared/figures.ts), so these are never rendered beside them.
+ */
+const KEY_FIGURE_METRICS = new Set(['op_margin', 'operating_margin', 'profit_margin', 'net_margin', 'fcf_margin', 'gross_margin']);
+
+export function renderValuation(
+  valuation: ValuationSnapshot | null,
+  currency: string | null,
+  options: { engineInputs?: boolean } = {},
+): string {
   if (!valuation) return 'Valuation engine output: not available';
   const v = valuation;
   const lines = [
@@ -262,17 +276,24 @@ export function renderValuation(valuation: ValuationSnapshot | null, currency: s
     `Terminal growth: ${pct(v.terminalGrowthPct, 2)}`,
     `Stage-1 growth: ${pct(v.stage1GrowthPct, 2)}`,
     `Market-implied growth: ${pct(v.impliedGrowthPct, 2)}`,
-    `Free cash flow base: ${money(v.fcfBase, currency)}`,
-    `Net debt: ${money(v.netDebt, currency)}`,
-    `Shares outstanding: ${quantity(v.sharesOut)}`,
-    `Engine confidence: ${v.confidence ?? NA}`,
   ];
+  // The engine's own inputs, for the reviewer who checks them. Everyone else
+  // reads net debt and cash flow from key figures, so they are left out.
+  if (options.engineInputs) {
+    lines.push(
+      `Free cash flow base used by the engine: ${money(v.fcfBase, currency)}`,
+      `Net debt used by the engine: ${money(v.netDebt, currency)}`,
+      `Shares outstanding used by the engine: ${quantity(v.sharesOut)}`,
+    );
+  }
+  lines.push(`Engine confidence: ${v.confidence ?? NA}`);
   if (v.confidenceWeaknesses.length) {
     lines.push(`Engine confidence weaknesses: ${v.confidenceWeaknesses.join('; ')}`);
   }
-  if (v.qualityMetrics.length) {
+  const metrics = v.qualityMetrics.filter((m) => !KEY_FIGURE_METRICS.has(m.key));
+  if (metrics.length) {
     lines.push('Quality scorecard:');
-    for (const m of v.qualityMetrics) {
+    for (const m of metrics) {
       const unit = m.unit === 'pct' ? '%' : m.unit === 'ratio' ? 'x' : '';
       lines.push(`  ${m.label}: ${m.value ?? NA}${m.value === null ? '' : unit}${m.tier ? ` (${m.tier})` : ''}`);
     }

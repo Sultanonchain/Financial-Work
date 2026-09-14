@@ -2,7 +2,7 @@
   "name": "redflag-aapl-2026-09-12",
   "description": "Illustrative AAPL-shaped context for tests. Statement figures are approximate; the news items and the model reply are synthetic and were written by hand because no API key was available when this fixture was created. Re-record against the live API with `npm run fixtures:record`.",
   "source": "recorded",
-  "recordedAt": "2026-09-14T15:46:38.070Z",
+  "recordedAt": "2026-09-14T21:39:23.155Z",
   "recordedModel": "claude-sonnet-5",
   "input": {
     "ticker": "AAPL",
@@ -392,24 +392,16 @@
     }
   },
   "modelOutput": {
-    "headline": "Apple's financials look clean overall, with strong cash generation and shrinking share count.",
-    "plainEnglish": "Apple turns its profits into real cash and is buying back more shares than it issues, which are good signs. Debt is high relative to equity but easily covered by cash flow, so it is not a major worry.",
+    "headline": "Apple's numbers look clean, with strong cash conversion and a shrinking share count.",
+    "plainEnglish": "Apple turns almost all of its profit into real cash, and it is buying back more shares than it issues. Debt is high but easily covered by operating cash flow, so this is not a concern by itself.",
     "overall": "clean",
-    "flags": [
-      {
-        "code": "leverage",
-        "title": "High debt relative to equity",
-        "severity": "low",
-        "evidence": "Debt to equity is 1.38x and net debt is $62.80B, but net debt is only 0.56x operating cash flow.",
-        "whatWouldClearIt": "Continued strong operating cash flow relative to debt would keep this from being a concern."
-      }
-    ]
+    "flags": []
   },
   "expected": {
     "status": "ok",
     "data": {
       "headline": {
-        "value": "Apple's financials look clean overall, with strong cash generation and shrinking share count.",
+        "value": "Apple's numbers look clean, with strong cash conversion and a shrinking share count.",
         "visibility": "headline",
         "source": "model"
       },
@@ -419,16 +411,12 @@
         "source": "model"
       },
       "plainEnglish": {
-        "value": "Apple turns its profits into real cash and is buying back more shares than it issues, which are good signs. Debt is high relative to equity but easily covered by cash flow, so it is not a major worry.",
+        "value": "Apple turns almost all of its profit into real cash, and it is buying back more shares than it issues. Debt is high but easily covered by operating cash flow, so this is not a concern by itself.",
         "visibility": "summary",
         "source": "model"
       },
       "topFlag": {
-        "value": {
-          "code": "leverage",
-          "title": "High debt relative to equity",
-          "severity": "low"
-        },
+        "value": null,
         "visibility": "summary",
         "source": "model"
       },
@@ -436,21 +424,13 @@
         "value": {
           "high": 0,
           "medium": 0,
-          "low": 1
+          "low": 0
         },
         "visibility": "summary",
         "source": "computed"
       },
       "flags": {
-        "value": [
-          {
-            "code": "leverage",
-            "title": "High debt relative to equity",
-            "severity": "low",
-            "evidence": "Debt to equity is 1.38x and net debt is $62.80B, but net debt is only 0.56x operating cash flow.",
-            "whatWouldClearIt": "Continued strong operating cash flow relative to debt would keep this from being a concern."
-          }
-        ],
+        "value": [],
         "visibility": "detail",
         "source": "model"
       },
@@ -458,13 +438,17 @@
         "value": {
           "annualPeriods": 5,
           "spanYears": 3,
-          "fcfToNetIncome": 0.88,
-          "sbcPctOfFcf": 13.1,
+          "flowBasis": "ttm",
+          "flowPeriodEnd": "2026-06-27",
+          "balanceSheetDate": "2026-06-27",
+          "fcfToNetIncome": 0.97,
+          "sbcPctOfFcf": 11.1,
           "shareCountChangePct": -8.1,
-          "netDebt": 62800000000,
-          "netDebtToOperatingCashFlow": 0.56,
+          "netDebt": 64900000000,
+          "netDebtToOperatingCashFlow": 0.5,
           "cashRunwayYears": null,
-          "operatingMarginPct": 32,
+          "cashBurnBasis": null,
+          "operatingMarginPct": 31.9,
           "operatingMarginChangePp": 1.7,
           "revenueCagrPct": 1.82,
           "negativeEquity": false

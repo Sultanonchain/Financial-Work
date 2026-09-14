@@ -7,11 +7,13 @@
  */
 
 import { generateValidated, MODELS } from '../_shared/client.ts';
+import { keyFigures, KEY_FIGURES_TITLE, renderKeyFigures } from '../_shared/figures.ts';
 import {
   isNum,
   money,
   pct,
   quantity,
+  ratio,
   renderPrices,
   renderProfile,
   renderValuation,
@@ -58,6 +60,7 @@ const TIER_BY_BAND: Record<ValuationBand, VerdictTier> = {
   Overvalued: 'negative',
 };
 
+// Debt to equity is not taken from vendor fields: key figures own it.
 const YFINANCE_VALUATION_KEYS = [
   'pegRatio',
   'trailingPE',
@@ -66,7 +69,6 @@ const YFINANCE_VALUATION_KEYS = [
   'earningsGrowth',
   'dividendYield',
   'payoutRatio',
-  'debtToEquity',
 ] as const;
 const YFINANCE_TAPE_KEYS = ['shortPercentOfFloat', 'heldPercentInsiders', 'heldPercentInstitutions'] as const;
 const FINVIZ_TAPE_KEYS = ['Short Float', 'Short Ratio', 'Rel Volume'] as const;
@@ -77,6 +79,9 @@ interface Guardrails {
   engineBand: ValuationBand | null;
   regimeCap: boolean;
   backstopFloor: boolean;
+  /** False when dcf marked the engine's value unreliable. */
+  valuationReliable: boolean;
+  valuationReasons: string[];
   allowedBands: ValuationBand[];
 }
 
@@ -154,7 +159,15 @@ function bandFromMarginOfSafety(mos: number | null): ValuationBand | null {
 
 function computeGuardrails(ctx: AgentContext): Guardrails {
   const engineBand = bandFromMarginOfSafety(ctx.valuation?.marginOfSafetyPct ?? null);
-  const engineIndex = engineBand === null ? null : VALUATION_BANDS.indexOf(engineBand);
+
+  // dcf decides whether the engine's value can anchor the verdict. A dcf result
+  // that is missing, or predates the reliability field, raises no objection.
+  const reliability = upstreamData<DcfOutput>(ctx, 'dcf')?.valuationReliability?.value;
+  const valuationReliable = reliability?.reliable ?? true;
+  const valuationReasons = reliability?.reasons ?? [];
+
+  const engineIndex =
+    engineBand === null || !valuationReliable ? null : VALUATION_BANDS.indexOf(engineBand);
   const regime = ctx.prices.regime;
 
   // A melt-up or a squeeze is not the moment to call a stock cheap.
@@ -169,7 +182,7 @@ function computeGuardrails(ctx: AgentContext): Guardrails {
     return true;
   });
 
-  return { engineBand, regimeCap, backstopFloor, allowedBands };
+  return { engineBand, regimeCap, backstopFloor, valuationReliable, valuationReasons, allowedBands };
 }
 
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -179,7 +192,12 @@ function computeGuardrails(ctx: AgentContext): Guardrails {
 function buildUserTurn(ctx: AgentContext, g: Guardrails): string {
   const currency = ctx.profile.currency ?? ctx.prices.currency;
   const rules = [
-    `Engine band (from margin of safety): ${g.engineBand ?? 'not available'}`,
+    `Engine band (from margin of safety): ${g.engineBand ?? 'not available'}` +
+      `${g.valuationReliable ? '' : ' (not a starting point: see valuation reliability)'}`,
+    g.valuationReliable
+      ? 'Valuation reliability: the dcf reviewer raised no reliability concern'
+      : `Valuation reliability: the dcf reviewer marked the engine's value unreliable ` +
+        `(${g.valuationReasons.join('; ')}); keep confidence low`,
     `Tape regime: ${ctx.prices.regime ?? 'not available'}${g.regimeCap ? ' (verdict capped at Fairly Valued)' : ''}`,
     `Sovereign backstop: ${g.backstopFloor ? 'yes (verdict floored at Fairly Valued)' : 'none on file'}`,
     `Allowed bands for this ticker: ${g.allowedBands.join(', ')}`,
@@ -197,7 +215,11 @@ function buildUserTurn(ctx: AgentContext, g: Guardrails): string {
     `Data as of ${ctx.asOf}.`,
     section('Verdict rules for this ticker', rules),
     section('Company', renderProfile(ctx.profile)),
-    section('Valuation engine output', renderValuation(ctx.valuation, currency)),
+    section(
+      g.valuationReliable ? 'Valuation engine output' : 'Valuation engine output (marked unreliable; not evidence)',
+      renderValuation(ctx.valuation, currency),
+    ),
+    section(KEY_FIGURES_TITLE, renderKeyFigures(keyFigures(ctx.statements), ctx.statements.currency)),
     section(
       'Valuation and growth fields (yfinance; growth, yield and payout as fractions)',
       renderVendorFields(ctx.yfinance, YFINANCE_VALUATION_KEYS),
@@ -206,7 +228,7 @@ function buildUserTurn(ctx: AgentContext, g: Guardrails): string {
     section('Reviewer: dcf', renderDcf(ctx, currency)),
     section('Reviewer: catalyst', renderCatalyst(ctx)),
     section('Reviewer: news', renderNews(ctx)),
-    section('Reviewer: redflag', renderRedflag(ctx, currency)),
+    section('Reviewer: redflag', renderRedflag(ctx)),
   ].join('\n\n');
 }
 
@@ -226,10 +248,12 @@ function renderDcf(ctx: AgentContext, currency: string | null): string {
 
   const engineValue = (value: number | null, unit: 'pct' | 'money' | 'shares') =>
     unit === 'pct' ? pct(value, 2) : unit === 'money' ? money(value, currency) : quantity(value);
+  const reliability = d.valuationReliability?.value;
 
   return [
     `Headline: ${d.headline.value}`,
     `Plain English: ${d.plainEnglish.value}`,
+    `Valuation reliability: ${!reliability || reliability.reliable ? 'reliable' : `unreliable (${reliability.reasons.join('; ')})`}`,
     `Historical fit of the growth path: ${d.historicalFit.value}`,
     `Reviewer confidence: ${d.confidence.value}`,
     'Assumptions:',
@@ -281,7 +305,8 @@ function renderNews(ctx: AgentContext): string {
   ].join('\n');
 }
 
-function renderRedflag(ctx: AgentContext, currency: string | null): string {
+/** Net debt and margins are in key figures, so only the redflag-specific ratios are repeated here. */
+function renderRedflag(ctx: AgentContext): string {
   const d = upstreamData<RedflagOutput>(ctx, 'redflag');
   if (!d) return notAvailable(ctx, 'redflag');
 
@@ -292,9 +317,8 @@ function renderRedflag(ctx: AgentContext, currency: string | null): string {
     `Overall: ${d.overall.value}`,
     rows.length ? 'Flags:' : 'Flags: none',
     ...rows,
-    `Key metrics: FCF/net income ${m.fcfToNetIncome ?? 'n/a'}, stock comp ${pct(m.sbcPctOfFcf)} of FCF, ` +
-      `share count ${pct(m.shareCountChangePct, 1, true)} over ${m.spanYears}y, net debt ${money(m.netDebt, currency)}, ` +
-      `operating margin ${pct(m.operatingMarginPct)}`,
+    `Key ratios: FCF/net income ${ratio(m.fcfToNetIncome)}, stock comp ${pct(m.sbcPctOfFcf)} of FCF, ` +
+      `share count ${pct(m.shareCountChangePct, 1, true)} over ${m.spanYears}y`,
   ].join('\n');
 }
 
@@ -308,6 +332,9 @@ function toOutput(model: VerdictModel, ctx: AgentContext, g: Guardrails): Verdic
   for (const slug of STAGE_ONE_SLUGS) {
     (ctx.upstream?.[slug]?.status === 'ok' ? available : missing).push(slug);
   }
+  const unreliable = g.valuationReliable
+    ? null
+    : `the dcf reviewer marked the engine's value unreliable (${g.valuationReasons.join('; ')})`;
 
   return {
     band: field(model.band, 'headline', 'model', 'Constrained to guardrails.allowedBands'),
@@ -316,7 +343,9 @@ function toOutput(model: VerdictModel, ctx: AgentContext, g: Guardrails): Verdic
 
     plainEnglish: field(tidy(model.plainEnglish), 'summary', 'model'),
     category: field(model.category, 'summary', 'model'),
-    confidence: field(model.confidence, 'summary', 'model'),
+    confidence: unreliable
+      ? field<VerdictModel['confidence']>('low', 'summary', 'computed', `Forced to low: ${unreliable}`)
+      : field(model.confidence, 'summary', 'model'),
     bullPoints: field(model.bullPoints.map(tidy), 'summary', 'model'),
     bearPoints: field(model.bearPoints.map(tidy), 'summary', 'model'),
     disclaimer: field(DISCLAIMER, 'summary', 'computed'),
@@ -328,11 +357,17 @@ function toOutput(model: VerdictModel, ctx: AgentContext, g: Guardrails): Verdic
       g.engineBand,
       'detail',
       'computed',
-      'Margin-of-safety cut-points: >=40, >=15, >=-10, >=-25',
+      'Margin-of-safety cut-points: >=40, >=15, >=-10, >=-25' +
+        (unreliable ? `. Not used as an anchor: ${unreliable}` : ''),
     ),
     regime: field(ctx.prices.regime, 'detail', 'computed'),
     guardrails: field(
-      { regimeCap: g.regimeCap, backstopFloor: g.backstopFloor, allowedBands: g.allowedBands },
+      {
+        regimeCap: g.regimeCap,
+        backstopFloor: g.backstopFloor,
+        valuationReliable: g.valuationReliable,
+        allowedBands: g.allowedBands,
+      },
       'detail',
       'computed',
     ),

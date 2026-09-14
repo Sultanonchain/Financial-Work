@@ -1,9 +1,8 @@
 import { generateValidated, MODELS } from '../_shared/client.ts';
+import { keyFigures, KEY_FIGURES_TITLE, renderKeyFigures, type KeyFigures } from '../_shared/figures.ts';
 import {
   cagrPct,
-  freeCashFlowOf,
   isNum,
-  money,
   pct,
   ratio,
   renderProfile,
@@ -32,23 +31,23 @@ import {
   type RedflagOutput,
 } from './schema.ts';
 
-const YFINANCE_KEYS = [
-  'shortPercentOfFloat',
-  'heldPercentInsiders',
-  'heldPercentInstitutions',
-  'debtToEquity',
-  'currentRatio',
-  'quickRatio',
-  'auditRisk',
-  'boardRisk',
-] as const;
-const FINVIZ_KEYS = ['Short Float', 'Short Ratio', 'Insider Own', 'Insider Trans', 'Inst Trans', 'Debt/Eq', 'Current Ratio'] as const;
-
 /** This agent's model. VALUS_AGENT_MODEL overrides it (resolveModel in client.ts). */
 export const model: string = MODELS.sonnet;
 
 /** Hard max_tokens cap: thinking plus up to eight flags. */
 export const maxTokens = 1_500;
+
+// Debt to equity is not taken from vendor fields: key figures own it.
+const YFINANCE_KEYS = [
+  'shortPercentOfFloat',
+  'heldPercentInsiders',
+  'heldPercentInstitutions',
+  'currentRatio',
+  'quickRatio',
+  'auditRisk',
+  'boardRisk',
+] as const;
+const FINVIZ_KEYS = ['Short Float', 'Short Ratio', 'Insider Own', 'Insider Trans', 'Inst Trans', 'Current Ratio'] as const;
 
 export async function run(ctx: AgentContext): Promise<AgentResult<RedflagOutput>> {
   const startedAt = Date.now();
@@ -61,13 +60,14 @@ export async function run(ctx: AgentContext): Promise<AgentResult<RedflagOutput>
     );
   }
 
-  const metrics = computeMetrics(ctx.statements);
+  const figures = keyFigures(ctx.statements);
+  const metrics = computeMetrics(ctx.statements, figures);
 
   const gen = await generateValidated({
     slug: 'redflag',
     ticker: ctx.ticker,
     system: SYSTEM_PROMPT,
-    user: buildUserTurn(ctx, metrics),
+    user: buildUserTurn(ctx, metrics, figures),
     schema: RedflagModelSchema,
     effort: 'low',
     model,
@@ -83,11 +83,16 @@ export async function run(ctx: AgentContext): Promise<AgentResult<RedflagOutput>
   return finalizeOutput(RedflagOutputSchema, toOutput(gen.data, metrics), init);
 }
 
-function buildUserTurn(ctx: AgentContext, m: RedflagMetrics): string {
+function buildUserTurn(ctx: AgentContext, m: RedflagMetrics, figures: KeyFigures): string {
   const currency = ctx.statements.currency;
-  const runway =
-    m.cashRunwayYears === null ? 'not burning cash, or not computable' : `${m.cashRunwayYears} years`;
+  const flow =
+    m.flowBasis === 'ttm'
+      ? `trailing twelve months to ${m.flowPeriodEnd}`
+      : m.flowBasis === 'annual'
+        ? `fiscal year to ${m.flowPeriodEnd}`
+        : 'latest period';
   const negativeEquity = m.negativeEquity === null ? 'n/a' : m.negativeEquity ? 'yes' : 'no';
+  const span = `${m.spanYears} fiscal year(s)`;
 
   const vendor = [
     renderVendorFields(ctx.yfinance, YFINANCE_KEYS),
@@ -99,20 +104,18 @@ function buildUserTurn(ctx: AgentContext, m: RedflagMetrics): string {
   return [
     `Data as of ${ctx.asOf}.`,
     section('Company', renderProfile(ctx.profile)),
+    section(KEY_FIGURES_TITLE, renderKeyFigures(figures, currency)),
     section(
-      `Pre-computed metrics (latest annual period vs ${m.spanYears} year(s) earlier)`,
+      'Pre-computed ratios (from the key figures, except multi-year changes, which compare fiscal years)',
       [
-        `Annual periods available: ${m.annualPeriods}`,
-        `Free cash flow / net income, latest year: ${ratio(m.fcfToNetIncome)}`,
-        `Stock-based compensation as a share of free cash flow: ${pct(m.sbcPctOfFcf)}`,
-        `Diluted share count change over the span: ${pct(m.shareCountChangePct, 1, true)}`,
-        `Net debt: ${money(m.netDebt, currency)}`,
-        `Net debt / operating cash flow: ${ratio(m.netDebtToOperatingCashFlow)}`,
-        `Cash runway at the latest free cash flow burn: ${runway}`,
-        `Operating margin, latest year: ${pct(m.operatingMarginPct)}`,
-        `Operating margin change over the span: ${m.operatingMarginChangePp === null ? 'n/a' : `${m.operatingMarginChangePp > 0 ? '+' : ''}${m.operatingMarginChangePp} points`}`,
-        `Revenue growth per year over the span: ${pct(m.revenueCagrPct, 2)}`,
+        `Free cash flow / net income, ${flow}: ${ratio(m.fcfToNetIncome)}`,
+        `Stock-based compensation as a share of free cash flow, ${flow}: ${pct(m.sbcPctOfFcf)}`,
+        `Net debt / operating cash flow, ${flow}: ${ratio(m.netDebtToOperatingCashFlow)}`,
         `Negative shareholder equity: ${negativeEquity}`,
+        `Annual periods available: ${m.annualPeriods}`,
+        `Diluted share count change over ${span}: ${pct(m.shareCountChangePct, 1, true)}`,
+        `Operating margin change over ${span}: ${m.operatingMarginChangePp === null ? 'n/a' : `${m.operatingMarginChangePp > 0 ? '+' : ''}${m.operatingMarginChangePp} points`}`,
+        `Revenue growth per year over ${span}: ${pct(m.revenueCagrPct, 2)}`,
       ].join('\n'),
     ),
     section('Statements', renderStatements(ctx.statements, { annual: 5, quarterly: 4 })),
@@ -120,19 +123,15 @@ function buildUserTurn(ctx: AgentContext, m: RedflagMetrics): string {
   ].join('\n\n');
 }
 
-function computeMetrics(statements: FinancialStatements): RedflagMetrics {
+/**
+ * Point-in-time and trailing figures come from key figures, so they match what
+ * dcf and verdict see. Multi-year changes still compare fiscal years.
+ */
+function computeMetrics(statements: FinancialStatements, f: KeyFigures): RedflagMetrics {
   const annual = statements.annual;
   const latest = annual[0];
   const spanIndex = Math.min(3, annual.length - 1);
   const earlier = spanIndex > 0 ? annual[spanIndex] : undefined;
-
-  const fcf = freeCashFlowOf(latest);
-  const netIncome = latest?.netIncome;
-  const ocf = latest?.operatingCashFlow;
-  const netDebt =
-    isNum(latest?.totalDebt) && isNum(latest?.cashAndEquivalents)
-      ? latest.totalDebt - latest.cashAndEquivalents
-      : null;
 
   const marginOf = (revenue: number | null | undefined, opIncome: number | null | undefined) =>
     isNum(revenue) && revenue > 0 && isNum(opIncome) ? (opIncome / revenue) * 100 : null;
@@ -145,31 +144,36 @@ function computeMetrics(statements: FinancialStatements): RedflagMetrics {
   return {
     annualPeriods: annual.length,
     spanYears: spanIndex,
-    fcfToNetIncome: isNum(fcf) && isNum(netIncome) && netIncome > 0 ? round(fcf / netIncome, 2) : null,
+    flowBasis: f.flowBasis,
+    flowPeriodEnd: f.flowPeriodEnd,
+    balanceSheetDate: f.balanceSheetDate,
+    fcfToNetIncome:
+      isNum(f.freeCashFlow) && isNum(f.netIncome) && f.netIncome > 0 ? round(f.freeCashFlow / f.netIncome, 2) : null,
     sbcPctOfFcf:
-      isNum(fcf) && fcf > 0 && isNum(latest?.stockCompensation)
-        ? round((latest.stockCompensation / fcf) * 100, 1)
+      isNum(f.freeCashFlow) && f.freeCashFlow > 0 && isNum(f.stockCompensation)
+        ? round((f.stockCompensation / f.freeCashFlow) * 100, 1)
         : null,
     shareCountChangePct:
       isNum(sharesNow) && isNum(sharesThen) && sharesThen > 0
         ? round((sharesNow / sharesThen - 1) * 100, 1)
         : null,
-    netDebt,
-    netDebtToOperatingCashFlow: netDebt !== null && isNum(ocf) && ocf > 0 ? round(netDebt / ocf, 2) : null,
-    cashRunwayYears:
-      isNum(fcf) && fcf < 0 && isNum(latest?.cashAndEquivalents)
-        ? round(latest.cashAndEquivalents / -fcf, 1)
+    netDebt: f.netDebt,
+    netDebtToOperatingCashFlow:
+      isNum(f.netDebt) && isNum(f.operatingCashFlow) && f.operatingCashFlow > 0
+        ? round(f.netDebt / f.operatingCashFlow, 2)
         : null,
-    operatingMarginPct: marginNow === null ? null : round(marginNow, 1),
+    cashRunwayYears: f.cashRunwayYears,
+    cashBurnBasis: f.cashBurnBasis,
+    operatingMarginPct: f.operatingMarginPct,
     operatingMarginChangePp:
       marginNow !== null && marginThen !== null ? round(marginNow - marginThen, 1) : null,
     revenueCagrPct: cagrPct(latest?.revenue, earlier?.revenue, spanIndex),
-    negativeEquity: isNum(latest?.shareholdersEquity) ? latest.shareholdersEquity < 0 : null,
+    negativeEquity: isNum(f.shareholdersEquity) ? f.shareholdersEquity < 0 : null,
   };
 }
 
-function toOutput(model: RedflagModel, metrics: RedflagMetrics): RedflagOutput {
-  const flags = model.flags
+function toOutput(reply: RedflagModel, metrics: RedflagMetrics): RedflagOutput {
+  const flags = reply.flags
     .map((f) => ({
       code: f.code,
       title: tidy(f.title),
@@ -185,10 +189,10 @@ function toOutput(model: RedflagModel, metrics: RedflagMetrics): RedflagOutput {
     flags.filter((f) => f.severity === severity).length;
 
   return {
-    headline: field(tidy(model.headline), 'headline', 'model'),
-    overall: field(model.overall, 'headline', 'model'),
+    headline: field(tidy(reply.headline), 'headline', 'model'),
+    overall: field(reply.overall, 'headline', 'model'),
 
-    plainEnglish: field(tidy(model.plainEnglish), 'summary', 'model'),
+    plainEnglish: field(tidy(reply.plainEnglish), 'summary', 'model'),
     topFlag: field(
       top ? { code: top.code, title: top.title, severity: top.severity } : null,
       'summary',

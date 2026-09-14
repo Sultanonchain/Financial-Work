@@ -2,7 +2,7 @@
   "name": "dcf-aapl-2026-09-12",
   "description": "Illustrative AAPL-shaped context for tests. Statement figures are approximate; the news items and the model reply are synthetic and were written by hand because no API key was available when this fixture was created. Re-record against the live API with `npm run fixtures:record`.",
   "source": "recorded",
-  "recordedAt": "2026-09-14T15:46:38.070Z",
+  "recordedAt": "2026-09-14T21:39:23.155Z",
   "recordedModel": "claude-sonnet-5",
   "input": {
     "ticker": "AAPL",
@@ -392,60 +392,68 @@
     }
   },
   "modelOutput": {
-    "headline": "This valuation rests mainly on a stage one growth rate well above Apple's recent track record, and on a discount rate that determines most of the terminal value.",
-    "plainEnglish": "A discounted cash flow estimate tries to guess what a company's future cash will be worth in today's dollars. Here the model assumes Apple's cash flow grows faster than it actually has in the past five years, and small changes to the discount rate used to bring future cash back to today's value swing the answer a lot.",
+    "headline": "The valuation rests mainly on the 8.4% discount rate and a terminal growth rate that sits close to it, with the stage one growth assumption running well above Apple's five year trend.",
+    "plainEnglish": "This estimate depends heavily on how much risk is priced into the discount rate and how fast Apple keeps growing far into the future. Recent revenue and cash flow growth have been much slower than what the model assumes for the next few years.",
     "historicalFit": "stretch",
     "assumptions": [
       {
         "key": "stage1_growth",
-        "assessment": "aggressive",
-        "reasoning": "The engine assumes 7.00% annual growth for the next stage, more than double the revenue growth and more than four times the free cash flow growth Apple has actually posted over the last five reported years.",
-        "evidence": "Revenue grew 3.28% a year and free cash flow grew 1.54% a year across the five annual periods provided."
+        "evidence": "Revenue growth per year across five periods was 3.28% and free cash flow growth was 1.54%, though trailing twelve month revenue grew 5.8%.",
+        "reasoning": "7% stage one growth is well above both the five year trend and the recent trailing twelve month pickup, requiring services and margin expansion to keep accelerating.",
+        "engineVsEvidence": "higher"
       },
       {
         "key": "terminal_growth",
-        "assessment": "supported",
-        "reasoning": "A 2.50% long run growth rate sits inside the normal range associated with long run nominal economic growth, and is not itself unusual, but combined with the 8.40% discount rate it produces a gap that leaves the terminal period doing most of the work in the total value.",
-        "evidence": "Terminal growth is 2.50% versus a discount rate of 8.40%, and the engine reports terminal value equals 71% of enterprise value."
+        "evidence": "Terminal growth is set at 2.50% against an 8.40% discount rate, a gap of 5.9 points.",
+        "reasoning": "2 to 3 percent is a reasonable long run terminal rate, but the engine itself flags terminal value at 71% of enterprise value, so this assumption dominates the result.",
+        "engineVsEvidence": "in_line"
       },
       {
         "key": "wacc",
-        "assessment": "supported",
-        "reasoning": "An 8.40% discount rate looks reasonable for a company with very low leverage, strong free cash flow margins, and no sovereign backstop needed, though there is no explicit risk free rate or beta shown in the context to fully confirm the figure.",
-        "evidence": "Net debt to EBITDA is 0.45x (strong) and free cash flow margin averaged 26.2% over the historical period, both indicating low balance sheet risk."
+        "evidence": "Net debt to EBITDA is 0.45x, described as strong, and Apple is a large, established company with no sovereign backstop noted.",
+        "reasoning": "8.40% seems reasonable for a large, low leverage, high return business, though a large-cap of this quality could arguably support a slightly lower rate.",
+        "engineVsEvidence": "in_line"
       },
       {
         "key": "fcf_base",
-        "assessment": "aggressive",
-        "reasoning": "The free cash flow base of $98.80B matches the latest reported annual figure, but stock based compensation, a non cash add back, equals 13.1% of that free cash flow, which can flatter the cash generation picture used as the starting point.",
-        "evidence": "Stock based compensation is 13.1% of the latest reported free cash flow of $98.80B."
+        "evidence": "Engine uses $98.80B, matching fiscal year 2025 free cash flow of $98.80B, while trailing twelve month free cash flow is $116.60B.",
+        "reasoning": "The engine's base is below the more recent trailing twelve month figure, so it is not using the most current, higher cash generation level.",
+        "engineVsEvidence": "lower"
       },
       {
         "key": "share_count",
-        "assessment": "supported",
-        "reasoning": "The 14.84B diluted share count used by the engine matches the most recent quarterly figure and continues a clear multi year trend of share count reduction from buybacks, so it is not a stale input.",
-        "evidence": "Diluted shares fell from 16.86B in fiscal 2021 to 15.00B in fiscal 2025 and to 14.84B in the latest quarter."
+        "evidence": "Engine uses 14.84B shares, matching the latest diluted share count reported for the trailing twelve months.",
+        "reasoning": "This matches the most recent reported figure and continues the buyback-driven decline from 15.00B a year earlier.",
+        "engineVsEvidence": "in_line"
       }
     ],
     "dominantSensitivity": {
-      "key": "wacc",
-      "explanation": "With terminal value already reported at 71% of enterprise value, the discount rate has outsized leverage over the result, and a one percentage point move in a rate like this commonly shifts intrinsic value by 15 to 40 percent."
+      "key": "terminal_growth",
+      "explanation": "With terminal value already 71% of enterprise value and only a 5.9 point gap to the discount rate, small changes in the terminal growth assumption swing the valuation far more than any other input."
     },
     "confidence": "medium",
     "confidenceReasons": [
-      "Stage one growth of 7.00% is well above the 3.28% revenue and 1.54% free cash flow growth actually reported over five years.",
-      "Terminal value makes up 71% of enterprise value, so the result leans heavily on assumptions about the far future rather than near term results.",
-      "Stock based compensation equal to 13.1% of free cash flow means part of the cash flow base is a non cash add back rather than distributable cash.",
-      "Balance sheet and buyback trends support the net debt and share count inputs, which adds some stability to the estimate."
+      "Terminal value dominates enterprise value at 71%, per the engine's own flagged weakness",
+      "Stage one growth of 7% is notably above the five year revenue and free cash flow trend",
+      "Free cash flow base used is below the more current trailing twelve month figure, understating recent cash generation"
     ]
   },
   "expected": {
     "status": "ok",
     "data": {
       "headline": {
-        "value": "This valuation rests mainly on a stage one growth rate well above Apple's recent track record, and on a discount rate that determines most of the terminal value.",
+        "value": "The valuation rests mainly on the 8.4% discount rate and a terminal growth rate that sits close to it, with the stage one growth assumption running well above Apple's five year trend.",
         "visibility": "headline",
         "source": "model"
+      },
+      "valuationReliability": {
+        "value": {
+          "reliable": true,
+          "reasons": []
+        },
+        "visibility": "headline",
+        "source": "computed",
+        "note": "Unreliable when the growth path breaks from history, or when two or more of near-term growth, discount rate and starting free cash flow could not be assessed (rated unclear, or missing from the engine)"
       },
       "intrinsicValue": {
         "value": 198.5,
@@ -471,7 +479,7 @@
         "source": "computed"
       },
       "plainEnglish": {
-        "value": "A discounted cash flow estimate tries to guess what a company's future cash will be worth in today's dollars. Here the model assumes Apple's cash flow grows faster than it actually has in the past five years, and small changes to the discount rate used to bring future cash back to today's value swing the answer a lot.",
+        "value": "This estimate depends heavily on how much risk is priced into the discount rate and how fast Apple keeps growing far into the future. Recent revenue and cash flow growth have been much slower than what the model assumes for the next few years.",
         "visibility": "summary",
         "source": "model"
       },
@@ -493,8 +501,8 @@
             "engineValue": 7,
             "unit": "pct",
             "assessment": "aggressive",
-            "reasoning": "The engine assumes 7.00% annual growth for the next stage, more than double the revenue growth and more than four times the free cash flow growth Apple has actually posted over the last five reported years.",
-            "evidence": "Revenue grew 3.28% a year and free cash flow grew 1.54% a year across the five annual periods provided."
+            "reasoning": "7% stage one growth is well above both the five year trend and the recent trailing twelve month pickup, requiring services and margin expansion to keep accelerating.",
+            "evidence": "Revenue growth per year across five periods was 3.28% and free cash flow growth was 1.54%, though trailing twelve month revenue grew 5.8%."
           },
           {
             "key": "terminal_growth",
@@ -502,8 +510,8 @@
             "engineValue": 2.5,
             "unit": "pct",
             "assessment": "supported",
-            "reasoning": "A 2.50% long run growth rate sits inside the normal range associated with long run nominal economic growth, and is not itself unusual, but combined with the 8.40% discount rate it produces a gap that leaves the terminal period doing most of the work in the total value.",
-            "evidence": "Terminal growth is 2.50% versus a discount rate of 8.40%, and the engine reports terminal value equals 71% of enterprise value."
+            "reasoning": "2 to 3 percent is a reasonable long run terminal rate, but the engine itself flags terminal value at 71% of enterprise value, so this assumption dominates the result.",
+            "evidence": "Terminal growth is set at 2.50% against an 8.40% discount rate, a gap of 5.9 points."
           },
           {
             "key": "wacc",
@@ -511,17 +519,17 @@
             "engineValue": 8.4,
             "unit": "pct",
             "assessment": "supported",
-            "reasoning": "An 8.40% discount rate looks reasonable for a company with very low leverage, strong free cash flow margins, and no sovereign backstop needed, though there is no explicit risk free rate or beta shown in the context to fully confirm the figure.",
-            "evidence": "Net debt to EBITDA is 0.45x (strong) and free cash flow margin averaged 26.2% over the historical period, both indicating low balance sheet risk."
+            "reasoning": "8.40% seems reasonable for a large, low leverage, high return business, though a large-cap of this quality could arguably support a slightly lower rate.",
+            "evidence": "Net debt to EBITDA is 0.45x, described as strong, and Apple is a large, established company with no sovereign backstop noted."
           },
           {
             "key": "fcf_base",
             "label": "Starting free cash flow",
             "engineValue": 98800000000,
             "unit": "money",
-            "assessment": "aggressive",
-            "reasoning": "The free cash flow base of $98.80B matches the latest reported annual figure, but stock based compensation, a non cash add back, equals 13.1% of that free cash flow, which can flatter the cash generation picture used as the starting point.",
-            "evidence": "Stock based compensation is 13.1% of the latest reported free cash flow of $98.80B."
+            "assessment": "conservative",
+            "reasoning": "The engine's base is below the more recent trailing twelve month figure, so it is not using the most current, higher cash generation level.",
+            "evidence": "Engine uses $98.80B, matching fiscal year 2025 free cash flow of $98.80B, while trailing twelve month free cash flow is $116.60B."
           },
           {
             "key": "share_count",
@@ -529,29 +537,28 @@
             "engineValue": 14840000000,
             "unit": "shares",
             "assessment": "supported",
-            "reasoning": "The 14.84B diluted share count used by the engine matches the most recent quarterly figure and continues a clear multi year trend of share count reduction from buybacks, so it is not a stale input.",
-            "evidence": "Diluted shares fell from 16.86B in fiscal 2021 to 15.00B in fiscal 2025 and to 14.84B in the latest quarter."
+            "reasoning": "This matches the most recent reported figure and continues the buyback-driven decline from 15.00B a year earlier.",
+            "evidence": "Engine uses 14.84B shares, matching the latest diluted share count reported for the trailing twelve months."
           }
         ],
         "visibility": "detail",
         "source": "model",
-        "note": "engineValue is copied from the valuation engine; assessment, reasoning and evidence are model-written"
+        "note": "engineValue is copied from the valuation engine; reasoning and evidence are model-written; assessment is set in code from the model's call on whether the engine figure is higher or lower than the evidence supports"
       },
       "dominantSensitivity": {
         "value": {
-          "key": "wacc",
-          "label": "Discount rate",
-          "explanation": "With terminal value already reported at 71% of enterprise value, the discount rate has outsized leverage over the result, and a one percentage point move in a rate like this commonly shifts intrinsic value by 15 to 40 percent."
+          "key": "terminal_growth",
+          "label": "Long-run growth",
+          "explanation": "With terminal value already 71% of enterprise value and only a 5.9 point gap to the discount rate, small changes in the terminal growth assumption swing the valuation far more than any other input."
         },
         "visibility": "detail",
         "source": "model"
       },
       "confidenceReasons": {
         "value": [
-          "Stage one growth of 7.00% is well above the 3.28% revenue and 1.54% free cash flow growth actually reported over five years.",
-          "Terminal value makes up 71% of enterprise value, so the result leans heavily on assumptions about the far future rather than near term results.",
-          "Stock based compensation equal to 13.1% of free cash flow means part of the cash flow base is a non cash add back rather than distributable cash.",
-          "Balance sheet and buyback trends support the net debt and share count inputs, which adds some stability to the estimate."
+          "Terminal value dominates enterprise value at 71%, per the engine's own flagged weakness",
+          "Stage one growth of 7% is notably above the five year revenue and free cash flow trend",
+          "Free cash flow base used is below the more current trailing twelve month figure, understating recent cash generation"
         ],
         "visibility": "detail",
         "source": "model"
@@ -562,7 +569,15 @@
           "revenueCagrPct": 3.28,
           "fcfCagrPct": 1.54,
           "avgFcfMarginPct": 26.2,
-          "latestSbcPctOfFcf": 13.1
+          "latestSbcPctOfFcf": 13.1,
+          "trailing": {
+            "basis": "ttm",
+            "periodEnd": "2026-06-27",
+            "revenue": 440200000000,
+            "freeCashFlow": 116600000000,
+            "operatingMarginPct": 31.9,
+            "revenueVsLastFiscalYearPct": 5.8
+          }
         },
         "visibility": "detail",
         "source": "computed"
