@@ -1,0 +1,25 @@
+{
+  "name": "@valus/agents",
+  "version": "0.1.0",
+  "private": true,
+  "description": "VALUS agent layer: five single-purpose Claude agents behind one orchestrator.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "test": "node --test \"tests/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "fixtures:replay": "node tests/record-fixtures.ts",
+    "fixtures:record": "node tests/record-fixtures.ts --live",
+    "icloud:nosync": "test -L node_modules || (rm -rf node_modules.nosync && mv node_modules node_modules.nosync && ln -s node_modules.nosync node_modules)"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.125.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,582 @@
+{
+  "name": "catalyst-aapl-2026-09-12",
+  "description": "Illustrative AAPL-shaped context for tests. Statement figures are approximate; the news items and the model reply are synthetic and were written by hand because no API key was available when this fixture was created. Re-record against the live API with `npm run fixtures:record`.",
+  "recordedAt": "2026-09-13T00:00:00.000Z",
+  "recordedWith": "hand-authored reply (not a live call)",
+  "input": {
+    "ticker": "AAPL",
+    "tier": "premium",
+    "asOf": "2026-09-12T20:00:00.000Z",
+    "profile": {
+      "ticker": "AAPL",
+      "name": "Apple Inc.",
+      "sector": "Technology",
+      "industry": "Consumer Electronics",
+      "country": "United States",
+      "currency": "USD",
+      "exchange": "NASDAQ",
+      "marketCap": 3510000000000,
+      "employees": 166000,
+      "description": "Designs and sells smartphones, personal computers, tablets, wearables and accessories, and sells related services including the App Store, cloud storage, payments and subscriptions.",
+      "strategic": {
+        "isStrategic": false,
+        "label": null,
+        "reason": null
+      }
+    },
+    "statements": {
+      "currency": "USD",
+      "annual": [
+        {
+          "periodEnd": "2025-09-27",
+          "revenue": 416200000000,
+          "grossProfit": 195200000000,
+          "operatingIncome": 133100000000,
+          "netIncome": 112000000000,
+          "operatingCashFlow": 111500000000,
+          "capex": -12700000000,
+          "freeCashFlow": 98800000000,
+          "stockCompensation": 12900000000,
+          "totalDebt": 98700000000,
+          "cashAndEquivalents": 35900000000,
+          "shareholdersEquity": 73700000000,
+          "dilutedShares": 15000000000
+        },
+        {
+          "periodEnd": "2024-09-28",
+          "revenue": 391035000000,
+          "grossProfit": 180683000000,
+          "operatingIncome": 123216000000,
+          "netIncome": 93736000000,
+          "operatingCashFlow": 118254000000,
+          "capex": -9447000000,
+          "freeCashFlow": 108807000000,
+          "stockCompensation": 11688000000,
+          "totalDebt": 106629000000,
+          "cashAndEquivalents": 29943000000,
+          "shareholdersEquity": 56950000000,
+          "dilutedShares": 15408000000
+        },
+        {
+          "periodEnd": "2023-09-30",
+          "revenue": 383285000000,
+          "grossProfit": 169148000000,
+          "operatingIncome": 114301000000,
+          "netIncome": 96995000000,
+          "operatingCashFlow": 110543000000,
+          "capex": -10959000000,
+          "freeCashFlow": 99584000000,
+          "stockCompensation": 10833000000,
+          "totalDebt": 111088000000,
+          "cashAndEquivalents": 29965000000,
+          "shareholdersEquity": 62146000000,
+          "dilutedShares": 15813000000
+        },
+        {
+          "periodEnd": "2022-09-24",
+          "revenue": 394328000000,
+          "grossProfit": 170782000000,
+          "operatingIncome": 119437000000,
+          "netIncome": 99803000000,
+          "operatingCashFlow": 122151000000,
+          "capex": -10708000000,
+          "freeCashFlow": 111443000000,
+          "stockCompensation": 9038000000,
+          "totalDebt": 120069000000,
+          "cashAndEquivalents": 23646000000,
+          "shareholdersEquity": 50672000000,
+          "dilutedShares": 16326000000
+        },
+        {
+          "periodEnd": "2021-09-25",
+          "revenue": 365817000000,
+          "grossProfit": 152836000000,
+          "operatingIncome": 108949000000,
+          "netIncome": 94680000000,
+          "operatingCashFlow": 104038000000,
+          "capex": -11085000000,
+          "freeCashFlow": 92953000000,
+          "stockCompensation": 7906000000,
+          "totalDebt": 124719000000,
+          "cashAndEquivalents": 34940000000,
+          "shareholdersEquity": 63090000000,
+          "dilutedShares": 16864999999.999998
+        }
+      ],
+      "quarterly": [
+        {
+          "periodEnd": "2026-06-27",
+          "revenue": 97900000000,
+          "grossProfit": 46200000000,
+          "operatingIncome": 30100000000,
+          "netIncome": 25600000000,
+          "operatingCashFlow": 29800000000,
+          "capex": -3300000000,
+          "freeCashFlow": 26500000000,
+          "stockCompensation": 3400000000,
+          "totalDebt": 96100000000,
+          "cashAndEquivalents": 31200000000,
+          "shareholdersEquity": 69800000000,
+          "dilutedShares": 14840000000
+        },
+        {
+          "periodEnd": "2026-03-28",
+          "revenue": 101200000000,
+          "grossProfit": 48000000000,
+          "operatingIncome": 31900000000,
+          "netIncome": 27100000000,
+          "operatingCashFlow": 25400000000,
+          "capex": -3100000000,
+          "freeCashFlow": 22300000000,
+          "stockCompensation": 3300000000,
+          "totalDebt": 97400000000,
+          "cashAndEquivalents": 30100000000,
+          "shareholdersEquity": 71200000000,
+          "dilutedShares": 14900000000
+        },
+        {
+          "periodEnd": "2025-12-27",
+          "revenue": 138600000000,
+          "grossProfit": 66099999999.99999,
+          "operatingIncome": 46200000000,
+          "netIncome": 39500000000,
+          "operatingCashFlow": 44700000000,
+          "capex": -3400000000,
+          "freeCashFlow": 41300000000,
+          "stockCompensation": 3200000000,
+          "totalDebt": 99000000000,
+          "cashAndEquivalents": 33500000000,
+          "shareholdersEquity": 72900000000,
+          "dilutedShares": 14970000000
+        },
+        {
+          "periodEnd": "2025-09-27",
+          "revenue": 102500000000,
+          "grossProfit": 48300000000,
+          "operatingIncome": 32400000000,
+          "netIncome": 27500000000,
+          "operatingCashFlow": 29700000000,
+          "capex": -3200000000,
+          "freeCashFlow": 26500000000,
+          "stockCompensation": 3100000000,
+          "totalDebt": 98700000000,
+          "cashAndEquivalents": 35900000000,
+          "shareholdersEquity": 73700000000,
+          "dilutedShares": 15000000000
+        }
+      ]
+    },
+    "prices": {
+      "currency": "USD",
+      "last": 236.4,
+      "points": [
+        {
+          "date": "2025-08-29",
+          "close": 232.14,
+          "volume": null
+        },
+        {
+          "date": "2025-09-30",
+          "close": 254.63,
+          "volume": null
+        },
+        {
+          "date": "2025-10-31",
+          "close": 258.4,
+          "volume": null
+        },
+        {
+          "date": "2025-11-28",
+          "close": 251.9,
+          "volume": null
+        },
+        {
+          "date": "2025-12-31",
+          "close": 250.42,
+          "volume": null
+        },
+        {
+          "date": "2026-01-30",
+          "close": 222.8,
+          "volume": null
+        },
+        {
+          "date": "2026-02-27",
+          "close": 214.1,
+          "volume": null
+        },
+        {
+          "date": "2026-03-31",
+          "close": 210.2,
+          "volume": null
+        },
+        {
+          "date": "2026-04-30",
+          "close": 205.3,
+          "volume": null
+        },
+        {
+          "date": "2026-05-29",
+          "close": 218.6,
+          "volume": null
+        },
+        {
+          "date": "2026-06-30",
+          "close": 221.8,
+          "volume": null
+        },
+        {
+          "date": "2026-07-31",
+          "close": 226.9,
+          "volume": null
+        },
+        {
+          "date": "2026-08-31",
+          "close": 226.85,
+          "volume": null
+        },
+        {
+          "date": "2026-09-11",
+          "close": 236.4,
+          "volume": null
+        }
+      ],
+      "fiftyTwoWeekHigh": 260.1,
+      "fiftyTwoWeekLow": 202.16,
+      "returnsPct": {
+        "m1": 4.2,
+        "m3": 9.8,
+        "m6": 12.5,
+        "ytd": -5.6
+      },
+      "regime": "stable"
+    },
+    "yfinance": {
+      "pegRatio": 2.41,
+      "trailingPE": 31.2,
+      "forwardPE": 28.6,
+      "revenueGrowth": 0.061,
+      "earningsGrowth": 0.092,
+      "dividendYield": 0.0044,
+      "dividendRate": 1.04,
+      "payoutRatio": 0.137,
+      "debtToEquity": 137.8,
+      "currentRatio": 0.87,
+      "quickRatio": 0.78,
+      "shortPercentOfFloat": 0.0071,
+      "heldPercentInsiders": 0.0203,
+      "heldPercentInstitutions": 0.6412,
+      "auditRisk": 7,
+      "boardRisk": 1,
+      "exDividendDate": 1762732800,
+      "earningsTimestampStart": 1793305800
+    },
+    "finviz": {
+      "Earnings": "Oct 29 AMC",
+      "Short Float": "0.71%",
+      "Short Ratio": "1.62",
+      "Insider Own": "2.03%",
+      "Insider Trans": "-1.84%",
+      "Inst Trans": "0.42%",
+      "Debt/Eq": "1.38",
+      "Current Ratio": "0.87",
+      "Rel Volume": "0.94"
+    },
+    "news": [
+      {
+        "id": "n-0912-a",
+        "publishedAt": "2026-09-11T21:05:00Z",
+        "source": "Reuters",
+        "url": "https://example.com/n-0912-a",
+        "title": "Apple unveils iPhone 18 lineup, keeps base prices flat",
+        "summary": "Apple introduced four iPhone 18 models at its September event and held US starting prices unchanged from last year, while raising the Pro Max price by $100."
+      },
+      {
+        "id": "n-0910-b",
+        "publishedAt": "2026-09-10T13:30:00Z",
+        "source": "Bloomberg",
+        "url": "https://example.com/n-0910-b",
+        "title": "EU regulators open formal review of Apple App Store fee changes",
+        "summary": "The European Commission opened a formal review into whether Apple's revised App Store terms comply with the Digital Markets Act, a process that can end in fines of up to 10% of global turnover."
+      },
+      {
+        "id": "n-0908-c",
+        "publishedAt": "2026-09-08T16:00:00Z",
+        "source": "Motley Fool",
+        "url": "https://example.com/n-0908-c",
+        "title": "3 reasons Apple stock could soar this fall",
+        "summary": "An opinion piece arguing new devices and services growth could lift the shares."
+      },
+      {
+        "id": "n-0905-d",
+        "publishedAt": "2026-09-05T11:20:00Z",
+        "source": "The Information",
+        "url": "https://example.com/n-0905-d",
+        "title": "Apple in talks to expand Gemini partnership for Siri",
+        "summary": "People familiar with the matter said Apple is negotiating a multi-year extension of its agreement to use Google's Gemini models in Siri. Terms were not disclosed and no deal has been signed."
+      },
+      {
+        "id": "n-0902-e",
+        "publishedAt": "2026-09-02T14:10:00Z",
+        "source": "CNBC",
+        "url": "https://example.com/n-0902-e",
+        "title": "Apple shares rise 2% as tech stocks rebound",
+        "summary": "Apple rose alongside other large technology names as bond yields fell."
+      },
+      {
+        "id": "n-0828-f",
+        "publishedAt": "2026-08-28T20:45:00Z",
+        "source": "Reuters",
+        "url": "https://example.com/n-0828-f",
+        "title": "US judge sets 2027 trial date in DOJ antitrust case against Apple",
+        "summary": "A federal judge scheduled the Justice Department's antitrust case against Apple for trial beginning in March 2027."
+      },
+      {
+        "id": "n-0822-g",
+        "publishedAt": "2026-08-22T09:00:00Z",
+        "source": "Nikkei",
+        "url": "https://example.com/n-0822-g",
+        "title": "TSMC begins volume production of Apple A20 chips on 2nm",
+        "summary": "TSMC started volume production of Apple's A20 processor on its 2-nanometer process, according to people familiar with the schedule."
+      },
+      {
+        "id": "n-0731-h",
+        "publishedAt": "2026-07-31T21:30:00Z",
+        "source": "Apple Newsroom",
+        "url": "https://example.com/n-0731-h",
+        "title": "Apple reports third quarter results",
+        "summary": "Apple reported quarterly revenue of $97.9 billion, up 4 percent year over year, with Services revenue at an all-time high of $28.9 billion. The board declared a dividend of $0.27 per share."
+      }
+    ],
+    "valuation": {
+      "price": 236.4,
+      "intrinsicValue": 198.5,
+      "ivLow": 162.3,
+      "ivHigh": 247.9,
+      "marginOfSafetyPct": -16,
+      "waccPct": 8.4,
+      "terminalGrowthPct": 2.5,
+      "stage1GrowthPct": 7,
+      "impliedGrowthPct": 9.6,
+      "fcfBase": 98800000000,
+      "netDebt": 64900000000.00001,
+      "sharesOut": 14840000000,
+      "confidence": "medium",
+      "confidenceWeaknesses": [
+        "Terminal value is 71% of enterprise value"
+      ],
+      "qualityMetrics": [
+        {
+          "key": "roic",
+          "label": "Return on invested capital",
+          "value": 58.2,
+          "unit": "pct",
+          "tier": "excellent"
+        },
+        {
+          "key": "fcf_margin",
+          "label": "Free cash flow margin",
+          "value": 23.7,
+          "unit": "pct",
+          "tier": "strong"
+        },
+        {
+          "key": "net_debt_ebitda",
+          "label": "Net debt to EBITDA",
+          "value": 0.45,
+          "unit": "ratio",
+          "tier": "strong"
+        }
+      ]
+    }
+  },
+  "modelOutput": {
+    "headline": "The iPhone 18 launch and the October 29 earnings report are the nearest events that could change the picture.",
+    "plainEnglish": "Apple has a new phone lineup and an earnings report coming up, which will show whether sales are picking up. A European review of its App Store rules is the main event that could go the other way.",
+    "netTilt": "balanced",
+    "catalysts": [
+      {
+        "title": "iPhone 18 launch cycle",
+        "direction": "two_sided",
+        "horizon": "under_3m",
+        "likelihood": "high",
+        "valueLever": "revenue_growth",
+        "whyItMatters": "The engine assumes 7.0% growth against about 3.3% recently, so a strong upgrade cycle is roughly what the valuation needs. Flat base prices and a higher Pro Max price make the mix the thing to watch.",
+        "evidenceNewsIds": [
+          "n-0912-a"
+        ],
+        "dateHint": null
+      },
+      {
+        "title": "Fiscal fourth quarter earnings",
+        "direction": "two_sided",
+        "horizon": "under_3m",
+        "likelihood": "high",
+        "valueLever": "revenue_growth",
+        "whyItMatters": "The first read on launch demand and on whether Services growth is holding up.",
+        "evidenceNewsIds": [],
+        "dateHint": "2026-10-29"
+      },
+      {
+        "title": "EU review of App Store fee changes",
+        "direction": "negative",
+        "horizon": "3_to_12m",
+        "likelihood": "medium",
+        "valueLever": "margins",
+        "whyItMatters": "Services earn higher margins than hardware, so forced fee cuts would reduce profit, and the process can end in fines of up to 10% of global turnover.",
+        "evidenceNewsIds": [
+          "n-0910-b"
+        ],
+        "dateHint": null
+      },
+      {
+        "title": "DOJ antitrust trial",
+        "direction": "negative",
+        "horizon": "over_12m",
+        "likelihood": "high",
+        "valueLever": "risk_discount",
+        "whyItMatters": "The trial is set for March 2027, so the risk stays open for more than a year before any ruling.",
+        "evidenceNewsIds": [
+          "n-0828-f"
+        ],
+        "dateHint": null
+      },
+      {
+        "title": "Gemini partnership extension for Siri",
+        "direction": "positive",
+        "horizon": "3_to_12m",
+        "likelihood": "medium",
+        "valueLever": "revenue_growth",
+        "whyItMatters": "A signed deal would firm up Apple's AI features, but the talks are unconfirmed and no terms were disclosed.",
+        "evidenceNewsIds": [
+          "n-0905-d"
+        ],
+        "dateHint": null
+      }
+    ]
+  },
+  "expected": {
+    "status": "ok",
+    "data": {
+      "headline": {
+        "value": "The iPhone 18 launch and the October 29 earnings report are the nearest events that could change the picture.",
+        "visibility": "headline",
+        "source": "model"
+      },
+      "topCatalyst": {
+        "value": {
+          "title": "iPhone 18 launch cycle",
+          "direction": "two_sided",
+          "horizon": "under_3m"
+        },
+        "visibility": "headline",
+        "source": "model",
+        "note": "Selected in code: highest likelihood, then nearest horizon"
+      },
+      "plainEnglish": {
+        "value": "Apple has a new phone lineup and an earnings report coming up, which will show whether sales are picking up. A European review of its App Store rules is the main event that could go the other way.",
+        "visibility": "summary",
+        "source": "model"
+      },
+      "netTilt": {
+        "value": "balanced",
+        "visibility": "summary",
+        "source": "model"
+      },
+      "nextEarningsDate": {
+        "value": "2026-10-29",
+        "visibility": "summary",
+        "source": "api"
+      },
+      "catalysts": {
+        "value": [
+          {
+            "title": "iPhone 18 launch cycle",
+            "direction": "two_sided",
+            "horizon": "under_3m",
+            "likelihood": "high",
+            "valueLever": "revenue_growth",
+            "whyItMatters": "The engine assumes 7.0% growth against about 3.3% recently, so a strong upgrade cycle is roughly what the valuation needs. Flat base prices and a higher Pro Max price make the mix the thing to watch.",
+            "dateHint": null,
+            "evidence": [
+              {
+                "id": "n-0912-a",
+                "title": "Apple unveils iPhone 18 lineup, keeps base prices flat",
+                "source": "Reuters",
+                "url": "https://example.com/n-0912-a",
+                "publishedAt": "2026-09-11T21:05:00Z"
+              }
+            ]
+          },
+          {
+            "title": "Fiscal fourth quarter earnings",
+            "direction": "two_sided",
+            "horizon": "under_3m",
+            "likelihood": "high",
+            "valueLever": "revenue_growth",
+            "whyItMatters": "The first read on launch demand and on whether Services growth is holding up.",
+            "dateHint": "2026-10-29",
+            "evidence": []
+          },
+          {
+            "title": "EU review of App Store fee changes",
+            "direction": "negative",
+            "horizon": "3_to_12m",
+            "likelihood": "medium",
+            "valueLever": "margins",
+            "whyItMatters": "Services earn higher margins than hardware, so forced fee cuts would reduce profit, and the process can end in fines of up to 10% of global turnover.",
+            "dateHint": null,
+            "evidence": [
+              {
+                "id": "n-0910-b",
+                "title": "EU regulators open formal review of Apple App Store fee changes",
+                "source": "Bloomberg",
+                "url": "https://example.com/n-0910-b",
+                "publishedAt": "2026-09-10T13:30:00Z"
+              }
+            ]
+          },
+          {
+            "title": "DOJ antitrust trial",
+            "direction": "negative",
+            "horizon": "over_12m",
+            "likelihood": "high",
+            "valueLever": "risk_discount",
+            "whyItMatters": "The trial is set for March 2027, so the risk stays open for more than a year before any ruling.",
+            "dateHint": null,
+            "evidence": [
+              {
+                "id": "n-0828-f",
+                "title": "US judge sets 2027 trial date in DOJ antitrust case against Apple",
+                "source": "Reuters",
+                "url": "https://example.com/n-0828-f",
+                "publishedAt": "2026-08-28T20:45:00Z"
+              }
+            ]
+          },
+          {
+            "title": "Gemini partnership extension for Siri",
+            "direction": "positive",
+            "horizon": "3_to_12m",
+            "likelihood": "medium",
+            "valueLever": "revenue_growth",
+            "whyItMatters": "A signed deal would firm up Apple's AI features, but the talks are unconfirmed and no terms were disclosed.",
+            "dateHint": null,
+            "evidence": [
+              {
+                "id": "n-0905-d",
+                "title": "Apple in talks to expand Gemini partnership for Siri",
+                "source": "The Information",
+                "url": "https://example.com/n-0905-d",
+                "publishedAt": "2026-09-05T11:20:00Z"
+              }
+            ]
+          }
+        ],
+        "visibility": "detail",
+        "source": "model",
+        "note": "evidence rows are resolved from the supplied news by id"
+      }
+    }
+  }
+}
