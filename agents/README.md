@@ -31,6 +31,35 @@ statements, price history (with the computed tape regime), yfinance and Finviz
 payloads, news items, and the Python engine's valuation snapshot. Agents never
 fetch anything.
 
+## Company section (no model)
+
+`runAgents` also returns `report.company`, built in code from the context by
+`_shared/company.ts`. No agent and no model call is involved, so it survives
+every agent failing, and a caller can call `buildCompanySection(ctx)` directly
+to render it before the agents finish. Every value is a `Field` with
+`source: "api"` and `visibility: "summary"`.
+
+- `stats`, in display order: `price`, `marketCap`, `forwardPE`. A missing or
+  negative forward P/E is omitted.
+- `facts`, in display order and above `businessSummary`: `founded`,
+  `headquarters`, `employees`, `sector`, `industry`, `ceo`. A value the data
+  layer does not have is omitted; nothing fills the gap.
+- `businessSummary`: the data layer's business description.
+
+The caller fills these on `profile` from yfinance: `forwardPE` (`forwardPE`),
+`headquarters` (`city`, `state`, `country`), `officers` (`companyOfficers`,
+name and title), `employees` (`fullTimeEmployees`), `sector`, `industry` and
+`description` (`longBusinessSummary`). yfinance has no founded or incorporation
+year, so `founded` only appears if another source supplies `foundedYear`.
+There is no IPO date row: yfinance only has a first-trade date, which is
+Yahoo's data start for older listings (JPM shows 1980-03-17).
+
+The CEO is the officer whose title makes them chief executive of the whole
+company. A "CEO of <division>", "Senior Advisor to the CEO" or "former CEO"
+title does not count, co-CEOs
+are listed together, any other case with more than one company-level CEO omits
+the row, and honorifics and credentials are dropped from the name.
+
 ## The contract, and what enforces each rule
 
 | Rule | Enforced by |

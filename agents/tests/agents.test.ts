@@ -22,6 +22,7 @@ import {
 } from '../_shared/client.ts';
 import { AGENT_SLUGS, registry } from '../_shared/registry.ts';
 import { runAgents, toClientPayload } from '../_shared/runner.ts';
+import { buildCompanySection, CompanySectionSchema, selectCeo } from '../_shared/company.ts';
 import {
   ADVICE_PATTERN,
   FIELD_SOURCES,
@@ -1019,5 +1020,106 @@ describe('tier redaction', () => {
     assert.equal(payload.results.dcf.status, 'unavailable');
     assert.ok(payload.results.dcf.error);
     assert.equal('detail' in payload.results.dcf.error, false);
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Company section                                                            */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+describe('company section', () => {
+  /** The base context plus the data-layer facts the company section reads. */
+  const withFacts = (profile: Partial<AgentContext['profile']> = {}): AgentContext => {
+    const ctx = baseContext();
+    ctx.profile = {
+      ...ctx.profile,
+      forwardPE: 28.6,
+      headquarters: { city: 'Cupertino', region: 'CA', country: 'United States' },
+      officers: [
+        { name: 'Ms. Jane  Doe', title: 'Chief Financial Officer' },
+        { name: 'Mr. John  Ternus', title: 'CEO & Director' },
+      ],
+      ...profile,
+    };
+    return ctx;
+  };
+
+  it('builds the stats row and the facts panel in display order, every value source api', () => {
+    const company = buildCompanySection(withFacts());
+
+    assert.equal(CompanySectionSchema.safeParse(company).success, true);
+    assert.deepEqual(Object.keys(company), ['stats', 'facts', 'businessSummary'], 'facts come before businessSummary');
+    assert.deepEqual(Object.keys(company.stats), ['price', 'marketCap', 'forwardPE']);
+    assert.deepEqual(company.stats.forwardPE, { value: 28.6, visibility: 'summary', source: 'api' });
+    assert.deepEqual(Object.keys(company.facts), ['headquarters', 'employees', 'sector', 'industry', 'ceo']);
+    assert.equal(company.facts.headquarters?.value, 'Cupertino, CA, United States');
+    assert.equal(company.facts.employees?.value, 166000);
+    assert.equal(company.facts.ceo?.value, 'John Ternus');
+
+    const values = [...Object.values(company.stats), ...Object.values(company.facts), company.businessSummary];
+    assert.ok(values.every((value) => value?.source === 'api' && value.visibility === 'summary'));
+  });
+
+  it('omits any row the data layer does not have, and never has an IPO date', () => {
+    const sparse = buildCompanySection(
+      withFacts({ forwardPE: null, headquarters: null, officers: [], employees: null, industry: null, description: null }),
+    );
+    assert.deepEqual(Object.keys(sparse.stats), ['price', 'marketCap']);
+    assert.deepEqual(Object.keys(sparse.facts), ['sector']);
+    assert.equal('businessSummary' in sparse, false);
+    assert.equal(/ipo/i.test(JSON.stringify(sparse)), false);
+
+    // A context assembled before these fields existed stays valid.
+    const legacy = buildCompanySection(baseContext());
+    assert.deepEqual(Object.keys(legacy.stats), ['price', 'marketCap']);
+    assert.deepEqual(Object.keys(legacy.facts), ['employees', 'sector', 'industry']);
+  });
+
+  it('shows founded only when the data layer supplies a year, and drops a negative forward P/E', () => {
+    const founded = buildCompanySection(withFacts({ foundedYear: 1976 }));
+    assert.deepEqual(Object.keys(founded.facts)[0], 'founded');
+    assert.equal(founded.facts.founded?.value, 1976);
+
+    assert.equal('forwardPE' in buildCompanySection(withFacts({ forwardPE: -8.2 })).stats, false);
+  });
+
+  it('picks the company CEO, not a division CEO, and cleans the name', () => {
+    const jpm = [
+      { name: 'Mr. James  Dimon', title: 'Chairman & CEO' },
+      { name: 'Mr. Douglas B. Petno', title: 'CEO of the Commercial & Investment Bank and Co-President' },
+      { name: 'Ms. Mary Callahan Erdoes', title: 'Chief Executive Officer of Asset & Wealth Management and Executive VP' },
+    ];
+    assert.equal(selectCeo(jpm), 'James Dimon');
+    assert.equal(selectCeo([{ name: 'Dr. Brian  Lian Ph.D.', title: 'President, CEO & Director' }]), 'Brian Lian');
+    // Micron's officer list from yfinance.
+    assert.equal(
+      selectCeo([
+        { name: 'Mr. Sanjay  Mehrotra', title: 'CEO & Chairman' },
+        { name: 'Mr. Sumit  Sadana', title: 'Senior Advisor to the CEO' },
+      ]),
+      'Sanjay Mehrotra',
+      'a role that serves the CEO is not a second CEO',
+    );
+    assert.equal(selectCeo([{ name: 'A One', title: 'Co-CEO' }, { name: 'B Two', title: 'Co-CEO & Director' }]), 'A One and B Two');
+    assert.equal(
+      selectCeo([{ name: 'A One', title: 'CEO' }, { name: 'B Two', title: 'Chief Executive Officer' }]),
+      null,
+      'two company-level CEOs is ambiguous, so the row is omitted',
+    );
+    assert.equal(selectCeo([{ name: 'A One', title: 'Former CEO' }, { name: 'B Two', title: 'CFO' }]), null);
+  });
+
+  it('needs no model call and survives every agent failing', async () => {
+    setModelTransport(null);
+    configureClient({ apiKey: undefined });
+    const report = await runAgents(withFacts());
+
+    assert.deepEqual([...report.unavailable].sort(), [...AGENT_SLUGS].sort());
+    assert.equal(report.company.facts.ceo?.value, 'John Ternus');
+    assert.ok(Object.keys(report).indexOf('company') < Object.keys(report).indexOf('results'));
+
+    const free = toClientPayload({ ...report, tier: 'free' });
+    assert.deepEqual(free.company.stats.forwardPE, { value: 28.6, visibility: 'summary', source: 'api' });
+    assert.deepEqual(free.company.facts.ceo, report.company.facts.ceo, 'summary rows stay visible on the free tier');
   });
 });

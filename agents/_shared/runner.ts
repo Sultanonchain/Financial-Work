@@ -14,6 +14,7 @@
  */
 
 import { withCache } from './cache.ts';
+import { buildCompanySection, type CompanySection } from './company.ts';
 import { registry, STAGE_ONE, STAGE_TWO, type AgentOutputs } from './registry.ts';
 import {
   FIELD_SOURCES,
@@ -55,6 +56,8 @@ export interface AgentReport {
   asOf: string;
   startedAt: string;
   durationMs: number;
+  /** Stats and facts from the data layer. No agent, no model call; see company.ts. */
+  company: CompanySection;
   results: AgentResults;
   unavailable: AgentSlug[];
 }
@@ -65,6 +68,8 @@ export interface AgentReport {
 
 export async function runAgents(ctx: AgentContext, options: RunOptions = {}): Promise<AgentReport> {
   const started = Date.now();
+  // Built from the context alone, before any agent runs, so it cannot fail with them.
+  const company = buildCompanySection(ctx);
 
   // runGuarded never rejects, so Promise.all cannot short-circuit here.
   const stageOne = await Promise.all(
@@ -86,6 +91,7 @@ export async function runAgents(ctx: AgentContext, options: RunOptions = {}): Pr
     asOf: ctx.asOf,
     startedAt: new Date(started).toISOString(),
     durationMs: Date.now() - started,
+    company,
     results,
     unavailable: (Object.keys(results) as AgentSlug[]).filter(
       (slug) => results[slug].status === 'unavailable',
@@ -211,6 +217,7 @@ export interface ClientPayload {
   ticker: string;
   tier: Tier;
   asOf: string;
+  company: Redacted<CompanySection>;
   results: { [K in AgentSlug]: ClientAgentResult<AgentOutputs[K]> };
   unavailable: AgentSlug[];
 }
@@ -239,6 +246,7 @@ export function toClientPayload(report: AgentReport): ClientPayload {
     ticker: report.ticker,
     tier: report.tier,
     asOf: report.asOf,
+    company: redactForTier(report.company, report.tier),
     results,
     unavailable: report.unavailable,
   };

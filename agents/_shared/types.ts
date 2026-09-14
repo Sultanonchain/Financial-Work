@@ -123,12 +123,36 @@ export interface CompanyProfile {
    * must not re-derive it from the description.
    */
   strategic: StrategicProfile | null;
+  /**
+   * Facts for the company section (_shared/company.ts), copied from the data
+   * layer and never inferred. Optional so contexts assembled before these
+   * existed stay valid; a missing value just omits its row.
+   */
+  /** yfinance forwardPE. */
+  forwardPE?: number | null;
+  /** Founded or incorporated year. yfinance has none, so this needs another source. */
+  foundedYear?: number | null;
+  /** yfinance city, state, country. */
+  headquarters?: CompanyHeadquarters | null;
+  /** yfinance companyOfficers, name and title only. */
+  officers?: CompanyOfficer[];
 }
 
 export interface StrategicProfile {
   isStrategic: boolean;
   label: string | null;
   reason: string | null;
+}
+
+export interface CompanyHeadquarters {
+  city: string | null;
+  region: string | null;
+  country: string | null;
+}
+
+export interface CompanyOfficer {
+  name: string;
+  title: string | null;
 }
 
 /** One fiscal period, already normalised to reporting currency units. */
