@@ -79,10 +79,14 @@ export interface ResolvedModel {
 /**
  * VALUS_AGENT_MODEL, then the agent's own model, then DEFAULT_MODEL. The env
  * var is read on every call rather than at import, so setting it takes effect
- * without reloading modules.
+ * without reloading modules. `env` is injectable so tooling (agents:status) can
+ * report the resolution for a given environment.
  */
-export function resolveModel(agentModel: string | undefined): ResolvedModel {
-  const override = process.env[MODEL_OVERRIDE_ENV]?.trim();
+export function resolveModel(
+  agentModel: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): ResolvedModel {
+  const override = env[MODEL_OVERRIDE_ENV]?.trim();
   if (override) return { id: override, source: 'env' };
   if (agentModel) return { id: agentModel, source: 'agent' };
   return { id: DEFAULT_MODEL, source: 'default' };
@@ -174,6 +178,8 @@ export interface TokenLogRecord {
   cacheHit: boolean;
   outcome: 'ok' | 'invalid' | 'refused' | 'error';
   stopReason: string | null;
+  /** For an invalid attempt: the validation issues sent back in the repair turn, trimmed. */
+  issues?: string;
 }
 
 export type TokenLogger = (record: TokenLogRecord) => void;
@@ -184,9 +190,20 @@ const consoleLogger: TokenLogger = (r) => {
   console.log(
     `[valus.agents] ${r.slug} ${r.ticker} model=${r.model}${requested} model_source=${r.modelSource} ` +
       `attempt=${r.attempt} ${r.outcome} stop=${r.stopReason ?? '-'} ` +
-      `in=${r.usage.inputTokens} out=${r.usage.outputTokens} ${cache} ${r.latencyMs}ms`,
+      `in=${r.usage.inputTokens} out=${r.usage.outputTokens} ${cache} ${r.latencyMs}ms` +
+      (r.issues ? ` issues="${r.issues}"` : ''),
   );
 };
+
+/** One line, bounded: a repair costs a full extra call, so the log should say why. */
+function summarizeIssues(hint: string): string {
+  const line = hint
+    .split('\n')
+    .map((part) => part.replace(/^\s*•\s*/, '').trim())
+    .filter(Boolean)
+    .join(' | ');
+  return line.length > 300 ? `${line.slice(0, 299)}…` : line;
+}
 
 let tokenLogger: TokenLogger = consoleLogger;
 
@@ -211,6 +228,8 @@ export interface ModelTransportRequest {
   ticker: string;
   /** The resolved model ID, after the env override. */
   model: string;
+  /** The agent's max_tokens cap. */
+  maxTokens: number;
   system: string;
   user: string;
   /** 1 on the first pass, 2 on the schema-repair retry. */
@@ -276,6 +295,7 @@ export interface GenerateOptions<S extends z.ZodType> {
   schema: S;
   /** The agent's own model. VALUS_AGENT_MODEL still wins; see resolveModel. */
   model?: string;
+  /** Hard max_tokens cap (thinking plus reply), for both attempts. */
   maxTokens?: number;
   /** Dropped for models that do not accept effort (see MODEL_FEATURES). */
   effort?: Effort;
@@ -297,8 +317,8 @@ export interface Repair {
 }
 
 const MAX_ATTEMPTS = 2;
-const DEFAULT_MAX_TOKENS = 8_000;
-const MAX_TOKENS_CEILING = 16_000;
+/** Only for callers that set no cap; every registered agent sets its own. */
+const DEFAULT_MAX_TOKENS = 4_000;
 const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 
 interface Reply {
@@ -342,7 +362,7 @@ export async function generateValidated<S extends z.ZodType>(
     });
   }
 
-  let maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS;
+  const maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS;
   let repair: Repair | null = null;
   let lastError: AgentError | null = null;
 
@@ -359,7 +379,7 @@ export async function generateValidated<S extends z.ZodType>(
 
     try {
       reply = transport
-        ? await callTransport(transport, opts, requestedModel, attempt, repair)
+        ? await callTransport(transport, opts, requestedModel, maxTokens, attempt, repair)
         : await callApi(opts, requestedModel, maxTokens, repair);
     } catch (err) {
       const error = toAgentError(err);
@@ -398,7 +418,11 @@ export async function generateValidated<S extends z.ZodType>(
     }
 
     const check = validate(opts.schema, reply);
-    log({ ...logBase, outcome: check.success ? 'ok' : 'invalid' });
+    log(
+      check.success
+        ? { ...logBase, outcome: 'ok' }
+        : { ...logBase, outcome: 'invalid', issues: summarizeIssues(check.hint) },
+    );
 
     if (check.success) {
       try {
@@ -414,12 +438,9 @@ export async function generateValidated<S extends z.ZodType>(
       message: `model reply failed schema validation on attempt ${attempt}`,
       detail: check.hint,
     };
+    // A reply cut off at max_tokens is repaired under the same cap: the cap is a
+    // latency and cost bound, and the repair hint asks for a shorter reply.
     repair = { hint: check.hint, previousReply: reply.text };
-    if (reply.stopReason === 'max_tokens') {
-      // max_tokens caps thinking and the JSON together; a truncated reply gets
-      // more room on the repair pass rather than the same wall.
-      maxTokens = Math.min(maxTokens * 2, MAX_TOKENS_CEILING);
-    }
   }
 
   return failure(servedModel, MAX_ATTEMPTS, total, lastError ?? {
@@ -503,6 +524,7 @@ async function callTransport<S extends z.ZodType>(
   fn: ModelTransport,
   opts: GenerateOptions<S>,
   model: string,
+  maxTokens: number,
   attempt: number,
   repair: Repair | null,
 ): Promise<Reply> {
@@ -510,6 +532,7 @@ async function callTransport<S extends z.ZodType>(
     slug: opts.slug,
     ticker: opts.ticker,
     model,
+    maxTokens,
     system: opts.system,
     user: opts.user,
     attempt,

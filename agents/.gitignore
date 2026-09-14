@@ -1,2 +1,5 @@
 node_modules
 node_modules.nosync
+
+.env
+.env.local

@@ -1,8 +1,9 @@
 {
   "name": "catalyst-aapl-2026-09-12",
   "description": "Illustrative AAPL-shaped context for tests. Statement figures are approximate; the news items and the model reply are synthetic and were written by hand because no API key was available when this fixture was created. Re-record against the live API with `npm run fixtures:record`.",
-  "recordedAt": "2026-09-13T00:00:00.000Z",
-  "recordedWith": "hand-authored reply (not a live call)",
+  "source": "recorded",
+  "recordedAt": "2026-09-14T17:46:40.185Z",
+  "recordedModel": "claude-sonnet-5",
   "input": {
     "ticker": "AAPL",
     "tier": "premium",
@@ -391,67 +392,82 @@
     }
   },
   "modelOutput": {
-    "headline": "The iPhone 18 launch and the October 29 earnings report are the nearest events that could change the picture.",
-    "plainEnglish": "Apple has a new phone lineup and an earnings report coming up, which will show whether sales are picking up. A European review of its App Store rules is the main event that could go the other way.",
-    "netTilt": "balanced",
-    "catalysts": [
+    "headline": "Apple's next dated event is its October 29 earnings report, after the iPhone 18 launch already happened this month.",
+    "plainEnglish": "Apple already unveiled its new iPhone 18 lineup with flat starting prices. Its next confirmed date ahead is the fourth quarter earnings report on October 29, while an EU App Store review and a 2027 antitrust trial remain unresolved without exact upcoming dates that qualify here.",
+    "upcoming": [
       {
-        "title": "iPhone 18 launch cycle",
+        "title": "Apple reports fiscal Q4 2026 earnings",
+        "kind": "earnings",
         "direction": "two_sided",
+        "valueLever": "revenue_growth",
+        "whyItMatters": "Quarterly results will show whether iPhone 18 demand and Services growth support the growth rate already priced into the stock.",
+        "evidenceNewsIds": [],
+        "status": "reported",
         "horizon": "under_3m",
         "likelihood": "high",
+        "expectedDate": "2026-10-29"
+      }
+    ],
+    "past": [
+      {
+        "title": "Apple unveils iPhone 18 lineup with flat base prices",
+        "kind": "launch_event",
+        "direction": "two_sided",
         "valueLever": "revenue_growth",
-        "whyItMatters": "The engine assumes 7.0% growth against about 3.3% recently, so a strong upgrade cycle is roughly what the valuation needs. Flat base prices and a higher Pro Max price make the mix the thing to watch.",
+        "whyItMatters": "New iPhone models and pricing decisions directly affect future device revenue and margins, though holding base prices flat while raising the Pro Max price could pressure or support margins depending on mix.",
         "evidenceNewsIds": [
           "n-0912-a"
         ],
-        "dateHint": null
+        "status": "announced",
+        "announcedDate": "2026-09-11"
       },
       {
-        "title": "Fiscal fourth quarter earnings",
-        "direction": "two_sided",
-        "horizon": "under_3m",
-        "likelihood": "high",
-        "valueLever": "revenue_growth",
-        "whyItMatters": "The first read on launch demand and on whether Services growth is holding up.",
-        "evidenceNewsIds": [],
-        "dateHint": "2026-10-29"
-      },
-      {
-        "title": "EU review of App Store fee changes",
+        "title": "EU opens formal review of Apple App Store fee changes",
+        "kind": "regulatory",
         "direction": "negative",
-        "horizon": "3_to_12m",
-        "likelihood": "medium",
-        "valueLever": "margins",
-        "whyItMatters": "Services earn higher margins than hardware, so forced fee cuts would reduce profit, and the process can end in fines of up to 10% of global turnover.",
+        "valueLever": "risk_discount",
+        "whyItMatters": "A Digital Markets Act investigation could lead to fines of up to 10% of global turnover, adding regulatory risk that can weigh on how the market prices the stock.",
         "evidenceNewsIds": [
           "n-0910-b"
         ],
-        "dateHint": null
+        "status": "announced",
+        "announcedDate": "2026-09-10"
       },
       {
-        "title": "DOJ antitrust trial",
+        "title": "US judge sets trial date in DOJ antitrust case against Apple",
+        "kind": "legal",
         "direction": "negative",
-        "horizon": "over_12m",
-        "likelihood": "high",
         "valueLever": "risk_discount",
-        "whyItMatters": "The trial is set for March 2027, so the risk stays open for more than a year before any ruling.",
+        "whyItMatters": "A scheduled 2027 antitrust trial keeps a legal risk on the horizon that could affect Apple's business practices and future earnings.",
         "evidenceNewsIds": [
           "n-0828-f"
         ],
-        "dateHint": null
+        "status": "announced",
+        "announcedDate": "2026-08-28"
       },
       {
-        "title": "Gemini partnership extension for Siri",
+        "title": "Apple reports third quarter fiscal 2026 results",
+        "kind": "earnings",
         "direction": "positive",
-        "horizon": "3_to_12m",
-        "likelihood": "medium",
         "valueLever": "revenue_growth",
-        "whyItMatters": "A signed deal would firm up Apple's AI features, but the talks are unconfirmed and no terms were disclosed.",
+        "whyItMatters": "Revenue grew 4 percent year over year with record Services revenue, showing continued growth in a high margin business segment.",
         "evidenceNewsIds": [
-          "n-0905-d"
+          "n-0731-h"
         ],
-        "dateHint": null
+        "status": "announced",
+        "announcedDate": "2026-07-31"
+      },
+      {
+        "title": "TSMC begins volume production of Apple's A20 chip on 2nm process",
+        "kind": "other",
+        "direction": "positive",
+        "valueLever": "margins",
+        "whyItMatters": "Advanced chip production could improve device performance and potentially support margins through better manufacturing efficiency.",
+        "evidenceNewsIds": [
+          "n-0822-g"
+        ],
+        "status": "announced",
+        "announcedDate": "2026-08-22"
       }
     ]
   },
@@ -459,45 +475,69 @@
     "status": "ok",
     "data": {
       "headline": {
-        "value": "The iPhone 18 launch and the October 29 earnings report are the nearest events that could change the picture.",
+        "value": "Apple's next dated event is its October 29 earnings report, after the iPhone 18 launch already happened this month.",
         "visibility": "headline",
         "source": "model"
       },
       "topCatalyst": {
         "value": {
-          "title": "iPhone 18 launch cycle",
+          "title": "Apple reports fiscal Q4 2026 earnings",
+          "status": "reported",
+          "kind": "earnings",
           "direction": "two_sided",
-          "horizon": "under_3m"
+          "horizon": "under_3m",
+          "expectedDate": "2026-10-29"
         },
         "visibility": "headline",
         "source": "model",
-        "note": "Selected in code: highest likelihood, then nearest horizon"
+        "note": "Selected in code from upcomingCatalysts: highest likelihood, then soonest expectedDate"
       },
       "plainEnglish": {
-        "value": "Apple has a new phone lineup and an earnings report coming up, which will show whether sales are picking up. A European review of its App Store rules is the main event that could go the other way.",
+        "value": "Apple already unveiled its new iPhone 18 lineup with flat starting prices. Its next confirmed date ahead is the fourth quarter earnings report on October 29, while an EU App Store review and a 2027 antitrust trial remain unresolved without exact upcoming dates that qualify here.",
         "visibility": "summary",
         "source": "model"
       },
       "netTilt": {
         "value": "balanced",
         "visibility": "summary",
-        "source": "model"
+        "source": "computed",
+        "note": "Positive against negative items in upcomingCatalysts; two-sided items count for neither"
       },
       "nextEarningsDate": {
         "value": "2026-10-29",
         "visibility": "summary",
         "source": "api"
       },
-      "catalysts": {
+      "upcomingCatalysts": {
         "value": [
           {
-            "title": "iPhone 18 launch cycle",
+            "title": "Apple reports fiscal Q4 2026 earnings",
+            "status": "reported",
+            "kind": "earnings",
             "direction": "two_sided",
             "horizon": "under_3m",
             "likelihood": "high",
             "valueLever": "revenue_growth",
-            "whyItMatters": "The engine assumes 7.0% growth against about 3.3% recently, so a strong upgrade cycle is roughly what the valuation needs. Flat base prices and a higher Pro Max price make the mix the thing to watch.",
-            "dateHint": null,
+            "whyItMatters": "Quarterly results will show whether iPhone 18 demand and Services growth support the growth rate already priced into the stock.",
+            "expectedDate": "2026-10-29",
+            "evidence": []
+          }
+        ],
+        "visibility": "detail",
+        "source": "model",
+        "note": "Rumored and reported items on a day the context states, today or later, soonest first"
+      },
+      "historicalAnalogs": {
+        "value": [
+          {
+            "title": "Apple unveils iPhone 18 lineup with flat base prices",
+            "status": "announced",
+            "kind": "launch_event",
+            "direction": "two_sided",
+            "valueLever": "revenue_growth",
+            "whyItMatters": "New iPhone models and pricing decisions directly affect future device revenue and margins, though holding base prices flat while raising the Pro Max price could pressure or support margins depending on mix.",
+            "eventDate": "2026-09-11",
+            "announcedDate": "2026-09-11",
             "evidence": [
               {
                 "id": "n-0912-a",
@@ -509,23 +549,14 @@
             ]
           },
           {
-            "title": "Fiscal fourth quarter earnings",
-            "direction": "two_sided",
-            "horizon": "under_3m",
-            "likelihood": "high",
-            "valueLever": "revenue_growth",
-            "whyItMatters": "The first read on launch demand and on whether Services growth is holding up.",
-            "dateHint": "2026-10-29",
-            "evidence": []
-          },
-          {
-            "title": "EU review of App Store fee changes",
+            "title": "EU opens formal review of Apple App Store fee changes",
+            "status": "announced",
+            "kind": "regulatory",
             "direction": "negative",
-            "horizon": "3_to_12m",
-            "likelihood": "medium",
-            "valueLever": "margins",
-            "whyItMatters": "Services earn higher margins than hardware, so forced fee cuts would reduce profit, and the process can end in fines of up to 10% of global turnover.",
-            "dateHint": null,
+            "valueLever": "risk_discount",
+            "whyItMatters": "A Digital Markets Act investigation could lead to fines of up to 10% of global turnover, adding regulatory risk that can weigh on how the market prices the stock.",
+            "eventDate": "2026-09-10",
+            "announcedDate": "2026-09-10",
             "evidence": [
               {
                 "id": "n-0910-b",
@@ -537,13 +568,14 @@
             ]
           },
           {
-            "title": "DOJ antitrust trial",
+            "title": "US judge sets trial date in DOJ antitrust case against Apple",
+            "status": "announced",
+            "kind": "legal",
             "direction": "negative",
-            "horizon": "over_12m",
-            "likelihood": "high",
             "valueLever": "risk_discount",
-            "whyItMatters": "The trial is set for March 2027, so the risk stays open for more than a year before any ruling.",
-            "dateHint": null,
+            "whyItMatters": "A scheduled 2027 antitrust trial keeps a legal risk on the horizon that could affect Apple's business practices and future earnings.",
+            "eventDate": "2026-08-28",
+            "announcedDate": "2026-08-28",
             "evidence": [
               {
                 "id": "n-0828-f",
@@ -555,27 +587,28 @@
             ]
           },
           {
-            "title": "Gemini partnership extension for Siri",
+            "title": "Apple reports third quarter fiscal 2026 results",
+            "status": "announced",
+            "kind": "earnings",
             "direction": "positive",
-            "horizon": "3_to_12m",
-            "likelihood": "medium",
             "valueLever": "revenue_growth",
-            "whyItMatters": "A signed deal would firm up Apple's AI features, but the talks are unconfirmed and no terms were disclosed.",
-            "dateHint": null,
+            "whyItMatters": "Revenue grew 4 percent year over year with record Services revenue, showing continued growth in a high margin business segment.",
+            "eventDate": "2026-07-31",
+            "announcedDate": "2026-07-31",
             "evidence": [
               {
-                "id": "n-0905-d",
-                "title": "Apple in talks to expand Gemini partnership for Siri",
-                "source": "The Information",
-                "url": "https://example.com/n-0905-d",
-                "publishedAt": "2026-09-05T11:20:00Z"
+                "id": "n-0731-h",
+                "title": "Apple reports third quarter results",
+                "source": "Apple Newsroom",
+                "url": "https://example.com/n-0731-h",
+                "publishedAt": "2026-07-31T21:30:00Z"
               }
             ]
           }
         ],
         "visibility": "detail",
         "source": "model",
-        "note": "evidence rows are resolved from the supplied news by id"
+        "note": "Announced items, and shipped items announced within 90 days; eventDate is announcedDate. Downgraded to reported, and left out because a reported item needs a day still ahead: TSMC begins volume production of Apple's A20 chip on 2nm process (unofficial sourcing in Nikkei)"
       }
     }
   }

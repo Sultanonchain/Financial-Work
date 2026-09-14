@@ -47,6 +47,9 @@ const FINVIZ_KEYS = ['Short Float', 'Short Ratio', 'Insider Own', 'Insider Trans
 /** This agent's model. VALUS_AGENT_MODEL overrides it (resolveModel in client.ts). */
 export const model: string = MODELS.sonnet;
 
+/** Hard max_tokens cap: thinking plus up to eight flags. */
+export const maxTokens = 1_500;
+
 export async function run(ctx: AgentContext): Promise<AgentResult<RedflagOutput>> {
   const startedAt = Date.now();
   const base = { slug: 'redflag' as const, ticker: ctx.ticker, startedAt };
@@ -68,6 +71,7 @@ export async function run(ctx: AgentContext): Promise<AgentResult<RedflagOutput>
     schema: RedflagModelSchema,
     effort: 'low',
     model,
+    maxTokens,
     signal: ctx.signal,
   });
 

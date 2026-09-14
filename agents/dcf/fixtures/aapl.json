@@ -1,8 +1,9 @@
 {
   "name": "dcf-aapl-2026-09-12",
   "description": "Illustrative AAPL-shaped context for tests. Statement figures are approximate; the news items and the model reply are synthetic and were written by hand because no API key was available when this fixture was created. Re-record against the live API with `npm run fixtures:record`.",
-  "recordedAt": "2026-09-13T00:00:00.000Z",
-  "recordedWith": "hand-authored reply (not a live call)",
+  "source": "recorded",
+  "recordedAt": "2026-09-14T15:46:38.070Z",
+  "recordedModel": "claude-sonnet-5",
   "input": {
     "ticker": "AAPL",
     "tier": "premium",
@@ -391,50 +392,58 @@
     }
   },
   "modelOutput": {
-    "headline": "The value leans on Apple growing about twice as fast as its revenue has over the last four years.",
-    "plainEnglish": "This estimate assumes Apple's business grows faster than it has recently. If growth stays at its recent pace, the estimated value would come in lower.",
+    "headline": "This valuation rests mainly on a stage one growth rate well above Apple's recent track record, and on a discount rate that determines most of the terminal value.",
+    "plainEnglish": "A discounted cash flow estimate tries to guess what a company's future cash will be worth in today's dollars. Here the model assumes Apple's cash flow grows faster than it actually has in the past five years, and small changes to the discount rate used to bring future cash back to today's value swing the answer a lot.",
     "historicalFit": "stretch",
     "assumptions": [
       {
         "key": "stage1_growth",
         "assessment": "aggressive",
-        "reasoning": "The engine uses 7.00% near-term growth, while revenue grew about 3.3% a year and free cash flow about 1.5% a year from FY2021 to FY2025. Reaching 7.00% needs a pickup the record does not yet show.",
-        "evidence": "Revenue grew 3.28% a year and free cash flow 1.54% a year from FY2021 to FY2025."
+        "reasoning": "The engine assumes 7.00% annual growth for the next stage, more than double the revenue growth and more than four times the free cash flow growth Apple has actually posted over the last five reported years.",
+        "evidence": "Revenue grew 3.28% a year and free cash flow grew 1.54% a year across the five annual periods provided."
       },
       {
         "key": "terminal_growth",
         "assessment": "supported",
-        "reasoning": "Long-run growth of 2.50% sits in the normal range for a mature company.",
-        "evidence": "Terminal growth 2.50% against a discount rate of 8.40%."
+        "reasoning": "A 2.50% long run growth rate sits inside the normal range associated with long run nominal economic growth, and is not itself unusual, but combined with the 8.40% discount rate it produces a gap that leaves the terminal period doing most of the work in the total value.",
+        "evidence": "Terminal growth is 2.50% versus a discount rate of 8.40%, and the engine reports terminal value equals 71% of enterprise value."
       },
       {
         "key": "wacc",
         "assessment": "supported",
-        "reasoning": "An 8.40% discount rate is reasonable for a very large, highly profitable company with modest net debt.",
-        "evidence": "Net debt of $64.90B against FY2025 operating cash flow of $111.50B."
+        "reasoning": "An 8.40% discount rate looks reasonable for a company with very low leverage, strong free cash flow margins, and no sovereign backstop needed, though there is no explicit risk free rate or beta shown in the context to fully confirm the figure.",
+        "evidence": "Net debt to EBITDA is 0.45x (strong) and free cash flow margin averaged 26.2% over the historical period, both indicating low balance sheet risk."
       },
       {
         "key": "fcf_base",
+        "assessment": "aggressive",
+        "reasoning": "The free cash flow base of $98.80B matches the latest reported annual figure, but stock based compensation, a non cash add back, equals 13.1% of that free cash flow, which can flatter the cash generation picture used as the starting point.",
+        "evidence": "Stock based compensation is 13.1% of the latest reported free cash flow of $98.80B."
+      },
+      {
+        "key": "share_count",
         "assessment": "supported",
-        "reasoning": "The $98.80B starting point matches FY2025 reported free cash flow and sits below the five-year average margin, so one strong year is not flattering it.",
-        "evidence": "FY2025 free cash flow $98.80B on revenue of $416.20B, against a 26.2% average free cash flow margin."
+        "reasoning": "The 14.84B diluted share count used by the engine matches the most recent quarterly figure and continues a clear multi year trend of share count reduction from buybacks, so it is not a stale input.",
+        "evidence": "Diluted shares fell from 16.86B in fiscal 2021 to 15.00B in fiscal 2025 and to 14.84B in the latest quarter."
       }
     ],
     "dominantSensitivity": {
       "key": "wacc",
-      "explanation": "The engine reports terminal value at 71% of enterprise value, so small changes in the discount rate move the estimate more than anything else."
+      "explanation": "With terminal value already reported at 71% of enterprise value, the discount rate has outsized leverage over the result, and a one percentage point move in a rate like this commonly shifts intrinsic value by 15 to 40 percent."
     },
     "confidence": "medium",
     "confidenceReasons": [
-      "The growth assumption runs ahead of the recent record.",
-      "Terminal value is a large share of the estimate."
+      "Stage one growth of 7.00% is well above the 3.28% revenue and 1.54% free cash flow growth actually reported over five years.",
+      "Terminal value makes up 71% of enterprise value, so the result leans heavily on assumptions about the far future rather than near term results.",
+      "Stock based compensation equal to 13.1% of free cash flow means part of the cash flow base is a non cash add back rather than distributable cash.",
+      "Balance sheet and buyback trends support the net debt and share count inputs, which adds some stability to the estimate."
     ]
   },
   "expected": {
     "status": "ok",
     "data": {
       "headline": {
-        "value": "The value leans on Apple growing about twice as fast as its revenue has over the last four years.",
+        "value": "This valuation rests mainly on a stage one growth rate well above Apple's recent track record, and on a discount rate that determines most of the terminal value.",
         "visibility": "headline",
         "source": "model"
       },
@@ -462,7 +471,7 @@
         "source": "computed"
       },
       "plainEnglish": {
-        "value": "This estimate assumes Apple's business grows faster than it has recently. If growth stays at its recent pace, the estimated value would come in lower.",
+        "value": "A discounted cash flow estimate tries to guess what a company's future cash will be worth in today's dollars. Here the model assumes Apple's cash flow grows faster than it actually has in the past five years, and small changes to the discount rate used to bring future cash back to today's value swing the answer a lot.",
         "visibility": "summary",
         "source": "model"
       },
@@ -484,8 +493,8 @@
             "engineValue": 7,
             "unit": "pct",
             "assessment": "aggressive",
-            "reasoning": "The engine uses 7.00% near-term growth, while revenue grew about 3.3% a year and free cash flow about 1.5% a year from FY2021 to FY2025. Reaching 7.00% needs a pickup the record does not yet show.",
-            "evidence": "Revenue grew 3.28% a year and free cash flow 1.54% a year from FY2021 to FY2025."
+            "reasoning": "The engine assumes 7.00% annual growth for the next stage, more than double the revenue growth and more than four times the free cash flow growth Apple has actually posted over the last five reported years.",
+            "evidence": "Revenue grew 3.28% a year and free cash flow grew 1.54% a year across the five annual periods provided."
           },
           {
             "key": "terminal_growth",
@@ -493,8 +502,8 @@
             "engineValue": 2.5,
             "unit": "pct",
             "assessment": "supported",
-            "reasoning": "Long-run growth of 2.50% sits in the normal range for a mature company.",
-            "evidence": "Terminal growth 2.50% against a discount rate of 8.40%."
+            "reasoning": "A 2.50% long run growth rate sits inside the normal range associated with long run nominal economic growth, and is not itself unusual, but combined with the 8.40% discount rate it produces a gap that leaves the terminal period doing most of the work in the total value.",
+            "evidence": "Terminal growth is 2.50% versus a discount rate of 8.40%, and the engine reports terminal value equals 71% of enterprise value."
           },
           {
             "key": "wacc",
@@ -502,17 +511,26 @@
             "engineValue": 8.4,
             "unit": "pct",
             "assessment": "supported",
-            "reasoning": "An 8.40% discount rate is reasonable for a very large, highly profitable company with modest net debt.",
-            "evidence": "Net debt of $64.90B against FY2025 operating cash flow of $111.50B."
+            "reasoning": "An 8.40% discount rate looks reasonable for a company with very low leverage, strong free cash flow margins, and no sovereign backstop needed, though there is no explicit risk free rate or beta shown in the context to fully confirm the figure.",
+            "evidence": "Net debt to EBITDA is 0.45x (strong) and free cash flow margin averaged 26.2% over the historical period, both indicating low balance sheet risk."
           },
           {
             "key": "fcf_base",
             "label": "Starting free cash flow",
             "engineValue": 98800000000,
             "unit": "money",
+            "assessment": "aggressive",
+            "reasoning": "The free cash flow base of $98.80B matches the latest reported annual figure, but stock based compensation, a non cash add back, equals 13.1% of that free cash flow, which can flatter the cash generation picture used as the starting point.",
+            "evidence": "Stock based compensation is 13.1% of the latest reported free cash flow of $98.80B."
+          },
+          {
+            "key": "share_count",
+            "label": "Share count",
+            "engineValue": 14840000000,
+            "unit": "shares",
             "assessment": "supported",
-            "reasoning": "The $98.80B starting point matches FY2025 reported free cash flow and sits below the five-year average margin, so one strong year is not flattering it.",
-            "evidence": "FY2025 free cash flow $98.80B on revenue of $416.20B, against a 26.2% average free cash flow margin."
+            "reasoning": "The 14.84B diluted share count used by the engine matches the most recent quarterly figure and continues a clear multi year trend of share count reduction from buybacks, so it is not a stale input.",
+            "evidence": "Diluted shares fell from 16.86B in fiscal 2021 to 15.00B in fiscal 2025 and to 14.84B in the latest quarter."
           }
         ],
         "visibility": "detail",
@@ -523,15 +541,17 @@
         "value": {
           "key": "wacc",
           "label": "Discount rate",
-          "explanation": "The engine reports terminal value at 71% of enterprise value, so small changes in the discount rate move the estimate more than anything else."
+          "explanation": "With terminal value already reported at 71% of enterprise value, the discount rate has outsized leverage over the result, and a one percentage point move in a rate like this commonly shifts intrinsic value by 15 to 40 percent."
         },
         "visibility": "detail",
         "source": "model"
       },
       "confidenceReasons": {
         "value": [
-          "The growth assumption runs ahead of the recent record.",
-          "Terminal value is a large share of the estimate."
+          "Stage one growth of 7.00% is well above the 3.28% revenue and 1.54% free cash flow growth actually reported over five years.",
+          "Terminal value makes up 71% of enterprise value, so the result leans heavily on assumptions about the far future rather than near term results.",
+          "Stock based compensation equal to 13.1% of free cash flow means part of the cash flow base is a non cash add back rather than distributable cash.",
+          "Balance sheet and buyback trends support the net debt and share count inputs, which adds some stability to the estimate."
         ],
         "visibility": "detail",
         "source": "model"

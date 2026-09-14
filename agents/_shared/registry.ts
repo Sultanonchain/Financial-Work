@@ -10,11 +10,11 @@
 import { TTL_SECONDS } from './cache.ts';
 import type { AgentModule, AgentSlug } from './types.ts';
 
-import { model as catalystModel, run as runCatalyst } from '../catalyst/run.ts';
-import { model as dcfModel, run as runDcf } from '../dcf/run.ts';
-import { model as newsModel, run as runNews } from '../news/run.ts';
-import { model as redflagModel, run as runRedflag } from '../redflag/run.ts';
-import { model as verdictModel, run as runVerdict } from '../verdict/run.ts';
+import * as catalyst from '../catalyst/run.ts';
+import * as dcf from '../dcf/run.ts';
+import * as news from '../news/run.ts';
+import * as redflag from '../redflag/run.ts';
+import * as verdict from '../verdict/run.ts';
 
 import type { CatalystOutput } from '../catalyst/schema.ts';
 import type { DcfOutput } from '../dcf/schema.ts';
@@ -38,40 +38,45 @@ export const registry: AgentRegistry = {
     title: 'Valuation assumptions',
     stage: 1,
     ttlSeconds: TTL_SECONDS.dcf,
-    model: dcfModel,
-    run: runDcf,
+    model: dcf.model,
+    maxTokens: dcf.maxTokens,
+    run: dcf.run,
   },
   catalyst: {
     slug: 'catalyst',
     title: 'Catalysts',
     stage: 1,
     ttlSeconds: TTL_SECONDS.catalyst,
-    model: catalystModel,
-    run: runCatalyst,
+    model: catalyst.model,
+    maxTokens: catalyst.maxTokens,
+    run: catalyst.run,
   },
   news: {
     slug: 'news',
     title: 'News read',
     stage: 1,
     ttlSeconds: TTL_SECONDS.news,
-    model: newsModel,
-    run: runNews,
+    model: news.model,
+    maxTokens: news.maxTokens,
+    run: news.run,
   },
   redflag: {
     slug: 'redflag',
     title: 'Red flags',
     stage: 1,
     ttlSeconds: TTL_SECONDS.redflag,
-    model: redflagModel,
-    run: runRedflag,
+    model: redflag.model,
+    maxTokens: redflag.maxTokens,
+    run: redflag.run,
   },
   verdict: {
     slug: 'verdict',
     title: 'Verdict',
     stage: 2,
     ttlSeconds: TTL_SECONDS.verdict,
-    model: verdictModel,
-    run: runVerdict,
+    model: verdict.model,
+    maxTokens: verdict.maxTokens,
+    run: verdict.run,
   },
 };
 

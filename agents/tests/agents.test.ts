@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { beforeEach, describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 
 import { cacheKey, MemoryStore, setCacheStore } from '../_shared/cache.ts';
+import { setClock } from '../_shared/format.ts';
 import {
   buildRequest,
   configureClient,
@@ -27,15 +28,23 @@ import {
   VISIBILITY_TIERS,
   type AgentContext,
   type AgentSlug,
+  type NewsItem,
 } from '../_shared/types.ts';
 
-import { CatalystModelSchema } from '../catalyst/schema.ts';
+import {
+  CatalystModelSchema,
+  catalystOutputSchemaFor,
+  SHIPPED_WINDOW_DAYS,
+  type CatalystOutput,
+} from '../catalyst/schema.ts';
 import { DcfModelSchema } from '../dcf/schema.ts';
 import { NewsModelSchema } from '../news/schema.ts';
 import { RedflagModelSchema } from '../redflag/schema.ts';
 import { VerdictModelSchema, type VerdictOutput } from '../verdict/schema.ts';
 
-import { AGENTS_ROOT, loadFixture, toJson, type Fixture } from './helpers.ts';
+import { collectStatus, renderStatus } from '../scripts/agents-status.ts';
+
+import { AGENTS_ROOT, loadFixture, provenanceIssues, toJson, type Fixture } from './helpers.ts';
 
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Harness                                                                    */
@@ -91,10 +100,33 @@ async function withModelOverride(value: string | undefined, body: () => Promise<
   }
 }
 
+/**
+ * npm test loads agents/.env, so a real API key can be present. No test may
+ * reach the API: the default transport refuses and records the attempt, and
+ * afterEach fails the test that made it.
+ */
+let unstubbedModelCalls: string[] = [];
+
+/**
+ * "Today" for date-dependent validation, pinned so tests do not rot as the
+ * calendar moves: the catalyst fixture's own reference date.
+ */
+const TEST_NOW = fixtures.catalyst.recordedAt ?? fixtures.catalyst.input.asOf;
+
 beforeEach(() => {
   resetClient();
+  setClock(() => Date.parse(TEST_NOW));
+  unstubbedModelCalls = [];
+  setModelTransport((req) => {
+    unstubbedModelCalls.push(req.slug);
+    throw new Error('model call without a test transport');
+  });
   setTokenLogger(() => {});
   setCacheStore(new MemoryStore());
+});
+
+afterEach(() => {
+  assert.deepEqual(unstubbedModelCalls, [], 'a test called the model without installing a transport');
 });
 
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -107,6 +139,7 @@ describe('recorded fixtures', () => {
       const fixture = fixtures[slug];
       assert.ok(fixture.expected, `${slug} has no expected output yet; run npm run fixtures:replay`);
 
+      setClock(() => Date.parse(fixture.recordedAt ?? fixture.input.asOf));
       const calls = useTransport();
       const result = await registry[slug].run(structuredClone(fixture.input));
       const { SYSTEM_PROMPT } = (await import(`../${slug}/prompt.ts`)) as { SYSTEM_PROMPT: string };
@@ -186,6 +219,19 @@ describe('contract', () => {
     }
   });
 
+  it('every fixture declares consistent provenance', () => {
+    for (const slug of AGENT_SLUGS) {
+      assert.deepEqual(provenanceIssues(fixtures[slug]), [], slug);
+    }
+    assert.deepEqual(provenanceIssues({ source: 'synthetic', recordedAt: null, recordedModel: null }), []);
+    assert.equal(provenanceIssues({ recordedAt: null }).length, 1, 'a missing source is never assumed');
+    assert.equal(
+      provenanceIssues({ source: 'recorded', recordedAt: null, recordedModel: null, modelOutput: {} }).length,
+      2,
+      'recorded requires a timestamp and a model',
+    );
+  });
+
   it('the advice filter catches trading instructions but not ordinary finance words', () => {
     for (const text of [
       'Investors should buy before the launch.',
@@ -217,6 +263,8 @@ describe('validation and repair', () => {
     const calls = useTransport({
       dcf: (req) => (req.attempt === 1 ? { ...reply('dcf'), confidence: 'certain' } : reply('dcf')),
     });
+    const records: TokenLogRecord[] = [];
+    setTokenLogger((record) => records.push(record));
     const result = await registry.dcf.run(baseContext());
 
     assert.equal(result.status, 'ok');
@@ -224,6 +272,9 @@ describe('validation and repair', () => {
     assert.equal(calls.length, 2);
     assert.equal(calls[0]?.repairHint, null);
     assert.match(calls[1]?.repairHint ?? '', /confidence/);
+    assert.equal(records[0]?.outcome, 'invalid');
+    assert.match(records[0]?.issues ?? '', /confidence/, 'the token log says why a repair was needed');
+    assert.equal(records[1]?.issues, undefined);
   });
 
   it('returns unavailable after a second invalid reply, without throwing', async () => {
@@ -335,6 +386,300 @@ describe('missing inputs', () => {
 
     assert.equal(result.error?.kind, 'insufficient_data');
     assert.equal(calls.length, 0);
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Catalyst lifecycle                                                         */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+describe('catalyst lifecycle', () => {
+  const TODAY = '2026-09-14';
+  const SHIPPED_SINCE = '2026-06-16'; // TODAY minus SHIPPED_WINDOW_DAYS
+  type Item = Record<string, unknown>;
+
+  // News in the base context used below: n-0731-h "Apple Newsroom" (company
+  // statement, 2026-07-31); n-0912-a Reuters (major outlet, 2026-09-11);
+  // n-0908-c Motley Fool (neither); n-0910-b Bloomberg on the EU review (no day);
+  // n-0828-f Reuters, trial "beginning in March 2027" (a month, no day). The
+  // calendar's next earnings date is 2026-10-29.
+  const upcoming = (overrides: Item = {}): Item => ({
+    title: 'Q4 earnings report',
+    status: 'reported',
+    kind: 'earnings',
+    direction: 'two_sided',
+    horizon: 'under_3m',
+    likelihood: 'high',
+    valueLever: 'revenue_growth',
+    whyItMatters: 'A test item for the lifecycle rules.',
+    evidenceNewsIds: [],
+    expectedDate: '2026-10-29',
+    ...overrides,
+  });
+  const past = (overrides: Item = {}): Item => ({
+    title: 'Q3 results released',
+    status: 'announced',
+    kind: 'earnings',
+    direction: 'positive',
+    valueLever: 'revenue_growth',
+    whyItMatters: 'A test item for the lifecycle rules.',
+    evidenceNewsIds: ['n-0731-h'],
+    announcedDate: '2026-07-31',
+    ...overrides,
+  });
+  const newsItem = (id: string, date: string, source: string, title: string): NewsItem => ({
+    id,
+    title,
+    summary: null,
+    url: null,
+    source,
+    publishedAt: `${date}T13:00:00Z`,
+  });
+
+  type Reply = { upcoming?: Item[]; past?: Item[] };
+
+  /** Runs the catalyst agent on TODAY; attempt N gets replies[N-1] (or the last one). */
+  const runCatalyst = async (replies: Reply[], extraNews: NewsItem[] = []) => {
+    setClock(() => Date.parse(`${TODAY}T12:00:00Z`));
+    const calls = useTransport({
+      catalyst: (req) => {
+        const reply = replies[Math.min(req.attempt, replies.length) - 1] ?? {};
+        return {
+          headline: 'A test headline.',
+          plainEnglish: 'A test summary for the reader.',
+          upcoming: reply.upcoming ?? [],
+          past: reply.past ?? [],
+        };
+      },
+    });
+    const ctx = baseContext();
+    ctx.news = [...ctx.news, ...extraNews];
+    return { result: await registry.catalyst.run(ctx), calls };
+  };
+
+  it('keeps a dated upcoming item and computes netTilt from what is kept', async () => {
+    const { result, calls } = await runCatalyst([{ upcoming: [upcoming({ direction: 'negative' })] }]);
+
+    assert.equal(result.status, 'ok', JSON.stringify(result.error));
+    assert.equal(calls.length, 1);
+    assert.deepEqual(
+      result.data?.upcomingCatalysts.value.map((c) => [c.title, c.kind, c.expectedDate]),
+      [['Q4 earnings report', 'earnings', '2026-10-29']],
+    );
+    assert.equal(result.data?.netTilt.value, 'negative');
+    assert.equal(result.data?.netTilt.source, 'computed');
+    assert.equal(result.data?.topCatalyst.value?.title, 'Q4 earnings report');
+  });
+
+  it('drops undated upcoming items in the same attempt, litigation and regulatory included', async () => {
+    const { result, calls } = await runCatalyst([
+      {
+        upcoming: [
+          upcoming(),
+          upcoming({ title: 'EU decision on App Store fees', kind: 'regulatory', expectedDate: '', evidenceNewsIds: ['n-0910-b'] }),
+          upcoming({ title: 'DOJ antitrust trial', kind: 'legal', horizon: 'over_12m', expectedDate: '2027-03-01', evidenceNewsIds: ['n-0828-f'] }),
+        ],
+      },
+    ]);
+
+    assert.equal(result.status, 'ok', JSON.stringify(result.error));
+    assert.equal(calls.length, 1, 'no repair turn');
+    assert.deepEqual(result.data?.upcomingCatalysts.value.map((c) => c.title), ['Q4 earnings report']);
+    const note = result.data?.upcomingCatalysts.note ?? '';
+    assert.match(note, /EU decision on App Store fees \(no exact day\)/);
+    assert.match(note, /DOJ antitrust trial \(2027-03-01 is not a day the context states\)/);
+  });
+
+  it('drops past-dated upcoming items instead of rendering them', async () => {
+    const event = newsItem('n-event', '2026-09-01', 'Reuters', 'Apple will hold its event on September 9, 2026');
+    const { result, calls } = await runCatalyst(
+      [{ upcoming: [upcoming({ title: 'Apple event', kind: 'launch_event', expectedDate: '2026-09-09', evidenceNewsIds: ['n-event'] })] }],
+      [event],
+    );
+
+    assert.equal(result.status, 'ok', JSON.stringify(result.error));
+    assert.equal(calls.length, 1);
+    assert.deepEqual(result.data?.upcomingCatalysts.value, []);
+    assert.equal(result.data?.netTilt.value, 'none');
+    assert.match(result.data?.upcomingCatalysts.note ?? '', /Apple event \(dated 2026-09-09, before today\)/);
+  });
+
+  it('keeps upcoming items dated today', async () => {
+    const event = newsItem('n-today', '2026-09-10', 'Reuters', 'Apple to hold an investor event on September 14, 2026');
+    const { result } = await runCatalyst(
+      [{ upcoming: [upcoming({ title: 'Investor event', kind: 'launch_event', expectedDate: TODAY, evidenceNewsIds: ['n-today'] })] }],
+      [event],
+    );
+
+    assert.equal(result.status, 'ok', JSON.stringify(result.error));
+    assert.equal(result.data?.upcomingCatalysts.value[0]?.expectedDate, TODAY);
+  });
+
+  it('the calendar date only dates the earnings report', async () => {
+    const borrowed = upcoming({ title: 'EU decision', kind: 'regulatory', evidenceNewsIds: ['n-0910-b'] });
+    const { result } = await runCatalyst([{ upcoming: [borrowed] }]);
+
+    assert.equal(result.status, 'ok', JSON.stringify(result.error));
+    assert.deepEqual(result.data?.upcomingCatalysts.value, []);
+  });
+
+  it('a future ship date, price or availability window needs a company statement', async () => {
+    const shipReport = newsItem('n-ship-r', '2026-09-12', 'Reuters', 'iPhone 18 Pro to ship on September 25, 2026, sources say');
+    const shipStatement = newsItem('n-ship-c', '2026-09-12', 'Apple Newsroom', 'iPhone 18 Pro available September 25, 2026');
+    const ships = (evidence: string) =>
+      upcoming({ title: 'iPhone 18 Pro ships', kind: 'ship_date', expectedDate: '2026-09-25', evidenceNewsIds: [evidence] });
+
+    const reported = await runCatalyst([{ upcoming: [ships('n-ship-r')] }], [shipReport, shipStatement]);
+    assert.equal(reported.result.status, 'unavailable');
+    assert.match(reported.calls[1]?.repairHint ?? '', /is a future ship date, which needs a company statement among its evidence/);
+
+    const fromCompany = await runCatalyst([{ upcoming: [ships('n-ship-c')] }], [shipReport, shipStatement]);
+    assert.equal(fromCompany.result.status, 'ok', JSON.stringify(fromCompany.result.error));
+    assert.equal(fromCompany.calls.length, 1);
+    assert.equal(fromCompany.result.data?.upcomingCatalysts.value[0]?.expectedDate, '2026-09-25');
+  });
+
+  it('a past official event reported by a major outlet counts as announced', async () => {
+    const unveiled = past({ title: 'iPhone 18 unveiled', kind: 'launch_event', evidenceNewsIds: ['n-0912-a'], announcedDate: '2026-09-11' });
+    const { result, calls } = await runCatalyst([{ past: [unveiled] }]);
+
+    assert.equal(result.status, 'ok', JSON.stringify(result.error));
+    assert.equal(calls.length, 1, 'no repair turn');
+    assert.deepEqual(
+      result.data?.historicalAnalogs.value.map((c) => [c.title, c.status, c.kind, c.eventDate, c.announcedDate]),
+      [['iPhone 18 unveiled', 'announced', 'launch_event', '2026-09-11', '2026-09-11']],
+    );
+  });
+
+  it('evidence with unofficial sourcing cannot support announced, whichever outlet published it', async () => {
+    // n-0822-g is Nikkei, a major outlet: "according to people familiar with the schedule".
+    const production = past({
+      title: 'TSMC begins A20 production',
+      kind: 'other',
+      evidenceNewsIds: ['n-0822-g'],
+      announcedDate: '2026-08-22',
+    });
+    const { result, calls } = await runCatalyst([{ past: [past(), production] }]);
+
+    assert.equal(result.status, 'ok', JSON.stringify(result.error));
+    assert.equal(calls.length, 1, 'a downgrade is not a repair turn');
+    assert.deepEqual(result.data?.historicalAnalogs.value.map((c) => c.title), ['Q3 results released']);
+    assert.match(
+      result.data?.historicalAnalogs.note ?? '',
+      /Downgraded to reported.*TSMC begins A20 production \(unofficial sourcing in Nikkei\)/,
+    );
+    assert.deepEqual(result.data?.upcomingCatalysts.value, [], 'a downgraded past event has no day still ahead');
+  });
+
+  it('each hedging phrase downgrades, and unhedged official evidence alongside still supports', async () => {
+    const phrases = ['people familiar with the plans', 'sources said', 'according to people briefed', 'is said to have', 'reportedly'];
+    for (const [n, phrase] of phrases.entries()) {
+      const hedged = newsItem(`n-hedge-${n}`, '2026-09-01', 'Bloomberg', `Apple ${phrase} signed a supply deal`);
+      const deal = past({ title: 'Supply deal', kind: 'corporate', evidenceNewsIds: [hedged.id], announcedDate: '2026-09-01' });
+      const { result, calls } = await runCatalyst([{ past: [deal] }], [hedged]);
+      assert.equal(result.status, 'ok', `"${phrase}": ${JSON.stringify(result.error)}`);
+      assert.equal(calls.length, 1, `"${phrase}"`);
+      assert.deepEqual(result.data?.historicalAnalogs.value, [], `"${phrase}" should downgrade`);
+    }
+
+    const hedged = newsItem('n-hedge', '2026-09-01', 'Bloomberg', 'Apple reportedly signed a supply deal');
+    const statement = newsItem('n-deal', '2026-09-01', 'Apple Newsroom', 'Apple signs a supply deal');
+    const deal = past({ title: 'Supply deal', kind: 'corporate', evidenceNewsIds: ['n-hedge', 'n-deal'], announcedDate: '2026-09-01' });
+    const { result } = await runCatalyst([{ past: [deal] }], [hedged, statement]);
+    assert.deepEqual(result.data?.historicalAnalogs.value.map((c) => [c.title, c.status]), [['Supply deal', 'announced']]);
+  });
+
+  it('legal and regulatory events that already happened stay in historicalAnalogs', async () => {
+    const trialDateSet = past({
+      title: 'Judge sets DOJ trial date',
+      kind: 'legal',
+      direction: 'negative',
+      evidenceNewsIds: ['n-0828-f'],
+      announcedDate: '2026-08-28',
+    });
+    const reviewOpened = past({
+      title: 'EU opens App Store fee review',
+      kind: 'regulatory',
+      direction: 'negative',
+      evidenceNewsIds: ['n-0910-b'],
+      announcedDate: '2026-09-10',
+    });
+    const { result } = await runCatalyst([{ past: [trialDateSet, reviewOpened] }]);
+
+    assert.equal(result.status, 'ok', JSON.stringify(result.error));
+    assert.deepEqual(
+      result.data?.historicalAnalogs.value.map((c) => [c.kind, c.eventDate]),
+      [
+        ['regulatory', '2026-09-10'],
+        ['legal', '2026-08-28'],
+      ],
+    );
+  });
+
+  it('announced still needs a company statement or a major outlet', async () => {
+    const viaOpinion = past({ evidenceNewsIds: ['n-0908-c'], announcedDate: '2026-09-08' });
+    const { result, calls } = await runCatalyst([{ past: [viaOpinion] }]);
+
+    assert.equal(result.status, 'unavailable');
+    assert.match(calls[1]?.repairHint ?? '', /neither a company statement nor a major outlet/);
+  });
+
+  it('announcedDate is required once status is announced or shipped', async () => {
+    const undated = past({ status: 'shipped', announcedDate: undefined });
+    const { result, calls } = await runCatalyst([{ past: [undated] }]);
+
+    assert.equal(result.status, 'unavailable');
+    assert.match(calls[1]?.repairHint ?? '', /past\.0\.announcedDate/);
+  });
+
+  it('announcedDate must match the cited evidence', async () => {
+    const { result, calls } = await runCatalyst([{ past: [past({ announcedDate: '2026-07-15' })] }]);
+
+    assert.equal(result.status, 'unavailable');
+    assert.match(calls[1]?.repairHint ?? '', /announcedDate 2026-07-15 does not match the cited evidence \(published 2026-07-31\)/);
+  });
+
+  it('announced items land in historicalAnalogs, dated by announcedDate', async () => {
+    const { result } = await runCatalyst([{ upcoming: [upcoming()], past: [past()] }]);
+
+    assert.equal(result.status, 'ok', JSON.stringify(result.error));
+    assert.deepEqual(result.data?.upcomingCatalysts.value.map((c) => c.title), ['Q4 earnings report']);
+    assert.deepEqual(
+      result.data?.historicalAnalogs.value.map((c) => [c.title, c.status, c.eventDate]),
+      [['Q3 results released', 'announced', '2026-07-31']],
+    );
+  });
+
+  it(`shipped items drop off ${SHIPPED_WINDOW_DAYS} days after announcedDate`, async () => {
+    const oldStatement = newsItem('n-0501-s', '2026-05-01', 'Apple Newsroom', 'Apple introduces a new product');
+    const recent = past({ title: 'Shipped recently', status: 'shipped' });
+    const old = past({ title: 'Shipped long ago', status: 'shipped', announcedDate: '2026-05-01', evidenceNewsIds: ['n-0501-s'] });
+    const { result } = await runCatalyst([{ past: [recent, old] }], [oldStatement]);
+
+    assert.equal(result.status, 'ok', JSON.stringify(result.error));
+    assert.deepEqual(result.data?.historicalAnalogs.value.map((c) => c.title), ['Shipped recently']);
+  });
+
+  it('the returned object is checked against today as well', () => {
+    const clean = structuredClone(fixtures.catalyst.expected?.data) as CatalystOutput;
+    assert.equal(catalystOutputSchemaFor(TODAY, SHIPPED_SINCE).safeParse(clean).success, true);
+
+    const stale = structuredClone(clean);
+    stale.upcomingCatalysts.value.push({
+      title: 'Stale',
+      status: 'reported',
+      kind: 'other',
+      direction: 'positive',
+      horizon: 'under_3m',
+      likelihood: 'high',
+      valueLever: 'margins',
+      whyItMatters: 'Dated before today.',
+      expectedDate: '2026-09-01',
+      evidence: [],
+    });
+    const parsed = catalystOutputSchemaFor(TODAY, SHIPPED_SINCE).safeParse(stale);
+    assert.equal(parsed.success, false);
+    assert.match(parsed.error?.issues[0]?.message ?? '', /past-dated item in upcomingCatalysts/);
   });
 });
 
@@ -509,7 +854,7 @@ describe('runner', () => {
   it('keys the cache by agent, ticker and UTC date', () => {
     assert.equal(
       cacheKey('news', ' aapl ', new Date('2026-09-12T23:59:59-04:00')),
-      'valus:agent:v1:news:AAPL:2026-09-13',
+      'valus:agent:v3:news:AAPL:2026-09-13',
     );
   });
 });
@@ -536,6 +881,11 @@ describe('models', () => {
       for (const slug of AGENT_SLUGS) {
         assert.equal(registry[slug].model, expected[slug], `${slug} module`);
         assert.equal(calls.find((call) => call.slug === slug)?.model, expected[slug], `${slug} request`);
+        assert.equal(
+          calls.find((call) => call.slug === slug)?.maxTokens,
+          registry[slug].maxTokens,
+          `${slug} max_tokens cap`,
+        );
         assert.equal(report.results[slug].meta.model, expected[slug], `${slug} meta`);
         const record = records.find((r) => r.slug === slug);
         assert.equal(record?.model, expected[slug], `${slug} token log`);
@@ -590,6 +940,51 @@ describe('models', () => {
 
     const unknown = buildRequest(opts, 'claude-unlisted-model', 1_000, null);
     assert.equal(unknown.output_config?.effort, undefined, 'unlisted models get the conservative set');
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* agents:status                                                              */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+describe('agents:status', () => {
+  it('lists every registered agent with its resolved model, files and fixture provenance', async () => {
+    const report = await collectStatus({});
+
+    assert.equal(report.apiKeySet, false);
+    assert.equal(report.modelOverride, null);
+    assert.equal(report.registryError, null);
+    assert.deepEqual(
+      report.agents.map((agent) => agent.slug),
+      AGENT_SLUGS,
+    );
+    for (const agent of report.agents) {
+      const slug = agent.slug as AgentSlug;
+      const fixture = fixtures[slug];
+      assert.equal(agent.ready, true, `${slug}: ${agent.problems.join('; ')}`);
+      assert.deepEqual(agent.missing, [], slug);
+      assert.equal(agent.model, registry[slug].model, slug);
+      assert.equal(agent.modelSource, 'agent', slug);
+      assert.equal(agent.provenance, fixture.source === 'recorded' ? 'recorded' : 'hand-written', slug);
+      assert.equal(agent.lastRecordedAt, fixture.recordedAt, slug);
+    }
+  });
+
+  it('reports the API key as set without printing it, and shows the model override', async () => {
+    const secret = 'sk-ant-test-0000-must-not-appear';
+    const report = await collectStatus({
+      ANTHROPIC_API_KEY: secret,
+      [MODEL_OVERRIDE_ENV]: 'claude-override-test',
+    });
+    const output = renderStatus(report);
+
+    assert.equal(report.apiKeySet, true);
+    assert.equal(output.includes(secret), false, 'the key value must never be printed');
+    assert.match(output, /ANTHROPIC_API_KEY\s+set\n/);
+    assert.ok(report.agents.every((agent) => agent.model === 'claude-override-test' && agent.modelSource === 'env'));
+    for (const slug of AGENT_SLUGS) {
+      assert.match(output, new RegExp(`^  ${slug}\\s+yes\\s+claude-override-test\\s+env\\s+ok`, 'm'));
+    }
   });
 });
 

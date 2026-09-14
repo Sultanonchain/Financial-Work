@@ -1,8 +1,9 @@
 {
   "name": "verdict-aapl-2026-09-12",
   "description": "Illustrative AAPL-shaped context for tests. Statement figures are approximate; the news items and the model reply are synthetic and were written by hand because no API key was available when this fixture was created. Re-record against the live API with `npm run fixtures:record`.",
-  "recordedAt": "2026-09-13T00:00:00.000Z",
-  "recordedWith": "hand-authored reply (not a live call)",
+  "source": "recorded",
+  "recordedAt": "2026-09-14T17:54:12.602Z",
+  "recordedModel": "claude-sonnet-5",
   "input": {
     "ticker": "AAPL",
     "tier": "premium",
@@ -395,7 +396,7 @@
         "status": "ok",
         "data": {
           "headline": {
-            "value": "The value leans on Apple growing about twice as fast as its revenue has over the last four years.",
+            "value": "This valuation rests mainly on a stage one growth rate well above Apple's recent track record, and on a discount rate that determines most of the terminal value.",
             "visibility": "headline",
             "source": "model"
           },
@@ -423,7 +424,7 @@
             "source": "computed"
           },
           "plainEnglish": {
-            "value": "This estimate assumes Apple's business grows faster than it has recently. If growth stays at its recent pace, the estimated value would come in lower.",
+            "value": "A discounted cash flow estimate tries to guess what a company's future cash will be worth in today's dollars. Here the model assumes Apple's cash flow grows faster than it actually has in the past five years, and small changes to the discount rate used to bring future cash back to today's value swing the answer a lot.",
             "visibility": "summary",
             "source": "model"
           },
@@ -445,8 +446,8 @@
                 "engineValue": 7,
                 "unit": "pct",
                 "assessment": "aggressive",
-                "reasoning": "The engine uses 7.00% near-term growth, while revenue grew about 3.3% a year and free cash flow about 1.5% a year from FY2021 to FY2025. Reaching 7.00% needs a pickup the record does not yet show.",
-                "evidence": "Revenue grew 3.28% a year and free cash flow 1.54% a year from FY2021 to FY2025."
+                "reasoning": "The engine assumes 7.00% annual growth for the next stage, more than double the revenue growth and more than four times the free cash flow growth Apple has actually posted over the last five reported years.",
+                "evidence": "Revenue grew 3.28% a year and free cash flow grew 1.54% a year across the five annual periods provided."
               },
               {
                 "key": "terminal_growth",
@@ -454,8 +455,8 @@
                 "engineValue": 2.5,
                 "unit": "pct",
                 "assessment": "supported",
-                "reasoning": "Long-run growth of 2.50% sits in the normal range for a mature company.",
-                "evidence": "Terminal growth 2.50% against a discount rate of 8.40%."
+                "reasoning": "A 2.50% long run growth rate sits inside the normal range associated with long run nominal economic growth, and is not itself unusual, but combined with the 8.40% discount rate it produces a gap that leaves the terminal period doing most of the work in the total value.",
+                "evidence": "Terminal growth is 2.50% versus a discount rate of 8.40%, and the engine reports terminal value equals 71% of enterprise value."
               },
               {
                 "key": "wacc",
@@ -463,17 +464,26 @@
                 "engineValue": 8.4,
                 "unit": "pct",
                 "assessment": "supported",
-                "reasoning": "An 8.40% discount rate is reasonable for a very large, highly profitable company with modest net debt.",
-                "evidence": "Net debt of $64.90B against FY2025 operating cash flow of $111.50B."
+                "reasoning": "An 8.40% discount rate looks reasonable for a company with very low leverage, strong free cash flow margins, and no sovereign backstop needed, though there is no explicit risk free rate or beta shown in the context to fully confirm the figure.",
+                "evidence": "Net debt to EBITDA is 0.45x (strong) and free cash flow margin averaged 26.2% over the historical period, both indicating low balance sheet risk."
               },
               {
                 "key": "fcf_base",
                 "label": "Starting free cash flow",
                 "engineValue": 98800000000,
                 "unit": "money",
+                "assessment": "aggressive",
+                "reasoning": "The free cash flow base of $98.80B matches the latest reported annual figure, but stock based compensation, a non cash add back, equals 13.1% of that free cash flow, which can flatter the cash generation picture used as the starting point.",
+                "evidence": "Stock based compensation is 13.1% of the latest reported free cash flow of $98.80B."
+              },
+              {
+                "key": "share_count",
+                "label": "Share count",
+                "engineValue": 14840000000,
+                "unit": "shares",
                 "assessment": "supported",
-                "reasoning": "The $98.80B starting point matches FY2025 reported free cash flow and sits below the five-year average margin, so one strong year is not flattering it.",
-                "evidence": "FY2025 free cash flow $98.80B on revenue of $416.20B, against a 26.2% average free cash flow margin."
+                "reasoning": "The 14.84B diluted share count used by the engine matches the most recent quarterly figure and continues a clear multi year trend of share count reduction from buybacks, so it is not a stale input.",
+                "evidence": "Diluted shares fell from 16.86B in fiscal 2021 to 15.00B in fiscal 2025 and to 14.84B in the latest quarter."
               }
             ],
             "visibility": "detail",
@@ -484,15 +494,17 @@
             "value": {
               "key": "wacc",
               "label": "Discount rate",
-              "explanation": "The engine reports terminal value at 71% of enterprise value, so small changes in the discount rate move the estimate more than anything else."
+              "explanation": "With terminal value already reported at 71% of enterprise value, the discount rate has outsized leverage over the result, and a one percentage point move in a rate like this commonly shifts intrinsic value by 15 to 40 percent."
             },
             "visibility": "detail",
             "source": "model"
           },
           "confidenceReasons": {
             "value": [
-              "The growth assumption runs ahead of the recent record.",
-              "Terminal value is a large share of the estimate."
+              "Stage one growth of 7.00% is well above the 3.28% revenue and 1.54% free cash flow growth actually reported over five years.",
+              "Terminal value makes up 71% of enterprise value, so the result leans heavily on assumptions about the far future rather than near term results.",
+              "Stock based compensation equal to 13.1% of free cash flow means part of the cash flow base is a non cash add back rather than distributable cash.",
+              "Balance sheet and buyback trends support the net debt and share count inputs, which adds some stability to the estimate."
             ],
             "visibility": "detail",
             "source": "model"
@@ -512,11 +524,11 @@
         "meta": {
           "slug": "dcf",
           "ticker": "AAPL",
-          "model": "claude-opus-5",
+          "model": "claude-sonnet-5",
           "attempts": 1,
           "cached": false,
           "latencyMs": 0,
-          "generatedAt": "2026-09-13T00:00:00.000Z",
+          "generatedAt": "2026-09-14T15:46:38.070Z",
           "usage": null
         },
         "error": null
@@ -526,45 +538,69 @@
         "status": "ok",
         "data": {
           "headline": {
-            "value": "The iPhone 18 launch and the October 29 earnings report are the nearest events that could change the picture.",
+            "value": "Apple's next dated event is its October 29 earnings report, after the iPhone 18 launch already happened this month.",
             "visibility": "headline",
             "source": "model"
           },
           "topCatalyst": {
             "value": {
-              "title": "iPhone 18 launch cycle",
+              "title": "Apple reports fiscal Q4 2026 earnings",
+              "status": "reported",
+              "kind": "earnings",
               "direction": "two_sided",
-              "horizon": "under_3m"
+              "horizon": "under_3m",
+              "expectedDate": "2026-10-29"
             },
             "visibility": "headline",
             "source": "model",
-            "note": "Selected in code: highest likelihood, then nearest horizon"
+            "note": "Selected in code from upcomingCatalysts: highest likelihood, then soonest expectedDate"
           },
           "plainEnglish": {
-            "value": "Apple has a new phone lineup and an earnings report coming up, which will show whether sales are picking up. A European review of its App Store rules is the main event that could go the other way.",
+            "value": "Apple already unveiled its new iPhone 18 lineup with flat starting prices. Its next confirmed date ahead is the fourth quarter earnings report on October 29, while an EU App Store review and a 2027 antitrust trial remain unresolved without exact upcoming dates that qualify here.",
             "visibility": "summary",
             "source": "model"
           },
           "netTilt": {
             "value": "balanced",
             "visibility": "summary",
-            "source": "model"
+            "source": "computed",
+            "note": "Positive against negative items in upcomingCatalysts; two-sided items count for neither"
           },
           "nextEarningsDate": {
             "value": "2026-10-29",
             "visibility": "summary",
             "source": "api"
           },
-          "catalysts": {
+          "upcomingCatalysts": {
             "value": [
               {
-                "title": "iPhone 18 launch cycle",
+                "title": "Apple reports fiscal Q4 2026 earnings",
+                "status": "reported",
+                "kind": "earnings",
                 "direction": "two_sided",
                 "horizon": "under_3m",
                 "likelihood": "high",
                 "valueLever": "revenue_growth",
-                "whyItMatters": "The engine assumes 7.0% growth against about 3.3% recently, so a strong upgrade cycle is roughly what the valuation needs. Flat base prices and a higher Pro Max price make the mix the thing to watch.",
-                "dateHint": null,
+                "whyItMatters": "Quarterly results will show whether iPhone 18 demand and Services growth support the growth rate already priced into the stock.",
+                "expectedDate": "2026-10-29",
+                "evidence": []
+              }
+            ],
+            "visibility": "detail",
+            "source": "model",
+            "note": "Rumored and reported items on a day the context states, today or later, soonest first"
+          },
+          "historicalAnalogs": {
+            "value": [
+              {
+                "title": "Apple unveils iPhone 18 lineup with flat base prices",
+                "status": "announced",
+                "kind": "launch_event",
+                "direction": "two_sided",
+                "valueLever": "revenue_growth",
+                "whyItMatters": "New iPhone models and pricing decisions directly affect future device revenue and margins, though holding base prices flat while raising the Pro Max price could pressure or support margins depending on mix.",
+                "eventDate": "2026-09-11",
+                "announcedDate": "2026-09-11",
                 "evidence": [
                   {
                     "id": "n-0912-a",
@@ -576,23 +612,14 @@
                 ]
               },
               {
-                "title": "Fiscal fourth quarter earnings",
-                "direction": "two_sided",
-                "horizon": "under_3m",
-                "likelihood": "high",
-                "valueLever": "revenue_growth",
-                "whyItMatters": "The first read on launch demand and on whether Services growth is holding up.",
-                "dateHint": "2026-10-29",
-                "evidence": []
-              },
-              {
-                "title": "EU review of App Store fee changes",
+                "title": "EU opens formal review of Apple App Store fee changes",
+                "status": "announced",
+                "kind": "regulatory",
                 "direction": "negative",
-                "horizon": "3_to_12m",
-                "likelihood": "medium",
-                "valueLever": "margins",
-                "whyItMatters": "Services earn higher margins than hardware, so forced fee cuts would reduce profit, and the process can end in fines of up to 10% of global turnover.",
-                "dateHint": null,
+                "valueLever": "risk_discount",
+                "whyItMatters": "A Digital Markets Act investigation could lead to fines of up to 10% of global turnover, adding regulatory risk that can weigh on how the market prices the stock.",
+                "eventDate": "2026-09-10",
+                "announcedDate": "2026-09-10",
                 "evidence": [
                   {
                     "id": "n-0910-b",
@@ -604,13 +631,14 @@
                 ]
               },
               {
-                "title": "DOJ antitrust trial",
+                "title": "US judge sets trial date in DOJ antitrust case against Apple",
+                "status": "announced",
+                "kind": "legal",
                 "direction": "negative",
-                "horizon": "over_12m",
-                "likelihood": "high",
                 "valueLever": "risk_discount",
-                "whyItMatters": "The trial is set for March 2027, so the risk stays open for more than a year before any ruling.",
-                "dateHint": null,
+                "whyItMatters": "A scheduled 2027 antitrust trial keeps a legal risk on the horizon that could affect Apple's business practices and future earnings.",
+                "eventDate": "2026-08-28",
+                "announcedDate": "2026-08-28",
                 "evidence": [
                   {
                     "id": "n-0828-f",
@@ -622,37 +650,38 @@
                 ]
               },
               {
-                "title": "Gemini partnership extension for Siri",
+                "title": "Apple reports third quarter fiscal 2026 results",
+                "status": "announced",
+                "kind": "earnings",
                 "direction": "positive",
-                "horizon": "3_to_12m",
-                "likelihood": "medium",
                 "valueLever": "revenue_growth",
-                "whyItMatters": "A signed deal would firm up Apple's AI features, but the talks are unconfirmed and no terms were disclosed.",
-                "dateHint": null,
+                "whyItMatters": "Revenue grew 4 percent year over year with record Services revenue, showing continued growth in a high margin business segment.",
+                "eventDate": "2026-07-31",
+                "announcedDate": "2026-07-31",
                 "evidence": [
                   {
-                    "id": "n-0905-d",
-                    "title": "Apple in talks to expand Gemini partnership for Siri",
-                    "source": "The Information",
-                    "url": "https://example.com/n-0905-d",
-                    "publishedAt": "2026-09-05T11:20:00Z"
+                    "id": "n-0731-h",
+                    "title": "Apple reports third quarter results",
+                    "source": "Apple Newsroom",
+                    "url": "https://example.com/n-0731-h",
+                    "publishedAt": "2026-07-31T21:30:00Z"
                   }
                 ]
               }
             ],
             "visibility": "detail",
             "source": "model",
-            "note": "evidence rows are resolved from the supplied news by id"
+            "note": "Announced items, and shipped items announced within 90 days; eventDate is announcedDate. Downgraded to reported, and left out because a reported item needs a day still ahead: TSMC begins volume production of Apple's A20 chip on 2nm process (unofficial sourcing in Nikkei)"
           }
         },
         "meta": {
           "slug": "catalyst",
           "ticker": "AAPL",
-          "model": "claude-opus-5",
+          "model": "claude-sonnet-5",
           "attempts": 1,
           "cached": false,
           "latencyMs": 0,
-          "generatedAt": "2026-09-13T00:00:00.000Z",
+          "generatedAt": "2026-09-14T17:46:40.185Z",
           "usage": null
         },
         "error": null
@@ -662,7 +691,7 @@
         "status": "ok",
         "data": {
           "headline": {
-            "value": "The EU opened a formal review of Apple's App Store fees, the most consequential item in a busy launch month.",
+            "value": "Apple holds iPhone 18 base prices flat while facing EU App Store review and US antitrust trial.",
             "visibility": "headline",
             "source": "model"
           },
@@ -672,7 +701,7 @@
             "source": "model"
           },
           "plainEnglish": {
-            "value": "Apple launched new iPhones without raising most prices, and European regulators started a review that could force changes to its app store fees. Most other headlines were opinion or market chatter.",
+            "value": "Apple kept the starting price of its new iPhone 18 the same as last year, though the most expensive model costs $100 more. The company faces regulatory scrutiny in Europe over App Store fees and a US antitrust trial starting in 2027.",
             "visibility": "summary",
             "source": "model"
           },
@@ -693,7 +722,7 @@
                 "materiality": "high",
                 "direction": "negative",
                 "affects": "legal_regulatory",
-                "takeaway": "A formal review under the Digital Markets Act can end in fines of up to 10% of global turnover and could force lower App Store fees, which would hit high-margin Services profit."
+                "takeaway": "The EU formally reviewed Apple's App Store fee changes under the Digital Markets Act, risking fines up to 10% of global revenue if found non-compliant. This is a material legal risk to the Services business."
               },
               {
                 "id": "n-0912-a",
@@ -704,7 +733,7 @@
                 "materiality": "medium",
                 "direction": "neutral",
                 "affects": "pricing",
-                "takeaway": "Holding base prices flat protects demand, while the $100 Pro Max increase lifts revenue per phone at the top of the range."
+                "takeaway": "Apple held iPhone 18 base prices flat year-over-year but raised the Pro Max by $100, signaling cautious pricing power on standard models while pushing premium variants higher."
               },
               {
                 "id": "n-0828-f",
@@ -715,18 +744,7 @@
                 "materiality": "medium",
                 "direction": "negative",
                 "affects": "legal_regulatory",
-                "takeaway": "The Justice Department case now has a March 2027 trial date, so the legal risk stays open well into next year."
-              },
-              {
-                "id": "n-0731-h",
-                "title": "Apple reports third quarter results",
-                "source": "Apple Newsroom",
-                "url": "https://example.com/n-0731-h",
-                "publishedAt": "2026-07-31T21:30:00Z",
-                "materiality": "medium",
-                "direction": "positive",
-                "affects": "demand",
-                "takeaway": "Quarterly revenue rose 4 percent with Services at a record $28.9 billion, so the higher-margin business is still growing."
+                "takeaway": "The DOJ antitrust case against Apple is scheduled for trial in March 2027, creating uncertainty around potential restrictions on App Store practices or pricing."
               },
               {
                 "id": "n-0905-d",
@@ -734,10 +752,10 @@
                 "source": "The Information",
                 "url": "https://example.com/n-0905-d",
                 "publishedAt": "2026-09-05T11:20:00Z",
-                "materiality": "low",
+                "materiality": "medium",
                 "direction": "positive",
                 "affects": "competition",
-                "takeaway": "Talks to extend the Gemini deal for Siri are unconfirmed, with no terms and no signed agreement."
+                "takeaway": "Apple is negotiating a multi-year extension of its Gemini partnership for Siri, unconfirmed, suggesting continued reliance on Google's AI to power its voice assistant rather than building in-house capability."
               },
               {
                 "id": "n-0822-g",
@@ -748,7 +766,7 @@
                 "materiality": "low",
                 "direction": "positive",
                 "affects": "costs",
-                "takeaway": "Volume production of the A20 chip on schedule supports the timing of the new lineup."
+                "takeaway": "TSMC began volume production of Apple's A20 chip on 2-nanometer technology, which typically improves performance and efficiency but is a normal product cycle advancement."
               }
             ],
             "visibility": "detail",
@@ -758,8 +776,8 @@
           "priceMove": {
             "value": {
               "returnPct1m": 4.2,
-              "explained": "no_notable_move",
-              "note": null
+              "explained": "partly",
+              "note": "The one-month 4.2% gain is modest relative to the stock's volatility and broader tech sector strength, and mixed news flow does not clearly explain it."
             },
             "visibility": "detail",
             "source": "model"
@@ -777,11 +795,11 @@
         "meta": {
           "slug": "news",
           "ticker": "AAPL",
-          "model": "claude-opus-5",
+          "model": "claude-haiku-4-5-20251001",
           "attempts": 1,
           "cached": false,
           "latencyMs": 0,
-          "generatedAt": "2026-09-13T00:00:00.000Z",
+          "generatedAt": "2026-09-14T15:46:38.070Z",
           "usage": null
         },
         "error": null
@@ -791,7 +809,7 @@
         "status": "ok",
         "data": {
           "headline": {
-            "value": "The numbers look clean, with one small point to watch on how much profit turned into cash last year.",
+            "value": "Apple's financials look clean overall, with strong cash generation and shrinking share count.",
             "visibility": "headline",
             "source": "model"
           },
@@ -801,14 +819,14 @@
             "source": "model"
           },
           "plainEnglish": {
-            "value": "Apple makes far more cash than it needs and has been shrinking its share count. The one thing worth watching is that cash coming in last year was a little lower than reported profit.",
+            "value": "Apple turns its profits into real cash and is buying back more shares than it issues, which are good signs. Debt is high relative to equity but easily covered by cash flow, so it is not a major worry.",
             "visibility": "summary",
             "source": "model"
           },
           "topFlag": {
             "value": {
-              "code": "cash_conversion",
-              "title": "Free cash flow below net income in FY2025",
+              "code": "leverage",
+              "title": "High debt relative to equity",
               "severity": "low"
             },
             "visibility": "summary",
@@ -818,7 +836,7 @@
             "value": {
               "high": 0,
               "medium": 0,
-              "low": 2
+              "low": 1
             },
             "visibility": "summary",
             "source": "computed"
@@ -826,18 +844,11 @@
           "flags": {
             "value": [
               {
-                "code": "cash_conversion",
-                "title": "Free cash flow below net income in FY2025",
-                "severity": "low",
-                "evidence": "Free cash flow was 0.88x net income in the latest year, $98.8B against $112.0B, after running above net income in each of the three years before.",
-                "whatWouldClearIt": "Free cash flow moving back to or above net income in the next annual report."
-              },
-              {
                 "code": "leverage",
-                "title": "Thin equity next to debt, from buybacks",
+                "title": "High debt relative to equity",
                 "severity": "low",
-                "evidence": "Shareholder equity of $73.7B is small next to $98.7B of total debt, largely because buybacks cut the share count 8.1% over three years.",
-                "whatWouldClearIt": "Nothing is needed while cash generation stays strong; it would matter only if operating cash flow fell well below the debt load."
+                "evidence": "Debt to equity is 1.38x and net debt is $62.80B, but net debt is only 0.56x operating cash flow.",
+                "whatWouldClearIt": "Continued strong operating cash flow relative to debt would keep this from being a concern."
               }
             ],
             "visibility": "detail",
@@ -865,11 +876,11 @@
         "meta": {
           "slug": "redflag",
           "ticker": "AAPL",
-          "model": "claude-opus-5",
+          "model": "claude-sonnet-5",
           "attempts": 1,
           "cached": false,
           "latencyMs": 0,
-          "generatedAt": "2026-09-13T00:00:00.000Z",
+          "generatedAt": "2026-09-14T15:46:38.070Z",
           "usage": null
         },
         "error": null
@@ -879,19 +890,19 @@
   "modelOutput": {
     "band": "Slightly Overvalued",
     "category": "stalwart",
-    "headline": "Slightly Overvalued: the price already assumes growth about three times what Apple has delivered recently.",
-    "thesis": "Apple is a stalwart with clean books, a record Services business and more cash than it needs. At $236.40 the shares sit above the engine's $198.50 estimate, and the price implies 9.60% growth a year against revenue growth of about 3.3% a year since FY2021. The dcf reviewer judged even the engine's 7.00% growth assumption aggressive. A PEG of 2.41 is expensive by Lynch's yardstick whatever the story. The iPhone 18 cycle could close part of the gap, while the EU App Store review and the 2027 antitrust trial weigh on the other side.",
-    "plainEnglish": "Apple is a strong, steady business, but the share price already expects faster growth than it has shown lately. A lot of good news is already in the price.",
-    "bandRationale": "Matches the engine band. The reviewers gave no reason to move it: the growth assumptions already look generous, the red flags are minor, and the catalysts are balanced.",
+    "headline": "Apple trades above a fair estimate built on growth faster than its own recent history.",
+    "thesis": "The engine puts fair value near $198.50, well below the $236.40 price, mainly because it assumes 7% near term growth against revenue growth of about 6.1% actually posted. Terminal value carries 71% of the total, so a modest change in the discount rate swings the answer a lot. Apple's business itself is excellent, with 58.2% return on invested capital and low net debt relative to cash flow, but that quality is already reflected in a trailing PE of 31.2 and a PEG of 2.41. Regulatory overhangs from the EU App Store review and the 2027 DOJ trial add risk the growth rate does not account for.",
+    "plainEnglish": "The price looks a bit ahead of what the business is worth today, based on a careful estimate of future cash. This is a well run company, but you are being asked to pay up for growth that has not shown up in the numbers yet.",
+    "bandRationale": "Stays at the engine's Slightly Overvalued band because the dcf reviewer flags the core growth assumption as aggressive relative to history, which supports rather than softens the overvaluation call, while nothing in catalyst or news is strong enough to shift it further.",
     "bullPoints": [
-      "Services revenue reached a record $28.9 billion last quarter.",
-      "Buybacks cut the share count 8.1% over three years.",
-      "Clean financials with only minor flags."
+      "Return on invested capital of 58.2% and free cash flow margin of 23.7% show a genuinely strong business",
+      "Share count down 8.1% over three years from steady buybacks",
+      "Net debt is only 0.45 times EBITDA, a strong balance sheet position"
     ],
     "bearPoints": [
-      "The price implies 9.60% growth against about 3.3% delivered.",
-      "A PEG of 2.41 is expensive for a stalwart.",
-      "The EU fee review and the 2027 antitrust trial are open risks."
+      "Stage one growth assumption of 7% is more than double actual revenue growth of 6.1%",
+      "PEG ratio of 2.41 is well above the 1.5 level Lynch considered expensive",
+      "EU App Store review and a scheduled 2027 antitrust trial add legal risk not reflected in the growth rate"
     ],
     "tapeVsFundamentals": "agree",
     "confidence": "medium"
@@ -911,12 +922,12 @@
         "source": "computed"
       },
       "headline": {
-        "value": "Slightly Overvalued: the price already assumes growth about three times what Apple has delivered recently.",
+        "value": "Apple trades above a fair estimate built on growth faster than its own recent history.",
         "visibility": "headline",
         "source": "model"
       },
       "plainEnglish": {
-        "value": "Apple is a strong, steady business, but the share price already expects faster growth than it has shown lately. A lot of good news is already in the price.",
+        "value": "The price looks a bit ahead of what the business is worth today, based on a careful estimate of future cash. This is a well run company, but you are being asked to pay up for growth that has not shown up in the numbers yet.",
         "visibility": "summary",
         "source": "model"
       },
@@ -932,18 +943,18 @@
       },
       "bullPoints": {
         "value": [
-          "Services revenue reached a record $28.9 billion last quarter.",
-          "Buybacks cut the share count 8.1% over three years.",
-          "Clean financials with only minor flags."
+          "Return on invested capital of 58.2% and free cash flow margin of 23.7% show a genuinely strong business",
+          "Share count down 8.1% over three years from steady buybacks",
+          "Net debt is only 0.45 times EBITDA, a strong balance sheet position"
         ],
         "visibility": "summary",
         "source": "model"
       },
       "bearPoints": {
         "value": [
-          "The price implies 9.60% growth against about 3.3% delivered.",
-          "A PEG of 2.41 is expensive for a stalwart.",
-          "The EU fee review and the 2027 antitrust trial are open risks."
+          "Stage one growth assumption of 7% is more than double actual revenue growth of 6.1%",
+          "PEG ratio of 2.41 is well above the 1.5 level Lynch considered expensive",
+          "EU App Store review and a scheduled 2027 antitrust trial add legal risk not reflected in the growth rate"
         ],
         "visibility": "summary",
         "source": "model"
@@ -954,12 +965,12 @@
         "source": "computed"
       },
       "thesis": {
-        "value": "Apple is a stalwart with clean books, a record Services business and more cash than it needs. At $236.40 the shares sit above the engine's $198.50 estimate, and the price implies 9.60% growth a year against revenue growth of about 3.3% a year since FY2021. The dcf reviewer judged even the engine's 7.00% growth assumption aggressive. A PEG of 2.41 is expensive by Lynch's yardstick whatever the story. The iPhone 18 cycle could close part of the gap, while the EU App Store review and the 2027 antitrust trial weigh on the other side.",
+        "value": "The engine puts fair value near $198.50, well below the $236.40 price, mainly because it assumes 7% near term growth against revenue growth of about 6.1% actually posted. Terminal value carries 71% of the total, so a modest change in the discount rate swings the answer a lot. Apple's business itself is excellent, with 58.2% return on invested capital and low net debt relative to cash flow, but that quality is already reflected in a trailing PE of 31.2 and a PEG of 2.41. Regulatory overhangs from the EU App Store review and the 2027 DOJ trial add risk the growth rate does not account for.",
         "visibility": "detail",
         "source": "model"
       },
       "bandRationale": {
-        "value": "Matches the engine band. The reviewers gave no reason to move it: the growth assumptions already look generous, the red flags are minor, and the catalysts are balanced.",
+        "value": "Stays at the engine's Slightly Overvalued band because the dcf reviewer flags the core growth assumption as aggressive relative to history, which supports rather than softens the overvaluation call, while nothing in catalyst or news is strong enough to shift it further.",
         "visibility": "detail",
         "source": "model"
       },

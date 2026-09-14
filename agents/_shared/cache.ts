@@ -40,7 +40,9 @@ export const TTL_SECONDS: Record<AgentSlug, number> = {
  * Bump when a prompt or schema change makes old entries wrong. Entries under
  * the old version are simply never read again and age out on their own TTL.
  */
-export const CACHE_VERSION = 'v1';
+// v2: catalyst output split into upcomingCatalysts / historicalAnalogs
+// v3: catalyst items gain kind; upcoming items are always dated
+export const CACHE_VERSION = 'v3';
 
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Store                                                                      */

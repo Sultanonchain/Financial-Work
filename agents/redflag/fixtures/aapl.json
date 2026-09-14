@@ -1,8 +1,9 @@
 {
   "name": "redflag-aapl-2026-09-12",
   "description": "Illustrative AAPL-shaped context for tests. Statement figures are approximate; the news items and the model reply are synthetic and were written by hand because no API key was available when this fixture was created. Re-record against the live API with `npm run fixtures:record`.",
-  "recordedAt": "2026-09-13T00:00:00.000Z",
-  "recordedWith": "hand-authored reply (not a live call)",
+  "source": "recorded",
+  "recordedAt": "2026-09-14T15:46:38.070Z",
+  "recordedModel": "claude-sonnet-5",
   "input": {
     "ticker": "AAPL",
     "tier": "premium",
@@ -391,23 +392,16 @@
     }
   },
   "modelOutput": {
-    "headline": "The numbers look clean, with one small point to watch on how much profit turned into cash last year.",
-    "plainEnglish": "Apple makes far more cash than it needs and has been shrinking its share count. The one thing worth watching is that cash coming in last year was a little lower than reported profit.",
+    "headline": "Apple's financials look clean overall, with strong cash generation and shrinking share count.",
+    "plainEnglish": "Apple turns its profits into real cash and is buying back more shares than it issues, which are good signs. Debt is high relative to equity but easily covered by cash flow, so it is not a major worry.",
     "overall": "clean",
     "flags": [
       {
-        "code": "cash_conversion",
-        "title": "Free cash flow below net income in FY2025",
-        "severity": "low",
-        "evidence": "Free cash flow was 0.88x net income in the latest year, $98.8B against $112.0B, after running above net income in each of the three years before.",
-        "whatWouldClearIt": "Free cash flow moving back to or above net income in the next annual report."
-      },
-      {
         "code": "leverage",
-        "title": "Thin equity next to debt, from buybacks",
+        "title": "High debt relative to equity",
         "severity": "low",
-        "evidence": "Shareholder equity of $73.7B is small next to $98.7B of total debt, largely because buybacks cut the share count 8.1% over three years.",
-        "whatWouldClearIt": "Nothing is needed while cash generation stays strong; it would matter only if operating cash flow fell well below the debt load."
+        "evidence": "Debt to equity is 1.38x and net debt is $62.80B, but net debt is only 0.56x operating cash flow.",
+        "whatWouldClearIt": "Continued strong operating cash flow relative to debt would keep this from being a concern."
       }
     ]
   },
@@ -415,7 +409,7 @@
     "status": "ok",
     "data": {
       "headline": {
-        "value": "The numbers look clean, with one small point to watch on how much profit turned into cash last year.",
+        "value": "Apple's financials look clean overall, with strong cash generation and shrinking share count.",
         "visibility": "headline",
         "source": "model"
       },
@@ -425,14 +419,14 @@
         "source": "model"
       },
       "plainEnglish": {
-        "value": "Apple makes far more cash than it needs and has been shrinking its share count. The one thing worth watching is that cash coming in last year was a little lower than reported profit.",
+        "value": "Apple turns its profits into real cash and is buying back more shares than it issues, which are good signs. Debt is high relative to equity but easily covered by cash flow, so it is not a major worry.",
         "visibility": "summary",
         "source": "model"
       },
       "topFlag": {
         "value": {
-          "code": "cash_conversion",
-          "title": "Free cash flow below net income in FY2025",
+          "code": "leverage",
+          "title": "High debt relative to equity",
           "severity": "low"
         },
         "visibility": "summary",
@@ -442,7 +436,7 @@
         "value": {
           "high": 0,
           "medium": 0,
-          "low": 2
+          "low": 1
         },
         "visibility": "summary",
         "source": "computed"
@@ -450,18 +444,11 @@
       "flags": {
         "value": [
           {
-            "code": "cash_conversion",
-            "title": "Free cash flow below net income in FY2025",
-            "severity": "low",
-            "evidence": "Free cash flow was 0.88x net income in the latest year, $98.8B against $112.0B, after running above net income in each of the three years before.",
-            "whatWouldClearIt": "Free cash flow moving back to or above net income in the next annual report."
-          },
-          {
             "code": "leverage",
-            "title": "Thin equity next to debt, from buybacks",
+            "title": "High debt relative to equity",
             "severity": "low",
-            "evidence": "Shareholder equity of $73.7B is small next to $98.7B of total debt, largely because buybacks cut the share count 8.1% over three years.",
-            "whatWouldClearIt": "Nothing is needed while cash generation stays strong; it would matter only if operating cash flow fell well below the debt load."
+            "evidence": "Debt to equity is 1.38x and net debt is $62.80B, but net debt is only 0.56x operating cash flow.",
+            "whatWouldClearIt": "Continued strong operating cash flow relative to debt would keep this from being a concern."
           }
         ],
         "visibility": "detail",

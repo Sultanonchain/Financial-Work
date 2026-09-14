@@ -315,6 +315,8 @@ export interface AgentModule<T> {
   ttlSeconds: number;
   /** The agent's own model ID, exported from its run.ts. VALUS_AGENT_MODEL overrides it. */
   model: string;
+  /** Hard max_tokens cap (thinking plus reply), exported from its run.ts. */
+  maxTokens: number;
   run(ctx: AgentContext): Promise<AgentResult<T>>;
 }
 

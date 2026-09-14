@@ -8,10 +8,11 @@
     "node": ">=22.18"
   },
   "scripts": {
-    "test": "node --test \"tests/*.test.ts\"",
+    "test": "node --env-file-if-exists=.env --test \"tests/*.test.ts\"",
     "typecheck": "tsc --noEmit",
+    "agents:status": "node --env-file-if-exists=.env scripts/agents-status.ts",
     "fixtures:replay": "node tests/record-fixtures.ts",
-    "fixtures:record": "node tests/record-fixtures.ts --live",
+    "fixtures:record": "node --env-file-if-exists=.env tests/record-fixtures.ts --live",
     "icloud:nosync": "test -L node_modules || (rm -rf node_modules.nosync && mv node_modules node_modules.nosync && ln -s node_modules.nosync node_modules)"
   },
   "dependencies": {

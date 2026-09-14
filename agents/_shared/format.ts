@@ -76,6 +76,32 @@ export function isoDate(value: unknown): string | null {
 }
 
 /* ────────────────────────────────────────────────────────────────────────── */
+/* Clock                                                                      */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+let clock: () => number = Date.now;
+
+/**
+ * The one clock that date-dependent validation reads ("is this catalyst in the
+ * past?"). Tests and fixture replays pin it; production uses the real time.
+ */
+export function setClock(next: (() => number) | null): void {
+  clock = next ?? Date.now;
+}
+
+/** Today's date in UTC, YYYY-MM-DD, from the pinned or real clock. */
+export function utcToday(): string {
+  return new Date(clock()).toISOString().slice(0, 10);
+}
+
+/** Shift a YYYY-MM-DD date by whole days, in UTC. */
+export function addDays(isoDay: string, days: number): string {
+  const date = new Date(`${isoDay}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+/* ────────────────────────────────────────────────────────────────────────── */
 /* Formatting                                                                 */
 /* ────────────────────────────────────────────────────────────────────────── */
 
@@ -151,7 +177,7 @@ export function renderProfile(profile: CompanyProfile): string {
   return lines.join('\n');
 }
 
-type NumericStatementKey = Exclude<keyof StatementPeriod, 'periodEnd'>;
+export type NumericStatementKey = Exclude<keyof StatementPeriod, 'periodEnd'>;
 
 const STATEMENT_COLUMNS: ReadonlyArray<[NumericStatementKey, string, 'money' | 'shares']> = [
   ['revenue', 'revenue', 'money'],
@@ -170,16 +196,19 @@ const STATEMENT_COLUMNS: ReadonlyArray<[NumericStatementKey, string, 'money' | '
 
 export function renderStatements(
   statements: FinancialStatements,
-  options: { annual?: number; quarterly?: number } = {},
+  options: { annual?: number; quarterly?: number; columns?: readonly NumericStatementKey[] } = {},
 ): string {
   const currency = statements.currency;
+  const columns = options.columns
+    ? STATEMENT_COLUMNS.filter(([key]) => options.columns?.includes(key))
+    : STATEMENT_COLUMNS;
   const table = (label: string, periods: StatementPeriod[]): string => {
     if (!periods.length) return `${label}: not available`;
-    const header = ['period', ...STATEMENT_COLUMNS.map(([, name]) => name)].join(' | ');
+    const header = ['period', ...columns.map(([, name]) => name)].join(' | ');
     const rows = periods.map((period) =>
       [
         period.periodEnd,
-        ...STATEMENT_COLUMNS.map(([key, , kind]) =>
+        ...columns.map(([key, , kind]) =>
           kind === 'shares' ? quantity(period[key]) : money(period[key], currency),
         ),
       ].join(' | '),

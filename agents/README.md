@@ -61,7 +61,11 @@ vendor values.
   `MODEL_FEATURES`. Effort is sent only where accepted (Haiku 4.5 rejects it),
   so the news agent's `effort` only applies when it is overridden onto Sonnet.
   Thinking stays at each model's default: adaptive on Sonnet 5, off on Haiku.
-  Effort is `low` for catalyst, news and redflag, `medium` for dcf and verdict.
+  Effort is `low` for dcf, catalyst, news and redflag, and `medium` for verdict.
+- Each agent sets a hard `max_tokens` cap in its `run.ts` (`export const maxTokens`),
+  covering thinking and the reply: dcf 2,000, catalyst 2,500, news 1,500,
+  redflag 1,500, verdict 2,500. A reply cut off at the cap is repaired under the
+  same cap, never a bigger one.
 - The token log names the model that served each attempt and why it was
   chosen, for cost per agent:
   `[valus.agents] news AAPL model=claude-haiku-4-5-20251001 model_source=agent attempt=1 ok ...`.
@@ -96,9 +100,48 @@ vendor values.
   validation.
 - No em or en dashes in rendered prose (`tidy`).
 
+## Catalyst lifecycle
+
+Every catalyst has a `status`: `rumored`, `reported`, `announced` or `shipped`.
+
+- `upcomingCatalysts` holds only rumored and reported items, each with an
+  `expectedDate` that is a day the context states, on or after today. The
+  calendar's date can only date the earnings report; any other item needs a
+  cited news item that gives the day. An item that fails is dropped on its own,
+  without a repair turn, and named in the field's `note`. Litigation and
+  regulatory matters without a date never appear. `netTilt` is computed from
+  the items that remain.
+- Every item has a `kind`. A future ship date, price or availability window
+  (`ship_date`, `price`, `availability`) needs a company statement among its
+  evidence: a news item from the company itself (its newsroom or investor
+  relations), a press-release wire, or a filing.
+- `announced` and `shipped` are official events that have already happened.
+  Their evidence can be a company statement or a major outlet (Reuters,
+  Bloomberg, WSJ, FT, AP, CNBC, NYT, Washington Post, Nikkei, BBC, The
+  Economist, Barron's, Dow Jones; `MAJOR_OUTLETS` in `catalyst/run.ts`). Both
+  require `announcedDate`.
+- A cited item whose title or summary hedges its sourcing ("people familiar",
+  "sources said", "according to people", "is said to", "reportedly") cannot
+  support `announced` or `shipped`, whichever outlet published it. An item
+  with no other support is downgraded to `reported`. A reported event that has
+  already happened has no day still ahead, so it is left out and named in
+  `historicalAnalogs.note`. This is a code check (`UNOFFICIAL_SOURCING` in
+  `catalyst/run.ts`), not a prompt instruction, and it never costs a repair turn.
+- Legal and regulatory events that have already happened stay in
+  `historicalAnalogs`.
+- Announced items move to `historicalAnalogs`, with `eventDate` set to
+  `announcedDate`. Shipped items stay there for 90 days after `announcedDate`,
+  then drop off.
+- Dates must come from the context. `expectedDate` has to be a day stated in
+  the calendar fields or in a cited news item ("March 2027" is not a day), and
+  `announcedDate` has to match the date of the cited evidence.
+- Every date is checked against today (UTC), and the final object is checked
+  again before it is returned, so a past-dated upcoming item never renders.
+  Tests and fixture replays pin the clock (`setClock` in `_shared/format.ts`).
+
 ## Cache
 
-Key: `valus:agent:v1:<slug>:<TICKER>:<YYYY-MM-DD UTC>`.
+Key: `valus:agent:v3:<slug>:<TICKER>:<YYYY-MM-DD UTC>`.
 
 - TTLs: dcf, catalyst and redflag 24h. News 4h. Verdict 4h, because it reads news.
 - A TTL is also capped at the next UTC midnight.
@@ -119,27 +162,51 @@ setCacheStore({
 });
 ```
 
-## Tests and fixtures
+## Status, tests and fixtures
 
 ```
-npm test              36 tests, offline (model replies come through the transport seam)
+npm run agents:status   every registered agent: resolved model, required files, fixture provenance
+npm test                offline tests (model replies come through the transport seam)
 npm run typecheck
 ```
 
-Each `fixtures/aapl.json` holds the agent's input, the model reply, and the
-expected result. Replaying the reply through `run()` must reproduce the
-expected result.
+`agents:status` also reports whether `ANTHROPIC_API_KEY` is set (never its
+value) and exits 1 when any agent is not ready.
 
-**The current model replies are hand-authored, not live recordings.** No API
-key was available when they were created, and the AAPL figures are
-approximate. To replace them with real recordings (five requests):
+`agents:status`, `fixtures:record` and `npm test` load `agents/.env` when it
+exists, using Node's built-in `--env-file-if-exists` (no dotenv). Without the
+file they run normally, which is what CI gets. A variable already set in the
+shell or CI takes precedence over the file. The key is never used by the
+tests: a test that calls the model without installing a transport fails.
+
+Each `fixtures/*.json` holds the agent's input, the model reply, the expected
+result, and its provenance. Replaying the reply through `run()` must reproduce
+the expected result.
+
+| Field | Recorded fixture | Hand-written fixture |
+|---|---|---|
+| `source` | `"recorded"` | `"synthetic"` |
+| `recordedAt` | ISO timestamp of the live call | `null` |
+| `recordedModel` | model that served the reply | `null` |
+
+Only `npm run fixtures:record` writes `source: "recorded"`, and only for an
+agent whose live call succeeded. A test rejects any fixture whose provenance
+fields disagree, and `agents:status` counts a fixture as recorded only when
+they agree.
+
+**The current fixtures are synthetic.** No API key was available when they were
+created, and the AAPL figures are approximate. To replace them with real
+recordings (five requests):
 
 ```
 ANTHROPIC_API_KEY=... npm run fixtures:record
 ```
 
 After an intentional change to how an agent wraps its output, run
-`npm run fixtures:replay` and review the diff.
+`npm run fixtures:replay` and review the diff. Both commands take agent slugs
+(`npm run fixtures:record -- catalyst verdict`), and neither ever writes a
+fixture for an agent that failed. Replay leaves a recorded fixture's input
+alone, since that is what the model was sent.
 
 ## iCloud note
 

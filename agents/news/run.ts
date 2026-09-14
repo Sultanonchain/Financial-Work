@@ -37,6 +37,9 @@ const NOTABLE_MOVE_PCT = 5;
  */
 export const model: string = MODELS.haiku;
 
+/** Hard max_tokens cap: Haiku does not think, so this is reply only. */
+export const maxTokens = 1_500;
+
 export async function run(ctx: AgentContext): Promise<AgentResult<NewsOutput>> {
   const startedAt = Date.now();
   const base = { slug: 'news' as const, ticker: ctx.ticker, startedAt };
@@ -69,6 +72,7 @@ export async function run(ctx: AgentContext): Promise<AgentResult<NewsOutput>> {
     schema,
     effort: 'low',
     model,
+    maxTokens,
     signal: ctx.signal,
   });
 

@@ -25,5 +25,5 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["_shared", "dcf", "catalyst", "news", "redflag", "verdict", "tests"]
+  "include": ["_shared", "dcf", "catalyst", "news", "redflag", "verdict", "tests", "scripts"]
 }

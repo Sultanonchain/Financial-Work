@@ -1,8 +1,9 @@
 {
   "name": "news-aapl-2026-09-12",
   "description": "Illustrative AAPL-shaped context for tests. Statement figures are approximate; the news items and the model reply are synthetic and were written by hand because no API key was available when this fixture was created. Re-record against the live API with `npm run fixtures:record`.",
-  "recordedAt": "2026-09-13T00:00:00.000Z",
-  "recordedWith": "hand-authored reply (not a live call)",
+  "source": "recorded",
+  "recordedAt": "2026-09-14T15:46:38.070Z",
+  "recordedModel": "claude-haiku-4-5-20251001",
   "input": {
     "ticker": "AAPL",
     "tier": "premium",
@@ -391,8 +392,8 @@
     }
   },
   "modelOutput": {
-    "headline": "The EU opened a formal review of Apple's App Store fees, the most consequential item in a busy launch month.",
-    "plainEnglish": "Apple launched new iPhones without raising most prices, and European regulators started a review that could force changes to its app store fees. Most other headlines were opinion or market chatter.",
+    "headline": "Apple holds iPhone 18 base prices flat while facing EU App Store review and US antitrust trial.",
+    "plainEnglish": "Apple kept the starting price of its new iPhone 18 the same as last year, though the most expensive model costs $100 more. The company faces regulatory scrutiny in Europe over App Store fees and a US antitrust trial starting in 2027.",
     "tone": "mixed",
     "items": [
       {
@@ -400,52 +401,45 @@
         "materiality": "high",
         "direction": "negative",
         "affects": "legal_regulatory",
-        "takeaway": "A formal review under the Digital Markets Act can end in fines of up to 10% of global turnover and could force lower App Store fees, which would hit high-margin Services profit."
+        "takeaway": "The EU formally reviewed Apple's App Store fee changes under the Digital Markets Act, risking fines up to 10% of global revenue if found non-compliant. This is a material legal risk to the Services business."
       },
       {
         "newsId": "n-0912-a",
         "materiality": "medium",
         "direction": "neutral",
         "affects": "pricing",
-        "takeaway": "Holding base prices flat protects demand, while the $100 Pro Max increase lifts revenue per phone at the top of the range."
+        "takeaway": "Apple held iPhone 18 base prices flat year-over-year but raised the Pro Max by $100, signaling cautious pricing power on standard models while pushing premium variants higher."
       },
       {
         "newsId": "n-0828-f",
         "materiality": "medium",
         "direction": "negative",
         "affects": "legal_regulatory",
-        "takeaway": "The Justice Department case now has a March 2027 trial date, so the legal risk stays open well into next year."
-      },
-      {
-        "newsId": "n-0731-h",
-        "materiality": "medium",
-        "direction": "positive",
-        "affects": "demand",
-        "takeaway": "Quarterly revenue rose 4 percent with Services at a record $28.9 billion, so the higher-margin business is still growing."
+        "takeaway": "The DOJ antitrust case against Apple is scheduled for trial in March 2027, creating uncertainty around potential restrictions on App Store practices or pricing."
       },
       {
         "newsId": "n-0905-d",
-        "materiality": "low",
+        "materiality": "medium",
         "direction": "positive",
         "affects": "competition",
-        "takeaway": "Talks to extend the Gemini deal for Siri are unconfirmed, with no terms and no signed agreement."
+        "takeaway": "Apple is negotiating a multi-year extension of its Gemini partnership for Siri, unconfirmed, suggesting continued reliance on Google's AI to power its voice assistant rather than building in-house capability."
       },
       {
         "newsId": "n-0822-g",
         "materiality": "low",
         "direction": "positive",
         "affects": "costs",
-        "takeaway": "Volume production of the A20 chip on schedule supports the timing of the new lineup."
+        "takeaway": "TSMC began volume production of Apple's A20 chip on 2-nanometer technology, which typically improves performance and efficiency but is a normal product cycle advancement."
       }
     ],
-    "priceMoveExplained": "no_notable_move",
-    "priceMoveNote": null
+    "priceMoveExplained": "partly",
+    "priceMoveNote": "The one-month 4.2% gain is modest relative to the stock's volatility and broader tech sector strength, and mixed news flow does not clearly explain it."
   },
   "expected": {
     "status": "ok",
     "data": {
       "headline": {
-        "value": "The EU opened a formal review of Apple's App Store fees, the most consequential item in a busy launch month.",
+        "value": "Apple holds iPhone 18 base prices flat while facing EU App Store review and US antitrust trial.",
         "visibility": "headline",
         "source": "model"
       },
@@ -455,7 +449,7 @@
         "source": "model"
       },
       "plainEnglish": {
-        "value": "Apple launched new iPhones without raising most prices, and European regulators started a review that could force changes to its app store fees. Most other headlines were opinion or market chatter.",
+        "value": "Apple kept the starting price of its new iPhone 18 the same as last year, though the most expensive model costs $100 more. The company faces regulatory scrutiny in Europe over App Store fees and a US antitrust trial starting in 2027.",
         "visibility": "summary",
         "source": "model"
       },
@@ -476,7 +470,7 @@
             "materiality": "high",
             "direction": "negative",
             "affects": "legal_regulatory",
-            "takeaway": "A formal review under the Digital Markets Act can end in fines of up to 10% of global turnover and could force lower App Store fees, which would hit high-margin Services profit."
+            "takeaway": "The EU formally reviewed Apple's App Store fee changes under the Digital Markets Act, risking fines up to 10% of global revenue if found non-compliant. This is a material legal risk to the Services business."
           },
           {
             "id": "n-0912-a",
@@ -487,7 +481,7 @@
             "materiality": "medium",
             "direction": "neutral",
             "affects": "pricing",
-            "takeaway": "Holding base prices flat protects demand, while the $100 Pro Max increase lifts revenue per phone at the top of the range."
+            "takeaway": "Apple held iPhone 18 base prices flat year-over-year but raised the Pro Max by $100, signaling cautious pricing power on standard models while pushing premium variants higher."
           },
           {
             "id": "n-0828-f",
@@ -498,18 +492,7 @@
             "materiality": "medium",
             "direction": "negative",
             "affects": "legal_regulatory",
-            "takeaway": "The Justice Department case now has a March 2027 trial date, so the legal risk stays open well into next year."
-          },
-          {
-            "id": "n-0731-h",
-            "title": "Apple reports third quarter results",
-            "source": "Apple Newsroom",
-            "url": "https://example.com/n-0731-h",
-            "publishedAt": "2026-07-31T21:30:00Z",
-            "materiality": "medium",
-            "direction": "positive",
-            "affects": "demand",
-            "takeaway": "Quarterly revenue rose 4 percent with Services at a record $28.9 billion, so the higher-margin business is still growing."
+            "takeaway": "The DOJ antitrust case against Apple is scheduled for trial in March 2027, creating uncertainty around potential restrictions on App Store practices or pricing."
           },
           {
             "id": "n-0905-d",
@@ -517,10 +500,10 @@
             "source": "The Information",
             "url": "https://example.com/n-0905-d",
             "publishedAt": "2026-09-05T11:20:00Z",
-            "materiality": "low",
+            "materiality": "medium",
             "direction": "positive",
             "affects": "competition",
-            "takeaway": "Talks to extend the Gemini deal for Siri are unconfirmed, with no terms and no signed agreement."
+            "takeaway": "Apple is negotiating a multi-year extension of its Gemini partnership for Siri, unconfirmed, suggesting continued reliance on Google's AI to power its voice assistant rather than building in-house capability."
           },
           {
             "id": "n-0822-g",
@@ -531,7 +514,7 @@
             "materiality": "low",
             "direction": "positive",
             "affects": "costs",
-            "takeaway": "Volume production of the A20 chip on schedule supports the timing of the new lineup."
+            "takeaway": "TSMC began volume production of Apple's A20 chip on 2-nanometer technology, which typically improves performance and efficiency but is a normal product cycle advancement."
           }
         ],
         "visibility": "detail",
@@ -541,8 +524,8 @@
       "priceMove": {
         "value": {
           "returnPct1m": 4.2,
-          "explained": "no_notable_move",
-          "note": null
+          "explained": "partly",
+          "note": "The one-month 4.2% gain is modest relative to the stock's volatility and broader tech sector strength, and mixed news flow does not clearly explain it."
         },
         "visibility": "detail",
         "source": "model"

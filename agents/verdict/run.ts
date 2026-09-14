@@ -83,6 +83,9 @@ interface Guardrails {
 /** This agent's model. VALUS_AGENT_MODEL overrides it (resolveModel in client.ts). */
 export const model: string = MODELS.sonnet;
 
+/** Hard max_tokens cap: medium-effort thinking plus the verdict. */
+export const maxTokens = 2_500;
+
 export async function run(ctx: AgentContext): Promise<AgentResult<VerdictOutput>> {
   const startedAt = Date.now();
   const base = { slug: 'verdict' as const, ticker: ctx.ticker, startedAt };
@@ -123,6 +126,7 @@ export async function run(ctx: AgentContext): Promise<AgentResult<VerdictOutput>
     schema,
     effort: 'medium',
     model,
+    maxTokens,
     signal: ctx.signal,
   });
 
@@ -241,16 +245,22 @@ function renderCatalyst(ctx: AgentContext): string {
   const d = upstreamData<CatalystOutput>(ctx, 'catalyst');
   if (!d) return notAvailable(ctx, 'catalyst');
 
-  const rows = d.catalysts.value.map(
+  const upcoming = d.upcomingCatalysts.value.map(
     (c) =>
-      `  ${c.title} (${c.direction}, ${c.horizon}, likelihood ${c.likelihood}, via ${c.valueLever}): ${c.whyItMatters}`,
+      `  ${c.title} (${c.status}, ${c.direction}, ${c.horizon}, likelihood ${c.likelihood}, via ${c.valueLever}` +
+      `${c.expectedDate ? `, expected ${c.expectedDate}` : ''}): ${c.whyItMatters}`,
+  );
+  const past = d.historicalAnalogs.value.map(
+    (c) => `  ${c.title} (${c.status} ${c.eventDate}, ${c.direction}, via ${c.valueLever}): ${c.whyItMatters}`,
   );
   return [
     `Headline: ${d.headline.value}`,
-    `Net tilt: ${d.netTilt.value}`,
+    `Net tilt of upcoming catalysts: ${d.netTilt.value}`,
     `Next earnings date: ${d.nextEarningsDate.value ?? 'not available'}`,
-    rows.length ? 'Catalysts:' : 'Catalysts: none specific in view',
-    ...rows,
+    upcoming.length ? 'Upcoming:' : 'Upcoming: none specific in view',
+    ...upcoming,
+    past.length ? 'Recently announced or shipped:' : 'Recently announced or shipped: none',
+    ...past,
   ].join('\n');
 }
 

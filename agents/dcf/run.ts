@@ -4,7 +4,6 @@ import {
   freeCashFlowOf,
   isNum,
   pct,
-  renderPrices,
   renderProfile,
   renderStatements,
   renderValuation,
@@ -12,6 +11,7 @@ import {
   safeDiv,
   section,
   tidy,
+  type NumericStatementKey,
 } from '../_shared/format.ts';
 import {
   field,
@@ -55,6 +55,23 @@ const UNITS: Record<DcfAssumptionKey, 'pct' | 'money' | 'shares'> = {
 /** This agent's model. VALUS_AGENT_MODEL overrides it (resolveModel in client.ts). */
 export const model: string = MODELS.sonnet;
 
+/** Hard max_tokens cap: thinking plus the assumption review. */
+export const maxTokens = 2_000;
+
+/** The statement lines the assumption review uses; the rest only lengthen the prompt. */
+const STATEMENT_COLUMNS: readonly NumericStatementKey[] = [
+  'revenue',
+  'operatingIncome',
+  'netIncome',
+  'operatingCashFlow',
+  'capex',
+  'freeCashFlow',
+  'stockCompensation',
+  'totalDebt',
+  'cashAndEquivalents',
+  'dilutedShares',
+];
+
 export async function run(ctx: AgentContext): Promise<AgentResult<DcfOutput>> {
   const startedAt = Date.now();
   const base = { slug: 'dcf' as const, ticker: ctx.ticker, startedAt };
@@ -75,8 +92,9 @@ export async function run(ctx: AgentContext): Promise<AgentResult<DcfOutput>> {
     system: SYSTEM_PROMPT,
     user: buildUserTurn(ctx, valuation, history),
     schema: DcfModelSchema,
-    effort: 'medium',
+    effort: 'low',
     model,
+    maxTokens,
     signal: ctx.signal,
   });
 
@@ -104,8 +122,12 @@ function buildUserTurn(ctx: AgentContext, valuation: ValuationSnapshot, history:
         `Stock-based compensation as a share of latest free cash flow: ${pct(history.latestSbcPctOfFcf, 1)}`,
       ].join('\n'),
     ),
-    section('Statements', renderStatements(ctx.statements, { annual: 5, quarterly: 4 })),
-    section('Price', renderPrices(ctx.prices)),
+    // Annual statements only, trimmed to the lines the review uses. Price is
+    // already in the valuation block, so the tape is left out.
+    section(
+      'Annual statements',
+      renderStatements(ctx.statements, { annual: 5, quarterly: 0, columns: STATEMENT_COLUMNS }),
+    ),
   ].join('\n\n');
 }
 
