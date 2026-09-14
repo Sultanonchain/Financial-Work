@@ -1,4 +1,4 @@
-import { generateValidated } from '../_shared/client.ts';
+import { generateValidated, MODELS } from '../_shared/client.ts';
 import {
   isoDate,
   pct,
@@ -35,6 +35,9 @@ const NEWS_LIMIT = 25;
 const YFINANCE_KEYS = ['exDividendDate', 'dividendRate', 'dividendYield', 'shortPercentOfFloat'] as const;
 const FINVIZ_KEYS = ['Earnings', 'Short Float', 'Insider Trans', 'Inst Trans'] as const;
 
+/** This agent's model. VALUS_AGENT_MODEL overrides it (resolveModel in client.ts). */
+export const model: string = MODELS.sonnet;
+
 export async function run(ctx: AgentContext): Promise<AgentResult<CatalystOutput>> {
   const startedAt = Date.now();
   const base = { slug: 'catalyst' as const, ticker: ctx.ticker, startedAt };
@@ -66,6 +69,7 @@ export async function run(ctx: AgentContext): Promise<AgentResult<CatalystOutput
     user: buildUserTurn(ctx, news, earningsDate),
     schema,
     effort: 'low',
+    model,
     signal: ctx.signal,
   });
 

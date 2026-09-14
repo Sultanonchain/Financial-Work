@@ -6,7 +6,7 @@
  * stage-1 result is missing, it works without it.
  */
 
-import { generateValidated } from '../_shared/client.ts';
+import { generateValidated, MODELS } from '../_shared/client.ts';
 import {
   isNum,
   money,
@@ -80,6 +80,9 @@ interface Guardrails {
   allowedBands: ValuationBand[];
 }
 
+/** This agent's model. VALUS_AGENT_MODEL overrides it (resolveModel in client.ts). */
+export const model: string = MODELS.sonnet;
+
 export async function run(ctx: AgentContext): Promise<AgentResult<VerdictOutput>> {
   const startedAt = Date.now();
   const base = { slug: 'verdict' as const, ticker: ctx.ticker, startedAt };
@@ -119,6 +122,7 @@ export async function run(ctx: AgentContext): Promise<AgentResult<VerdictOutput>
     user: buildUserTurn(ctx, guardrails),
     schema,
     effort: 'medium',
+    model,
     signal: ctx.signal,
   });
 

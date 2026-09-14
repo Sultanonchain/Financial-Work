@@ -2,18 +2,20 @@
  * The only place in the agent layer that talks to Anthropic.
  *
  * Responsibilities:
+ *   • the model table: which model IDs agents use, which request features each
+ *     model accepts, and how an agent's model is resolved
  *   • one lazily-built client with a timeout and SDK-level retries
  *   • structured output + the schema-repair retry the contract requires
  *     (one retry with the validation error appended, then give up cleanly)
- *   • token logging, including cache hit/miss so a broken cached prefix is
- *     visible instead of just expensive
+ *   • token logging per attempt, naming the model that served it, so cost is
+ *     attributable per agent
  *   • a rate-limit cooldown: after a 429/529 we stop calling for a few minutes
  *     rather than adding latency to every page view
  *   • a test seam (setModelTransport) so fixtures can drive agents offline
  *
- * Nothing here knows what a stock is. Agents pass a system prompt, a user turn
- * and a zod schema; they get back either validated data or a typed error.
- * This module never throws.
+ * Nothing here knows what a stock is. Agents pass a system prompt, a user turn,
+ * a zod schema and their model; they get back either validated data or a typed
+ * error. This module never throws.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -23,13 +25,75 @@ import type { z } from 'zod';
 import type { AgentError, AgentSlug, TokenUsage } from './types.ts';
 
 /* ────────────────────────────────────────────────────────────────────────── */
+/* Models: the single place to bump versions                                  */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Full model IDs, not aliases. An alias moves to a new snapshot on its own,
+ * which would change agent output and cost with no diff in this repo. Sonnet 5
+ * is published without a dated snapshot, so its full ID is the bare name.
+ */
+export const MODELS = {
+  sonnet: 'claude-sonnet-5',
+  haiku: 'claude-haiku-4-5-20251001',
+} as const;
+
+/** Used only when an agent names no model and no override is set. */
+export const DEFAULT_MODEL: string = MODELS.sonnet;
+
+/** Global override, for testing: when set, every agent uses this model. */
+export const MODEL_OVERRIDE_ENV = 'VALUS_AGENT_MODEL';
+
+export interface ModelFeatures {
+  /** `output_config.effort`. Haiku 4.5 rejects it with a 400. */
+  effort: boolean;
+  /** Server-side `fallbacks: "default"`, built for the Opus 5 / Fable 5 refusal classifiers. */
+  refusalFallbacks: boolean;
+}
+
+/**
+ * Request features that differ by model. Structured outputs are not listed
+ * because every model here supports them. A model missing from this table,
+ * typically a VALUS_AGENT_MODEL override, gets the conservative set.
+ */
+const MODEL_FEATURES: Readonly<Record<string, ModelFeatures>> = {
+  [MODELS.sonnet]: { effort: true, refusalFallbacks: false },
+  [MODELS.haiku]: { effort: false, refusalFallbacks: false },
+  // Not used by any agent; listed so an override onto it keeps its features.
+  'claude-opus-5': { effort: true, refusalFallbacks: true },
+};
+
+const CONSERVATIVE_FEATURES: ModelFeatures = { effort: false, refusalFallbacks: false };
+
+export function modelFeatures(model: string): ModelFeatures {
+  return MODEL_FEATURES[model] ?? CONSERVATIVE_FEATURES;
+}
+
+export type ModelSource = 'env' | 'agent' | 'default';
+
+export interface ResolvedModel {
+  id: string;
+  source: ModelSource;
+}
+
+/**
+ * VALUS_AGENT_MODEL, then the agent's own model, then DEFAULT_MODEL. The env
+ * var is read on every call rather than at import, so setting it takes effect
+ * without reloading modules.
+ */
+export function resolveModel(agentModel: string | undefined): ResolvedModel {
+  const override = process.env[MODEL_OVERRIDE_ENV]?.trim();
+  if (override) return { id: override, source: 'env' };
+  if (agentModel) return { id: agentModel, source: 'agent' };
+  return { id: DEFAULT_MODEL, source: 'default' };
+}
+
+/* ────────────────────────────────────────────────────────────────────────── */
 /* Configuration                                                              */
 /* ────────────────────────────────────────────────────────────────────────── */
 
 export interface ClientConfig {
   apiKey: string | undefined;
-  /** Default model for every agent. Override per call via GenerateOptions. */
-  model: string;
   /** Per-request timeout in MILLISECONDS (the TS SDK takes ms, not seconds). */
   timeoutMs: number;
   /** SDK-level retries for 408/409/429/5xx and connection errors. */
@@ -37,10 +101,8 @@ export interface ClientConfig {
   /** How long to stop calling after a 429/529 survives the SDK retries. */
   cooldownMs: number;
   /**
-   * Server-side refusal fallback. When a safety classifier declines a request,
-   * the API re-runs it on a fallback model inside the same call instead of
-   * returning an empty refusal. First-party API only; turn off on Bedrock,
-   * Vertex or Foundry.
+   * Server-side refusal fallback, sent only to models whose MODEL_FEATURES
+   * allow it. First-party API only; turn off on Bedrock, Vertex or Foundry.
    */
   refusalFallbacks: boolean;
 }
@@ -48,7 +110,6 @@ export interface ClientConfig {
 function defaultConfig(): ClientConfig {
   return {
     apiKey: process.env['ANTHROPIC_API_KEY'],
-    model: process.env['VALUS_AGENT_MODEL'] ?? 'claude-opus-5',
     timeoutMs: 45_000,
     maxRetries: 2,
     cooldownMs: 5 * 60_000,
@@ -95,12 +156,21 @@ function getClient(): Anthropic {
 export interface TokenLogRecord {
   slug: AgentSlug;
   ticker: string;
+  /** The model that served this attempt, as reported by the API. Bill against this. */
   model: string;
+  /** The model that was asked for. Differs from `model` only when a refusal fallback served the reply. */
+  requestedModel: string;
+  /** Why `requestedModel` was chosen: the env override, the agent's own model, or the default. */
+  modelSource: ModelSource;
   attempt: number;
   latencyMs: number;
   /** This attempt only, not the running total. */
   usage: TokenUsage;
-  /** false on a real call means the cached system prefix missed. */
+  /**
+   * Whether the system prompt was served from cache. A miss is expected when
+   * the prompt is below the model's cache minimum (1,024 tokens on Sonnet 5,
+   * 4,096 on Haiku 4.5).
+   */
   cacheHit: boolean;
   outcome: 'ok' | 'invalid' | 'refused' | 'error';
   stopReason: string | null;
@@ -110,10 +180,11 @@ export type TokenLogger = (record: TokenLogRecord) => void;
 
 const consoleLogger: TokenLogger = (r) => {
   const cache = r.cacheHit ? `cache_read=${r.usage.cacheReadTokens}` : 'cache_miss';
+  const requested = r.requestedModel === r.model ? '' : ` requested=${r.requestedModel}`;
   console.log(
-    `[valus.agents] ${r.slug} ${r.ticker} ${r.model} attempt=${r.attempt} ${r.outcome} ` +
-      `stop=${r.stopReason ?? '-'} in=${r.usage.inputTokens} out=${r.usage.outputTokens} ` +
-      `${cache} ${r.latencyMs}ms`,
+    `[valus.agents] ${r.slug} ${r.ticker} model=${r.model}${requested} model_source=${r.modelSource} ` +
+      `attempt=${r.attempt} ${r.outcome} stop=${r.stopReason ?? '-'} ` +
+      `in=${r.usage.inputTokens} out=${r.usage.outputTokens} ${cache} ${r.latencyMs}ms`,
   );
 };
 
@@ -138,6 +209,8 @@ function log(record: TokenLogRecord): void {
 export interface ModelTransportRequest {
   slug: AgentSlug;
   ticker: string;
+  /** The resolved model ID, after the env override. */
+  model: string;
   system: string;
   user: string;
   /** 1 on the first pass, 2 on the schema-repair retry. */
@@ -201,9 +274,11 @@ export interface GenerateOptions<S extends z.ZodType> {
   user: string;
   /** The model-facing schema. Also sent as the structured-output format. */
   schema: S;
-  maxTokens?: number;
-  effort?: Effort;
+  /** The agent's own model. VALUS_AGENT_MODEL still wins; see resolveModel. */
   model?: string;
+  maxTokens?: number;
+  /** Dropped for models that do not accept effort (see MODEL_FEATURES). */
+  effort?: Effort;
   signal?: AbortSignal | undefined;
 }
 
@@ -211,8 +286,14 @@ export interface GenerateResult<T> {
   data: T | null;
   error: AgentError | null;
   attempts: number;
+  /** The model that served the last attempt (the requested one if none was served). */
   model: string;
   usage: TokenUsage | null;
+}
+
+export interface Repair {
+  hint: string;
+  previousReply: string;
 }
 
 const MAX_ATTEMPTS = 2;
@@ -224,14 +305,11 @@ interface Reply {
   /** Already-structured value (transport only). */
   value: unknown;
   text: string;
+  /** The model that actually produced the reply. */
+  model: string;
   stopReason: string | null;
   usage: TokenUsage;
   refusal: string | null;
-}
-
-interface Repair {
-  hint: string;
-  previousReply: string;
 }
 
 /**
@@ -247,17 +325,18 @@ interface Repair {
 export async function generateValidated<S extends z.ZodType>(
   opts: GenerateOptions<S>,
 ): Promise<GenerateResult<z.infer<S>>> {
-  const model = opts.model ?? config.model;
+  const { id: requestedModel, source: modelSource } = resolveModel(opts.model);
+  let servedModel = requestedModel;
   const total = emptyUsage();
 
   if (!transport && !config.apiKey) {
-    return failure(model, 0, null, {
+    return failure(requestedModel, 0, null, {
       kind: 'no_api_key',
       message: 'ANTHROPIC_API_KEY is not set in this runtime',
     });
   }
   if (!transport && isCoolingDown()) {
-    return failure(model, 0, null, {
+    return failure(requestedModel, 0, null, {
       kind: 'cooldown',
       message: 'Anthropic rate-limit cooldown is active; skipped the call',
     });
@@ -269,34 +348,38 @@ export async function generateValidated<S extends z.ZodType>(
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const startedAt = Date.now();
+    const identity = {
+      slug: opts.slug,
+      ticker: opts.ticker,
+      requestedModel,
+      modelSource,
+      attempt,
+    };
     let reply: Reply;
 
     try {
       reply = transport
-        ? await callTransport(transport, opts, attempt, repair)
-        : await callApi(opts, model, maxTokens, repair);
+        ? await callTransport(transport, opts, requestedModel, attempt, repair)
+        : await callApi(opts, requestedModel, maxTokens, repair);
     } catch (err) {
       const error = toAgentError(err);
       log({
-        slug: opts.slug,
-        ticker: opts.ticker,
-        model,
-        attempt,
+        ...identity,
+        model: requestedModel,
         latencyMs: Date.now() - startedAt,
         usage: emptyUsage(),
         cacheHit: false,
         outcome: 'error',
         stopReason: null,
       });
-      return failure(model, attempt, total, error);
+      return failure(servedModel, attempt, total, error);
     }
 
+    servedModel = reply.model;
     addUsage(total, reply.usage);
     const logBase = {
-      slug: opts.slug,
-      ticker: opts.ticker,
-      model,
-      attempt,
+      ...identity,
+      model: reply.model,
       latencyMs: Date.now() - startedAt,
       usage: reply.usage,
       cacheHit: reply.usage.cacheReadTokens > 0,
@@ -304,10 +387,10 @@ export async function generateValidated<S extends z.ZodType>(
     };
 
     if (reply.stopReason === 'refusal') {
-      // The fallback chain (when enabled) already had its chance inside the
-      // call. Asking the same thing again would be declined the same way.
+      // Any fallback chain already had its chance inside the call. Asking the
+      // same thing again would be declined the same way.
       log({ ...logBase, outcome: 'refused' });
-      return failure(model, attempt, total, {
+      return failure(servedModel, attempt, total, {
         kind: 'api',
         message: 'the model declined this request',
         ...(reply.refusal ? { detail: reply.refusal } : {}),
@@ -323,7 +406,7 @@ export async function generateValidated<S extends z.ZodType>(
       } catch {
         // Recording is diagnostic; it never affects the result.
       }
-      return { data: check.data, error: null, attempts: attempt, model, usage: total };
+      return { data: check.data, error: null, attempts: attempt, model: servedModel, usage: total };
     }
 
     lastError = {
@@ -333,24 +416,29 @@ export async function generateValidated<S extends z.ZodType>(
     };
     repair = { hint: check.hint, previousReply: reply.text };
     if (reply.stopReason === 'max_tokens') {
-      // max_tokens caps adaptive thinking and the JSON together; a truncated
-      // reply gets more room on the repair pass rather than the same wall.
+      // max_tokens caps thinking and the JSON together; a truncated reply gets
+      // more room on the repair pass rather than the same wall.
       maxTokens = Math.min(maxTokens * 2, MAX_TOKENS_CEILING);
     }
   }
 
-  return failure(model, MAX_ATTEMPTS, total, lastError ?? {
+  return failure(servedModel, MAX_ATTEMPTS, total, lastError ?? {
     kind: 'validation',
     message: 'model reply failed schema validation',
   });
 }
 
-async function callApi<S extends z.ZodType>(
+/**
+ * The exact request body for one attempt, shaped for `model`. Exported so the
+ * per-model request shape can be tested without HTTP.
+ */
+export function buildRequest<S extends z.ZodType>(
   opts: GenerateOptions<S>,
   model: string,
   maxTokens: number,
   repair: Repair | null,
-): Promise<Reply> {
+): Anthropic.Beta.Messages.MessageCreateParamsNonStreaming {
+  const features = modelFeatures(model);
   // zodOutputFormat() gives the strict JSON schema the API wants. It is sent
   // through create(), not parse(): parse() throws on a reply that fails zod,
   // which would skip the repair turn the contract requires.
@@ -363,20 +451,28 @@ async function callApi<S extends z.ZodType>(
     // context goes in the user turn, after the breakpoint.
     system: [{ type: 'text', text: opts.system, cache_control: { type: 'ephemeral' } }],
     messages: buildMessages(opts.user, repair),
-    // Thinking is left at the model default (adaptive on Opus 5) and bounded by
-    // effort, which is cheaper and better behaved than disabling it.
+    // Thinking is left at each model's default (adaptive on Sonnet 5, off on
+    // Haiku 4.5). Where the model accepts effort, effort bounds it.
     output_config: {
-      effort: opts.effort ?? 'low',
       format: { type: 'json_schema', schema },
+      ...(features.effort ? { effort: opts.effort ?? 'low' } : {}),
     },
   };
-  if (config.refusalFallbacks) {
+  if (config.refusalFallbacks && features.refusalFallbacks) {
     params.betas = [FALLBACK_BETA];
     params.fallbacks = 'default';
   }
+  return params;
+}
 
+async function callApi<S extends z.ZodType>(
+  opts: GenerateOptions<S>,
+  model: string,
+  maxTokens: number,
+  repair: Repair | null,
+): Promise<Reply> {
   const response = await getClient().beta.messages.create(
-    params,
+    buildRequest(opts, model, maxTokens, repair),
     opts.signal ? { signal: opts.signal } : undefined,
   );
 
@@ -388,6 +484,7 @@ async function callApi<S extends z.ZodType>(
   return {
     value: undefined,
     text,
+    model: response.model,
     stopReason: response.stop_reason,
     usage: {
       inputTokens: response.usage.input_tokens ?? 0,
@@ -405,12 +502,14 @@ async function callApi<S extends z.ZodType>(
 async function callTransport<S extends z.ZodType>(
   fn: ModelTransport,
   opts: GenerateOptions<S>,
+  model: string,
   attempt: number,
   repair: Repair | null,
 ): Promise<Reply> {
   const out = await fn({
     slug: opts.slug,
     ticker: opts.ticker,
+    model,
     system: opts.system,
     user: opts.user,
     attempt,
@@ -420,6 +519,7 @@ async function callTransport<S extends z.ZodType>(
   return {
     value: isText ? undefined : out,
     text: isText ? out : (JSON.stringify(out) ?? ''),
+    model,
     stopReason: 'end_turn',
     usage: emptyUsage(),
     refusal: null,

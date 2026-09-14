@@ -50,19 +50,36 @@ vendor values.
 
 ## Model calls
 
-- Default model `claude-opus-5` (override with `VALUS_AGENT_MODEL`), adaptive
-  thinking. Effort is `low` for catalyst, news and redflag, `medium` for dcf
-  and verdict.
-- The system prompt is byte-stable and marked cacheable. Per-ticker context
-  goes in the user turn. The token log shows `cache_miss` when that breaks.
+- Each agent names its own model in its `run.ts` (`export const model`), taken
+  from the `MODELS` constants block in `_shared/client.ts`, the one place to
+  bump versions. News runs on Haiku 4.5 (`claude-haiku-4-5-20251001`); dcf,
+  catalyst, redflag and verdict run on Sonnet 5 (`claude-sonnet-5`). IDs are
+  full model IDs, not aliases.
+- Resolution order: `VALUS_AGENT_MODEL` (global override, for testing), then
+  the agent's `model`, then `DEFAULT_MODEL` (Sonnet 5).
+- Request features that differ by model sit next to the IDs in
+  `MODEL_FEATURES`. Effort is sent only where accepted (Haiku 4.5 rejects it),
+  so the news agent's `effort` only applies when it is overridden onto Sonnet.
+  Thinking stays at each model's default: adaptive on Sonnet 5, off on Haiku.
+  Effort is `low` for catalyst, news and redflag, `medium` for dcf and verdict.
+- The token log names the model that served each attempt and why it was
+  chosen, for cost per agent:
+  `[valus.agents] news AAPL model=claude-haiku-4-5-20251001 model_source=agent attempt=1 ok ...`.
+  `AgentResult.meta.model` carries the same served model.
+- The system prompt is byte-stable and marked cacheable, with per-ticker
+  context in the user turn. Prompts shorter than the model's cache minimum
+  (1,024 tokens on Sonnet 5, 4,096 on Haiku 4.5) never cache, so `cache_miss`
+  is expected for those.
 - Structured output uses `zodOutputFormat` sent through `messages.create()`,
   not `parse()`. `parse()` throws on a zod failure, which would skip the
   repair turn. The SDK moves enums and length limits into schema descriptions,
   so the client-side zod check is what actually enforces them.
-- The server-side refusal fallback is on (`fallbacks: "default"`, beta
-  `server-side-fallback-2026-07-01`). It only exists on the first-party API:
-  set `configureClient({ refusalFallbacks: false })` on Bedrock, Vertex or
-  Foundry.
+- The server-side refusal fallback (`fallbacks: "default"`, beta
+  `server-side-fallback-2026-07-01`) is sent only to models `MODEL_FEATURES`
+  marks as supporting it, which today means an override onto `claude-opus-5`.
+  On Sonnet and Haiku a refusal comes back as `unavailable`.
+  `configureClient({ refusalFallbacks: false })` turns it off everywhere, which
+  Bedrock, Vertex and Foundry need.
 - The SDK retries 429/5xx twice, with a 45s timeout per request. If a 429 or
   529 survives the retries, calls are skipped for 5 minutes and agents return
   `unavailable` with kind `cooldown`.

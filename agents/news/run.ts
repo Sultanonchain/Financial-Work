@@ -1,4 +1,4 @@
-import { generateValidated } from '../_shared/client.ts';
+import { generateValidated, MODELS } from '../_shared/client.ts';
 import {
   isNum,
   renderNews,
@@ -29,6 +29,13 @@ import {
 const NEWS_LIMIT = 25;
 /** Matches the "about 5 percent" threshold in the prompt. */
 const NOTABLE_MOVE_PCT = 5;
+
+/**
+ * This agent's model. Headline triage is short, frequent classification (4h
+ * TTL), so it runs on Haiku. VALUS_AGENT_MODEL overrides it (resolveModel in
+ * client.ts). Haiku does not accept effort, so the client drops it.
+ */
+export const model: string = MODELS.haiku;
 
 export async function run(ctx: AgentContext): Promise<AgentResult<NewsOutput>> {
   const startedAt = Date.now();
@@ -61,6 +68,7 @@ export async function run(ctx: AgentContext): Promise<AgentResult<NewsOutput>> {
     user: buildUserTurn(ctx, news),
     schema,
     effort: 'low',
+    model,
     signal: ctx.signal,
   });
 

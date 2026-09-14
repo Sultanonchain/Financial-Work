@@ -1,4 +1,4 @@
-import { generateValidated } from '../_shared/client.ts';
+import { generateValidated, MODELS } from '../_shared/client.ts';
 import {
   cagrPct,
   freeCashFlowOf,
@@ -52,6 +52,9 @@ const UNITS: Record<DcfAssumptionKey, 'pct' | 'money' | 'shares'> = {
   net_debt: 'money',
 };
 
+/** This agent's model. VALUS_AGENT_MODEL overrides it (resolveModel in client.ts). */
+export const model: string = MODELS.sonnet;
+
 export async function run(ctx: AgentContext): Promise<AgentResult<DcfOutput>> {
   const startedAt = Date.now();
   const base = { slug: 'dcf' as const, ticker: ctx.ticker, startedAt };
@@ -73,6 +76,7 @@ export async function run(ctx: AgentContext): Promise<AgentResult<DcfOutput>> {
     user: buildUserTurn(ctx, valuation, history),
     schema: DcfModelSchema,
     effort: 'medium',
+    model,
     signal: ctx.signal,
   });
 

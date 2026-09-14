@@ -7,11 +7,17 @@ import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 
 import { cacheKey, MemoryStore, setCacheStore } from '../_shared/cache.ts';
 import {
+  buildRequest,
   configureClient,
+  DEFAULT_MODEL,
+  MODEL_OVERRIDE_ENV,
+  MODELS,
   resetClient,
+  resolveModel,
   setModelTransport,
   setTokenLogger,
   type ModelTransportRequest,
+  type TokenLogRecord,
 } from '../_shared/client.ts';
 import { AGENT_SLUGS, registry } from '../_shared/registry.ts';
 import { runAgents, toClientPayload } from '../_shared/runner.ts';
@@ -69,6 +75,21 @@ function useTransport(overrides: Partial<Record<AgentSlug, Override>> = {}): Mod
 }
 
 const LOCKED = (source: string) => ({ visibility: 'detail', source, locked: true });
+
+/** Runs `body` with VALUS_AGENT_MODEL set to `value` (or unset), then restores it. */
+async function withModelOverride(value: string | undefined, body: () => Promise<void> | void) {
+  const saved = process.env[MODEL_OVERRIDE_ENV];
+  const apply = (next: string | undefined) => {
+    if (next === undefined) delete process.env[MODEL_OVERRIDE_ENV];
+    else process.env[MODEL_OVERRIDE_ENV] = next;
+  };
+  apply(value);
+  try {
+    await body();
+  } finally {
+    apply(saved);
+  }
+}
 
 beforeEach(() => {
   resetClient();
@@ -490,6 +511,85 @@ describe('runner', () => {
       cacheKey('news', ' aapl ', new Date('2026-09-12T23:59:59-04:00')),
       'valus:agent:v1:news:AAPL:2026-09-13',
     );
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Models                                                                     */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+describe('models', () => {
+  it('each agent calls its own model, and the token log attributes it', async () => {
+    await withModelOverride(undefined, async () => {
+      const records: TokenLogRecord[] = [];
+      setTokenLogger((record) => records.push(record));
+      const calls = useTransport();
+      const report = await runAgents(baseContext());
+
+      const expected: Record<AgentSlug, string> = {
+        dcf: MODELS.sonnet,
+        catalyst: MODELS.sonnet,
+        news: MODELS.haiku,
+        redflag: MODELS.sonnet,
+        verdict: MODELS.sonnet,
+      };
+      for (const slug of AGENT_SLUGS) {
+        assert.equal(registry[slug].model, expected[slug], `${slug} module`);
+        assert.equal(calls.find((call) => call.slug === slug)?.model, expected[slug], `${slug} request`);
+        assert.equal(report.results[slug].meta.model, expected[slug], `${slug} meta`);
+        const record = records.find((r) => r.slug === slug);
+        assert.equal(record?.model, expected[slug], `${slug} token log`);
+        assert.equal(record?.modelSource, 'agent', `${slug} token log source`);
+      }
+    });
+  });
+
+  it(`resolves ${MODEL_OVERRIDE_ENV}, then the agent's model, then the default`, async () => {
+    await withModelOverride(undefined, () => {
+      assert.deepEqual(resolveModel(MODELS.haiku), { id: MODELS.haiku, source: 'agent' });
+      assert.deepEqual(resolveModel(undefined), { id: DEFAULT_MODEL, source: 'default' });
+    });
+
+    await withModelOverride('claude-override-test', async () => {
+      assert.deepEqual(resolveModel(MODELS.haiku), { id: 'claude-override-test', source: 'env' });
+
+      const records: TokenLogRecord[] = [];
+      setTokenLogger((record) => records.push(record));
+      const calls = useTransport();
+      await runAgents(baseContext());
+
+      assert.equal(calls.length, 5);
+      assert.ok(calls.every((call) => call.model === 'claude-override-test'));
+      assert.ok(records.every((r) => r.model === 'claude-override-test' && r.modelSource === 'env'));
+    });
+  });
+
+  it('sends effort and refusal fallbacks only to models that accept them', () => {
+    const opts = {
+      slug: 'news' as const,
+      ticker: 'AAPL',
+      system: 'system',
+      user: 'user',
+      schema: NewsModelSchema,
+      effort: 'medium' as const,
+    };
+
+    const haiku = buildRequest(opts, MODELS.haiku, 1_000, null);
+    assert.equal(haiku.model, MODELS.haiku);
+    assert.equal(haiku.output_config?.effort, undefined, 'Haiku 4.5 rejects effort');
+    assert.equal(haiku.output_config?.format?.type, 'json_schema');
+    assert.equal(haiku.fallbacks, undefined);
+
+    const sonnet = buildRequest(opts, MODELS.sonnet, 1_000, null);
+    assert.equal(sonnet.output_config?.effort, 'medium');
+    assert.equal(sonnet.fallbacks, undefined);
+
+    const opus = buildRequest(opts, 'claude-opus-5', 1_000, null);
+    assert.equal(opus.fallbacks, 'default');
+    assert.deepEqual(opus.betas, ['server-side-fallback-2026-07-01']);
+
+    const unknown = buildRequest(opts, 'claude-unlisted-model', 1_000, null);
+    assert.equal(unknown.output_config?.effort, undefined, 'unlisted models get the conservative set');
   });
 });
 

@@ -10,11 +10,11 @@
 import { TTL_SECONDS } from './cache.ts';
 import type { AgentModule, AgentSlug } from './types.ts';
 
-import { run as runCatalyst } from '../catalyst/run.ts';
-import { run as runDcf } from '../dcf/run.ts';
-import { run as runNews } from '../news/run.ts';
-import { run as runRedflag } from '../redflag/run.ts';
-import { run as runVerdict } from '../verdict/run.ts';
+import { model as catalystModel, run as runCatalyst } from '../catalyst/run.ts';
+import { model as dcfModel, run as runDcf } from '../dcf/run.ts';
+import { model as newsModel, run as runNews } from '../news/run.ts';
+import { model as redflagModel, run as runRedflag } from '../redflag/run.ts';
+import { model as verdictModel, run as runVerdict } from '../verdict/run.ts';
 
 import type { CatalystOutput } from '../catalyst/schema.ts';
 import type { DcfOutput } from '../dcf/schema.ts';
@@ -38,6 +38,7 @@ export const registry: AgentRegistry = {
     title: 'Valuation assumptions',
     stage: 1,
     ttlSeconds: TTL_SECONDS.dcf,
+    model: dcfModel,
     run: runDcf,
   },
   catalyst: {
@@ -45,6 +46,7 @@ export const registry: AgentRegistry = {
     title: 'Catalysts',
     stage: 1,
     ttlSeconds: TTL_SECONDS.catalyst,
+    model: catalystModel,
     run: runCatalyst,
   },
   news: {
@@ -52,6 +54,7 @@ export const registry: AgentRegistry = {
     title: 'News read',
     stage: 1,
     ttlSeconds: TTL_SECONDS.news,
+    model: newsModel,
     run: runNews,
   },
   redflag: {
@@ -59,6 +62,7 @@ export const registry: AgentRegistry = {
     title: 'Red flags',
     stage: 1,
     ttlSeconds: TTL_SECONDS.redflag,
+    model: redflagModel,
     run: runRedflag,
   },
   verdict: {
@@ -66,6 +70,7 @@ export const registry: AgentRegistry = {
     title: 'Verdict',
     stage: 2,
     ttlSeconds: TTL_SECONDS.verdict,
+    model: verdictModel,
     run: runVerdict,
   },
 };

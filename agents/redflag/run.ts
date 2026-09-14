@@ -1,4 +1,4 @@
-import { generateValidated } from '../_shared/client.ts';
+import { generateValidated, MODELS } from '../_shared/client.ts';
 import {
   cagrPct,
   freeCashFlowOf,
@@ -44,6 +44,9 @@ const YFINANCE_KEYS = [
 ] as const;
 const FINVIZ_KEYS = ['Short Float', 'Short Ratio', 'Insider Own', 'Insider Trans', 'Inst Trans', 'Debt/Eq', 'Current Ratio'] as const;
 
+/** This agent's model. VALUS_AGENT_MODEL overrides it (resolveModel in client.ts). */
+export const model: string = MODELS.sonnet;
+
 export async function run(ctx: AgentContext): Promise<AgentResult<RedflagOutput>> {
   const startedAt = Date.now();
   const base = { slug: 'redflag' as const, ticker: ctx.ticker, startedAt };
@@ -64,6 +67,7 @@ export async function run(ctx: AgentContext): Promise<AgentResult<RedflagOutput>
     user: buildUserTurn(ctx, metrics),
     schema: RedflagModelSchema,
     effort: 'low',
+    model,
     signal: ctx.signal,
   });
 

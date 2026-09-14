@@ -313,6 +313,8 @@ export interface AgentModule<T> {
   /** 1 = runs in parallel on raw data. 2 = runs after stage 1, reads upstream. */
   stage: 1 | 2;
   ttlSeconds: number;
+  /** The agent's own model ID, exported from its run.ts. VALUS_AGENT_MODEL overrides it. */
+  model: string;
   run(ctx: AgentContext): Promise<AgentResult<T>>;
 }
 
