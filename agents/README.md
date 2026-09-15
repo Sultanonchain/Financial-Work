@@ -204,17 +204,39 @@ against the key figures). Decide before wiring the agents into Flask.
 
 Two things the agents cannot see past:
 
-- **The displayed intrinsic value is not the DCF of these inputs.**
-  `dcf_recompute_basis.scale` multiplies the DCF result before display: AMC
-  $18.61 x 0.071 = $1.32, MU $34.72 x 13.59 = $471.68, SOTK $4.68 x 0.76 =
-  $3.56. dcf reviews inputs whose own result was rescaled by a factor it is
-  never shown.
+- **The displayed intrinsic value is usually not the DCF of these inputs.**
+  `base_fcf`, `wacc`, `stage1_growth` and the rest are inputs to the pure DCF,
+  whose result is `dcf_recompute_basis.base_iv`. app.py then replaces that
+  value: a FIN 415 FCFE model (app.py:11157), scenario weighting (11332),
+  sector overlays for biotech and banking (11360), a 90/10 blend with the
+  analyst target (11407) and a sanity clamp (11751). Pure DCF against
+  displayed: MU $34.72 against $471.68, AMC $18.61 against $1.32, SOTK $4.68
+  against $3.56. `dcf_recompute_basis.scale` is the ratio between the two,
+  recorded afterwards for the slider endpoint; it is not a step in the
+  valuation. So dcf reviews inputs to a number the page never shows. Whatever
+  Flask passes as `valuation.intrinsicValue` should carry the path that
+  produced it (`iv_source_label`, `fin415_used`, `sector_val_label`,
+  `consensus_anchor_pre_iv`), or dcf is reviewing the wrong model.
 - **`iv_confidence` is `high` on all five**, including JPM and VKTX, where
   `dcf_available` is false and `dcf_confidence` is `not_applicable` (their
   values come from the banking and biotech methods), and AMC, where
   `dcf_confidence` is `low`. The smoke context builder maps `iv_confidence`
   into `valuation.confidence`, which is where VKTX's "high confidence" came
-  from; whatever Flask maps there decides what dcf and verdict see.
+  from.
+
+  **When the production Python assembler is written, map `dcf_confidence`
+  into `valuation.confidence`. Never `iv_confidence`.** `iv_confidence` is the
+  site's confidence in whatever value it displays, including values that come
+  from the banking and biotech methods rather than a DCF, and it read `high`
+  on every ticker in the smoke run. `dcf_confidence` is the engine's own
+  verdict on the DCF the agents are asked to review, and it is the only one of
+  the two that says `not_applicable` when no DCF was run. `not_applicable` has
+  no place in a `low | medium | high` field, so map it to null; the renderer
+  prints `n/a` and dcf then has nothing to defer to. Carry `dcf_available` and
+  `dcf_warning` across as well, so dcf and verdict can tell when the value
+  under review is not a DCF at all. `scratch/smoke-2026-09-14/build_contexts.py`
+  is a scratch harness, not the production mapping, and still reads
+  `iv_confidence`.
 
 ## Catalyst lifecycle
 
