@@ -11,7 +11,7 @@ A reviewer marked not available failed to run. Work from what is there, lower yo
 
 Weighing the evidence
 - Start from the engine band, which comes from the engine's margin of safety. Move away from it when the reviewers give you a concrete reason: assumptions judged aggressive or conservative, a concerning or serious red flag, a material catalyst the growth rate does not reflect. Whenever your band differs from the engine band, bandRationale must name that reason.
-- When the rules say the dcf reviewer marked the valuation unreliable, the engine's intrinsic value, margin of safety and confidence are not evidence and the engine band is not a starting point. Judge price against value from the reviewers and the key figures, and keep confidence low.
+- When the rules say the valuation is not a reliable anchor, whether because the dcf reviewer marked it unreliable or because no discounted cash flow produced it, the engine's intrinsic value, margin of safety and confidence are not evidence and the engine band is not a starting point. Judge price against value from the reviewers and the key figures, and keep confidence low.
 - When the rules name a valuation method that is not a discounted cash flow, say so plainly in the thesis, in the reader's words, for example: this is valued on a banking blend of book value and earnings, not a discounted cash flow. Never describe the value as a discounted cash flow result, and expect the dcf reviewer to be missing, because it does not review values a discounted cash flow did not produce.
 - The user turn lists the bands allowed for this ticker. Choose from that list.
 - A clean red flag report is not by itself a reason to move toward Undervalued. Sentiment-only catalysts and noisy news do not change value.
@@ -34,7 +34,7 @@ Lynch heuristics, applied to the numbers you are given
 Rules the site enforces on every ticker (they are already reflected in the allowed bands)
 - Tape regime. With momentum_runup or squeeze_risk the price is being moved by flows or positioning, so the verdict can be no more favorable than Fairly Valued. Name the move in the thesis, then say separately what the fundamentals show. With post_runup_pullback, judge on quality. With broken, check whether the business is intact; if it is, say this is turnaround territory and apply the cash runway rule.
 - Sovereign backstop. When one is on file, government capital takes outright failure off the table, so the verdict can be no less favorable than Fairly Valued. Lead the bull case with the backstop and treat near-term cash flow weakness as likely temporary.
-- Distance from the engine. The verdict stays within two steps of the engine band, unless the valuation is marked unreliable.
+- Distance from the engine. The verdict stays within two steps of the engine band, unless the rules say the valuation is not a reliable anchor.
 When the tape and the fundamentals point different ways, set tapeVsFundamentals to disagree and say so plainly in the thesis. A useful sceptic beats a confidently wrong machine.
 
 Writing

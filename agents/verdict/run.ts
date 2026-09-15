@@ -163,11 +163,29 @@ function bandFromMarginOfSafety(mos: number | null): ValuationBand | null {
 function computeGuardrails(ctx: AgentContext): Guardrails {
   const engineBand = bandFromMarginOfSafety(ctx.valuation?.marginOfSafetyPct ?? null);
 
-  // dcf decides whether the engine's value can anchor the verdict. A dcf result
-  // that is missing, or predates the reliability field, raises no objection.
+  // Two things stop the engine's value anchoring the verdict: dcf marking it
+  // unreliable, and the value not being a discounted cash flow at all, which is
+  // also why dcf did not run. Without either, a missing dcf result, or one that
+  // predates the reliability field, raises no objection of its own.
+  const valuationMethod = valuationPathOf(ctx.valuation);
   const reliability = upstreamData<DcfOutput>(ctx, 'dcf')?.valuationReliability?.value;
-  const valuationReliable = reliability?.reliable ?? true;
-  const valuationReasons = reliability?.reasons ?? [];
+  const dcfUnreliable = reliability?.reliable === false;
+  const valuationReliable = valuationMethod.isDcf && !dcfUnreliable;
+  const valuationReasons = valuationReliable
+    ? []
+    : [
+        ...(valuationMethod.isDcf
+          ? []
+          : [
+              `the engine valued this on ${shortMethod(valuationMethod.label ?? 'an unnamed method')}, ` +
+                'not a discounted cash flow',
+            ]),
+        ...(dcfUnreliable
+          ? reliability.reasons.length
+            ? reliability.reasons
+            : ['the dcf reviewer marked it unreliable']
+          : []),
+      ];
 
   const engineIndex =
     engineBand === null || !valuationReliable ? null : VALUATION_BANDS.indexOf(engineBand);
@@ -191,7 +209,7 @@ function computeGuardrails(ctx: AgentContext): Guardrails {
     backstopFloor,
     valuationReliable,
     valuationReasons,
-    valuationMethod: valuationPathOf(ctx.valuation),
+    valuationMethod,
     allowedBands,
   };
 }
@@ -211,9 +229,9 @@ function buildUserTurn(ctx: AgentContext, g: Guardrails): string {
         `${shortMethod(g.valuationMethod.label ?? 'an unnamed method')}. Name that method plainly in the thesis, ` +
         'and do not present the value as a discounted cash flow result',
     g.valuationReliable
-      ? 'Valuation reliability: the dcf reviewer raised no reliability concern'
-      : `Valuation reliability: the dcf reviewer marked the engine's value unreliable ` +
-        `(${g.valuationReasons.join('; ')}); keep confidence low`,
+      ? 'Valuation reliability: no concern raised about the engine value'
+      : 'Valuation reliability: not a reliable anchor for the verdict ' +
+        `(${g.valuationReasons.join('; ')}); the engine band is not a starting point and confidence stays low`,
     `Tape regime: ${ctx.prices.regime ?? 'not available'}${g.regimeCap ? ' (verdict capped at Fairly Valued)' : ''}`,
     `Sovereign backstop: ${g.backstopFloor ? 'yes (verdict floored at Fairly Valued)' : 'none on file'}`,
     `Allowed bands for this ticker: ${g.allowedBands.join(', ')}`,
@@ -350,7 +368,7 @@ function toOutput(model: VerdictModel, ctx: AgentContext, g: Guardrails): Verdic
   }
   const unreliable = g.valuationReliable
     ? null
-    : `the dcf reviewer marked the engine's value unreliable (${g.valuationReasons.join('; ')})`;
+    : `the valuation is not a reliable anchor (${g.valuationReasons.join('; ')})`;
 
   return {
     band: field(model.band, 'headline', 'model', 'Constrained to guardrails.allowedBands'),

@@ -1376,7 +1376,7 @@ describe('valuation reliability', () => {
     assert.deepEqual([result.data?.confidence.value, result.data?.confidence.source], ['low', 'computed']);
 
     const user = calls[0]?.user ?? '';
-    assert.match(user, /Valuation reliability: the dcf reviewer marked the engine's value unreliable \(test reason\)/);
+    assert.match(user, /Valuation reliability: not a reliable anchor for the verdict \(test reason\)/);
     assert.match(user, /## Valuation engine output \(marked unreliable; not evidence\)/);
     assert.match(user, /Valuation reliability: unreliable \(test reason\)/);
   });
@@ -1602,6 +1602,24 @@ describe('valuation method', () => {
     assert.match(calls[1]?.user ?? '', /Valuation method: discounted cash flow \(DCF\)/);
     assert.deepEqual(plain.data?.valuationMethod.value, { label: 'DCF', isDcf: true });
     assert.equal(plain.data?.valuationMethod.note, undefined);
+  });
+
+  it('a value no discounted cash flow produced is no anchor either', async () => {
+    const calls = useTransport();
+    const blended = await registry.verdict.run(labelled('Analyst Target (pre-revenue biotech)'));
+
+    assert.equal(blended.data?.guardrails.value.valuationReliable, false);
+    assert.deepEqual(blended.data?.guardrails.value.allowedBands, [...VALUATION_BANDS]);
+    assert.deepEqual([blended.data?.confidence.value, blended.data?.confidence.source], ['low', 'computed']);
+    assert.match(
+      calls[0]?.user ?? '',
+      /not a reliable anchor for the verdict \(the engine valued this on Analyst Target \(pre-revenue biotech\), not a discounted cash flow\)/,
+    );
+    assert.match(blended.data?.engineBand.note ?? '', /Not used as an anchor/);
+
+    const plain = await registry.verdict.run(labelled('DCF'));
+    assert.equal(plain.data?.guardrails.value.valuationReliable, true);
+    assert.equal(plain.data?.confidence.source, 'model');
   });
 });
 

@@ -168,6 +168,9 @@ decided in code from dcf's review, never from the engine's own confidence:
 - when two or more of near-term growth, discount rate and starting free cash
   flow could not be assessed: rated `unclear`, or missing from the engine.
 
+The verdict adds a third reason of its own: the value did not come from a
+discounted cash flow at all (above).
+
 One unassessable input is not enough on its own; in the 2026-09-14 smoke run
 every ticker had one. When unreliable, dcf's `confidence` is forced to `low`
 (source `computed`, reasons in the note) and intrinsic value, range and margin
@@ -258,8 +261,12 @@ book-value or banking blend, a distress proxy and any blend of methods are not
 than reviewing DCF assumptions for a value no DCF produced. The verdict states
 the method instead of implying a DCF: its rules block names it, the prompt
 requires the thesis to say so in plain words, and `valuationMethod` (summary,
-computed) carries the label and the flag for the UI. A context with no label is
-treated as a DCF, which is the engine's default path.
+computed) carries the label and the flag for the UI. It also treats such a
+value the way it treats an unreliable one, below: no engine anchor, confidence
+forced to `low`. Otherwise the ticker nobody reviewed would carry more
+confidence than one that was reviewed and doubted (JPM, 2026-09-14: Modestly
+Undervalued at medium, against Fairly Valued at low when dcf still ran). A
+context with no label is treated as a DCF, which is the engine's default path.
 
 ## Catalyst lifecycle
 
