@@ -949,6 +949,14 @@
         "visibility": "summary",
         "source": "model"
       },
+      "valuationMethod": {
+        "value": {
+          "label": null,
+          "isDcf": true
+        },
+        "visibility": "summary",
+        "source": "computed"
+      },
       "bullPoints": {
         "value": [
           "Operating margin of 31.9% and free cash flow of $116.60B show a highly profitable, cash generative business.",

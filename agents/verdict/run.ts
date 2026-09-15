@@ -8,6 +8,7 @@
 
 import { generateValidated, MODELS } from '../_shared/client.ts';
 import { keyFigures, KEY_FIGURES_TITLE, renderKeyFigures } from '../_shared/figures.ts';
+import { shortMethod, valuationPathOf, type ValuationPath } from '../_shared/valuation.ts';
 import {
   isNum,
   money,
@@ -82,6 +83,8 @@ interface Guardrails {
   /** False when dcf marked the engine's value unreliable. */
   valuationReliable: boolean;
   valuationReasons: string[];
+  /** The method behind the engine's value; dcf does not run when it is not a DCF. */
+  valuationMethod: ValuationPath;
   allowedBands: ValuationBand[];
 }
 
@@ -182,7 +185,15 @@ function computeGuardrails(ctx: AgentContext): Guardrails {
     return true;
   });
 
-  return { engineBand, regimeCap, backstopFloor, valuationReliable, valuationReasons, allowedBands };
+  return {
+    engineBand,
+    regimeCap,
+    backstopFloor,
+    valuationReliable,
+    valuationReasons,
+    valuationMethod: valuationPathOf(ctx.valuation),
+    allowedBands,
+  };
 }
 
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -194,6 +205,11 @@ function buildUserTurn(ctx: AgentContext, g: Guardrails): string {
   const rules = [
     `Engine band (from margin of safety): ${g.engineBand ?? 'not available'}` +
       `${g.valuationReliable ? '' : ' (not a starting point: see valuation reliability)'}`,
+    g.valuationMethod.isDcf
+      ? `Valuation method: discounted cash flow${g.valuationMethod.label ? ` (${g.valuationMethod.label})` : ''}`
+      : 'Valuation method: NOT a discounted cash flow. The engine valued this on ' +
+        `${shortMethod(g.valuationMethod.label ?? 'an unnamed method')}. Name that method plainly in the thesis, ` +
+        'and do not present the value as a discounted cash flow result',
     g.valuationReliable
       ? 'Valuation reliability: the dcf reviewer raised no reliability concern'
       : `Valuation reliability: the dcf reviewer marked the engine's value unreliable ` +
@@ -346,6 +362,14 @@ function toOutput(model: VerdictModel, ctx: AgentContext, g: Guardrails): Verdic
     confidence: unreliable
       ? field<VerdictModel['confidence']>('low', 'summary', 'computed', `Forced to low: ${unreliable}`)
       : field(model.confidence, 'summary', 'model'),
+    valuationMethod: field(
+      g.valuationMethod,
+      'summary',
+      'computed',
+      g.valuationMethod.isDcf
+        ? undefined
+        : `Valued on ${shortMethod(g.valuationMethod.label ?? 'an unnamed method')}, not a discounted cash flow`,
+    ),
     bullPoints: field(model.bullPoints.map(tidy), 'summary', 'model'),
     bearPoints: field(model.bearPoints.map(tidy), 'summary', 'model'),
     disclaimer: field(DISCLAIMER, 'summary', 'computed'),

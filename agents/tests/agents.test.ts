@@ -7,6 +7,7 @@ import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 
 import { cacheKey, MemoryStore, setCacheStore } from '../_shared/cache.ts';
 import { keyFigures, renderKeyFigures } from '../_shared/figures.ts';
+import { valuationPathOf } from '../_shared/valuation.ts';
 import { setClock } from '../_shared/format.ts';
 import {
   buildRequest,
@@ -1519,6 +1520,88 @@ describe('valuation basis', () => {
       displayIv: 198.5,
       differsMaterially: false,
     });
+  });
+});
+
+describe('valuation method', () => {
+  const pathFor = (label: string | null) => {
+    const ctx = baseContext();
+    assert.ok(ctx.valuation);
+    ctx.valuation.ivSourceLabel = label;
+    return valuationPathOf(ctx.valuation);
+  };
+
+  const labelled = (label: string | null): AgentContext => {
+    const ctx = verdictContext();
+    assert.ok(ctx.valuation);
+    ctx.valuation.ivSourceLabel = label;
+    return ctx;
+  };
+
+  it("reads the engine's own labels", () => {
+    for (const label of [
+      'DCF',
+      'Network Effect Valuation: Standard DCF applied to asset-light payment infrastructure.',
+      null,
+    ]) {
+      assert.equal(pathFor(label).isDcf, true, `${label} is a discounted cash flow`);
+    }
+    for (const label of [
+      'Analyst Target (pre-revenue biotech)',
+      'Banking-DCF (616.01) 70% + P/B (1.56x) + P/E (13.2x) blend + ROE 17.8% efficiency premium 30%',
+      'Banking-DCF (Net Income → FCFE)',
+      'DCF 50% + EV/Revenue 4.2x 50%',
+      'DCF + Multiples (50/50)',
+      'Multiples (EV/EBITDA)',
+      'Cash-Only Distress Proxy',
+      'Sultan Split',
+    ]) {
+      assert.equal(pathFor(label).isDcf, false, `${label} is not a discounted cash flow`);
+    }
+  });
+
+  it('dcf refuses a value no discounted cash flow produced, without calling the model', async () => {
+    const calls = useTransport();
+    const ctx = baseContext();
+    assert.ok(ctx.valuation);
+    ctx.valuation.ivSourceLabel = 'Analyst Target (pre-revenue biotech)';
+    const result = await registry.dcf.run(ctx);
+
+    assert.equal(result.status, 'unavailable');
+    assert.equal(result.error?.kind, 'insufficient_data');
+    assert.match(result.error?.message ?? '', /it used Analyst Target \(pre-revenue biotech\)/);
+    assert.equal(calls.length, 0, 'the refusal costs no model call');
+  });
+
+  it('dcf still runs on a discounted cash flow, or when the label is missing', async () => {
+    const calls = useTransport();
+    const ctx = baseContext();
+    assert.ok(ctx.valuation);
+    ctx.valuation.ivSourceLabel = 'DCF';
+
+    assert.equal((await registry.dcf.run(ctx)).status, 'ok');
+    assert.equal((await registry.dcf.run(baseContext())).status, 'ok');
+    assert.equal(calls.length, 2);
+  });
+
+  it('the verdict names the method in its rules and carries it as a field', async () => {
+    const calls = useTransport();
+    const blended = await registry.verdict.run(
+      labelled('Banking-DCF (616.01) 70% + P/B (1.56x) + P/E (13.2x) blend'),
+    );
+
+    assert.match(
+      calls[0]?.user ?? '',
+      /Valuation method: NOT a discounted cash flow\. The engine valued this on Banking-DCF/,
+    );
+    assert.equal(blended.data?.valuationMethod.value.isDcf, false);
+    assert.equal(blended.data?.valuationMethod.visibility, 'summary');
+    assert.match(blended.data?.valuationMethod.note ?? '', /not a discounted cash flow/);
+
+    const plain = await registry.verdict.run(labelled('DCF'));
+    assert.match(calls[1]?.user ?? '', /Valuation method: discounted cash flow \(DCF\)/);
+    assert.deepEqual(plain.data?.valuationMethod.value, { label: 'DCF', isDcf: true });
+    assert.equal(plain.data?.valuationMethod.note, undefined);
   });
 });
 

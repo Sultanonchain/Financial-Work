@@ -248,6 +248,19 @@ validation requires both figures to appear there, so a reader looking at the
 displayed number is told the critique is of the pre-adjustment one. The
 `valuationBasis` field (detail, computed) carries both values and the flag.
 
+**When the value is not a DCF at all.** `_shared/valuation.ts` reads
+`ivSourceLabel` and decides whether the displayed value came from a discounted
+cash flow of the inputs dcf is shown. Multiples, an analyst target, a
+book-value or banking blend, a distress proxy and any blend of methods are not
+(on 2026-09-14, VKTX was "Analyst Target (pre-revenue biotech)" and JPM was
+"Banking-DCF (616.01) 70% + P/B (1.56x) + P/E (13.2x) blend"). dcf then returns
+`unavailable` with a reason naming the method, before any model call, rather
+than reviewing DCF assumptions for a value no DCF produced. The verdict states
+the method instead of implying a DCF: its rules block names it, the prompt
+requires the thesis to say so in plain words, and `valuationMethod` (summary,
+computed) carries the label and the flag for the UI. A context with no label is
+treated as a DCF, which is the engine's default path.
+
 ## Catalyst lifecycle
 
 Every catalyst has a `status`: `rumored`, `reported`, `announced` or `shipped`.

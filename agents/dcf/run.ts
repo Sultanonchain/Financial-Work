@@ -23,6 +23,7 @@ import {
   type FinancialStatements,
   type ValuationSnapshot,
 } from '../_shared/types.ts';
+import { shortMethod, valuationPathOf } from '../_shared/valuation.ts';
 
 import { SYSTEM_PROMPT } from './prompt.ts';
 import {
@@ -146,6 +147,22 @@ export async function run(ctx: AgentContext): Promise<AgentResult<DcfOutput>> {
   if (!valuation || !isNum(valuation.intrinsicValue)) {
     return unavailable(
       { kind: 'insufficient_data', message: 'no valuation engine output on the context' },
+      base,
+    );
+  }
+
+  // The inputs below are discounted cash flow assumptions. When the engine
+  // reached its value another way, reviewing them would describe a model that
+  // did not produce the number on the page, so the panel says nothing instead.
+  const path = valuationPathOf(valuation);
+  if (!path.isDcf) {
+    return unavailable(
+      {
+        kind: 'insufficient_data',
+        message:
+          'the engine did not value this with a discounted cash flow, so it has no discounted cash flow ' +
+          `assumptions to review: it used ${shortMethod(path.label ?? 'an unnamed method')}`,
+      },
       base,
     );
   }

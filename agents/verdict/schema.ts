@@ -71,6 +71,8 @@ export const VerdictOutputSchema = z.object({
   plainEnglish: zField(z.string()),
   category: zField(z.enum(LYNCH_CATEGORIES)),
   confidence: zField(z.enum(CONFIDENCE)),
+  /** The method behind the engine's value. isDcf false means the page is not showing DCF output. */
+  valuationMethod: zField(z.object({ label: z.string().nullable(), isDcf: z.boolean() })),
   bullPoints: zField(z.array(z.string())),
   bearPoints: zField(z.array(z.string())),
   disclaimer: zField(z.string()),

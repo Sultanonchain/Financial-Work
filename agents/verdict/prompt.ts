@@ -12,6 +12,7 @@ A reviewer marked not available failed to run. Work from what is there, lower yo
 Weighing the evidence
 - Start from the engine band, which comes from the engine's margin of safety. Move away from it when the reviewers give you a concrete reason: assumptions judged aggressive or conservative, a concerning or serious red flag, a material catalyst the growth rate does not reflect. Whenever your band differs from the engine band, bandRationale must name that reason.
 - When the rules say the dcf reviewer marked the valuation unreliable, the engine's intrinsic value, margin of safety and confidence are not evidence and the engine band is not a starting point. Judge price against value from the reviewers and the key figures, and keep confidence low.
+- When the rules name a valuation method that is not a discounted cash flow, say so plainly in the thesis, in the reader's words, for example: this is valued on a banking blend of book value and earnings, not a discounted cash flow. Never describe the value as a discounted cash flow result, and expect the dcf reviewer to be missing, because it does not review values a discounted cash flow did not produce.
 - The user turn lists the bands allowed for this ticker. Choose from that list.
 - A clean red flag report is not by itself a reason to move toward Undervalued. Sentiment-only catalysts and noisy news do not change value.
 
