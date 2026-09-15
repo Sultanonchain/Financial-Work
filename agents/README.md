@@ -238,6 +238,16 @@ Two things the agents cannot see past:
   is a scratch harness, not the production mapping, and still reads
   `iv_confidence`.
 
+**What dcf is told about this.** The context carries `baseIv` (the engine's
+pure DCF value, `dcf_recompute_basis.base_iv`), `ivSourceLabel`, `fin415Used`,
+`sectorValLabel` and `consensusAnchorPreIv`. They render under the engine
+inputs, so dcf sees them and the other agents do not. dcf writes
+`inputRationale` (summary), one or two sentences naming the value its review
+applies to. When `baseIv` and `intrinsicValue` differ by 10% or more,
+validation requires both figures to appear there, so a reader looking at the
+displayed number is told the critique is of the pre-adjustment one. The
+`valuationBasis` field (detail, computed) carries both values and the flag.
+
 ## Catalyst lifecycle
 
 Every catalyst has a `status`: `rumored`, `reported`, `announced` or `shipped`.

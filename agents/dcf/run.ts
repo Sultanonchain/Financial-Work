@@ -110,6 +110,34 @@ const CORE_INPUTS: readonly DcfAssumptionKey[] = ['stage1_growth', 'wacc', 'fcf_
  */
 const UNASSESSABLE_CORE_LIMIT = 2;
 
+/**
+ * Below this the pure DCF value and the displayed value are the same number for
+ * the reader. At or above it the review must say which one it is reviewing.
+ */
+const MATERIAL_DIFFERENCE = 0.1;
+
+interface ValuationBasis {
+  baseIv: number | null;
+  displayIv: number | null;
+  differsMaterially: boolean;
+}
+
+/** What the review is of (the engine's pure DCF) against what the reader is shown. */
+function valuationBasisOf(v: ValuationSnapshot): ValuationBasis {
+  const baseIv = isNum(v.baseIv) ? v.baseIv : null;
+  const displayIv = isNum(v.intrinsicValue) ? v.intrinsicValue : null;
+  return {
+    baseIv,
+    displayIv,
+    differsMaterially:
+      baseIv !== null &&
+      displayIv !== null &&
+      baseIv > 0 &&
+      displayIv > 0 &&
+      Math.abs(displayIv / baseIv - 1) >= MATERIAL_DIFFERENCE,
+  };
+}
+
 export async function run(ctx: AgentContext): Promise<AgentResult<DcfOutput>> {
   const startedAt = Date.now();
   const base = { slug: 'dcf' as const, ticker: ctx.ticker, startedAt };
@@ -124,13 +152,34 @@ export async function run(ctx: AgentContext): Promise<AgentResult<DcfOutput>> {
 
   const figures = keyFigures(ctx.statements);
   const history = computeHistory(ctx.statements, figures);
+  const basis = valuationBasisOf(valuation);
+
+  // The reader is shown the post-adjustment value while this review is of the
+  // inputs to the pure one. When they are different numbers, say both.
+  const schema = basis.differsMaterially
+    ? DcfModelSchema.superRefine((out, issues) => {
+        const written = out.inputRationale.replace(/,/g, '');
+        const missing = [basis.baseIv, basis.displayIv].filter(
+          (value): value is number => value !== null && !written.includes(value.toFixed(2)),
+        );
+        if (missing.length) {
+          issues.addIssue({
+            code: 'custom',
+            path: ['inputRationale'],
+            message:
+              'inputRationale must name both values as figures: this review is of the pure discounted cash flow ' +
+              `value of ${basis.baseIv?.toFixed(2)}, while the page shows ${basis.displayIv?.toFixed(2)}`,
+          });
+        }
+      })
+    : DcfModelSchema;
 
   const gen = await generateValidated({
     slug: 'dcf',
     ticker: ctx.ticker,
     system: SYSTEM_PROMPT,
     user: buildUserTurn(ctx, valuation, history, figures),
-    schema: DcfModelSchema,
+    schema,
     effort: 'low',
     model,
     maxTokens,
@@ -142,7 +191,7 @@ export async function run(ctx: AgentContext): Promise<AgentResult<DcfOutput>> {
     return unavailable(gen.error ?? { kind: 'unknown', message: 'no data returned' }, init);
   }
 
-  return finalizeOutput(DcfOutputSchema, toOutput(gen.data, ctx, valuation, history), init);
+  return finalizeOutput(DcfOutputSchema, toOutput(gen.data, ctx, valuation, history, basis), init);
 }
 
 function buildUserTurn(
@@ -279,6 +328,7 @@ function toOutput(
   ctx: AgentContext,
   v: ValuationSnapshot,
   history: DcfHistory,
+  basis: ValuationBasis,
 ): DcfOutput {
   const byKey = new Map(reply.assumptions.map((row) => [row.key, row]));
 
@@ -318,6 +368,14 @@ function toOutput(
     price: field(v.price ?? ctx.prices.last, 'summary', 'api'),
     marginOfSafetyPct: field(v.marginOfSafetyPct, 'summary', 'computed', unreliable),
     plainEnglish: field(tidy(reply.plainEnglish), 'summary', 'model'),
+    inputRationale: field(
+      tidy(reply.inputRationale),
+      'summary',
+      'model',
+      basis.differsMaterially
+        ? 'The engine replaces its own discounted cash flow value before display, so the review is of the pure value'
+        : undefined,
+    ),
     historicalFit: field(reply.historicalFit, 'summary', 'model'),
     confidence: reliability.reliable
       ? field(reply.confidence, 'summary', 'model')
@@ -340,6 +398,12 @@ function toOutput(
       'model',
     ),
     confidenceReasons: field(reply.confidenceReasons.map(tidy), 'detail', 'model'),
+    valuationBasis: field(
+      basis,
+      'detail',
+      'computed',
+      'baseIv is the engine\'s pure discounted cash flow value; displayIv is what the reader is shown',
+    ),
     history: field(history, 'detail', 'computed'),
   };
 }

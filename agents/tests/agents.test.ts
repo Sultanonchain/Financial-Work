@@ -1448,6 +1448,80 @@ describe('dcf assessments', () => {
   });
 });
 
+describe('valuation basis', () => {
+  /** The base context with the engine's pure DCF value and the path that replaced it. */
+  const withBasis = (baseIv: number | null): AgentContext => {
+    const ctx = baseContext();
+    assert.ok(ctx.valuation);
+    ctx.valuation.baseIv = baseIv;
+    ctx.valuation.ivSourceLabel = 'DCF';
+    ctx.valuation.fin415Used = true;
+    ctx.valuation.consensusAnchorPreIv = 355.96;
+    return ctx;
+  };
+
+  it('shows dcf how the displayed value was produced, and nobody else', async () => {
+    const calls = useTransport();
+    await registry.dcf.run(withBasis(34.72));
+    await registry.redflag.run(withBasis(34.72));
+    const users = Object.fromEntries(calls.map((call) => [call.slug, call.user]));
+
+    assert.match(
+      users.dcf ?? '',
+      /pure discounted cash flow value from these inputs, before the site's later adjustments: \$34\.72/,
+    );
+    assert.match(users.dcf ?? '', /an FCFE model replaced the discounted cash flow result before display/);
+    assert.match(users.dcf ?? '', /value before the blend with the analyst target: \$355\.96/);
+    assert.doesNotMatch(users.redflag ?? '', /How the displayed value was produced/);
+  });
+
+  it('requires both figures in inputRationale when the two values differ materially', async () => {
+    // MU on 2026-09-14: a $34.72 pure DCF behind a $471.68 displayed value.
+    const calls = useTransport({
+      dcf: (req) =>
+        req.attempt === 1
+          ? { ...reply('dcf'), inputRationale: 'This review is of the engine valuation.' }
+          : {
+              ...reply('dcf'),
+              inputRationale:
+                'This review is of the pure discounted cash flow value of $34.72; the page shows $198.50 after later adjustments.',
+            },
+    });
+    const result = await registry.dcf.run(withBasis(34.72));
+
+    assert.equal(result.status, 'ok', JSON.stringify(result.error));
+    assert.equal(result.meta.attempts, 2);
+    assert.match(calls[1]?.repairHint ?? '', /must name both values as figures/);
+    assert.deepEqual(result.data?.valuationBasis.value, {
+      baseIv: 34.72,
+      displayIv: 198.5,
+      differsMaterially: true,
+    });
+    assert.equal(result.data?.inputRationale.visibility, 'summary');
+    assert.match(result.data?.inputRationale.note ?? '', /review is of the pure value/);
+  });
+
+  it('asks for nothing extra when the displayed value is the DCF value, or when there is none', async () => {
+    const sameValue = useTransport({
+      dcf: () => ({ ...reply('dcf'), inputRationale: 'This review is of the value shown on the page.' }),
+    });
+    const same = await registry.dcf.run(withBasis(198.5));
+    assert.equal(same.meta.attempts, 1);
+    assert.equal(sameValue.length, 1);
+    assert.equal(same.data?.valuationBasis.value.differsMaterially, false);
+
+    useTransport({
+      dcf: () => ({ ...reply('dcf'), inputRationale: 'This review is of the engine value.' }),
+    });
+    const missing = await registry.dcf.run(baseContext());
+    assert.deepEqual(missing.data?.valuationBasis.value, {
+      baseIv: null,
+      displayIv: 198.5,
+      differsMaterially: false,
+    });
+  });
+});
+
 describe('neutral wording', () => {
   it('sends dcf and verdict prose that calls a figure fabricated back for repair', async () => {
     const calls = useTransport({

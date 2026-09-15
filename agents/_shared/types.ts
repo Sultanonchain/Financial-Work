@@ -266,6 +266,22 @@ export interface ValuationSnapshot {
   confidence: 'low' | 'medium' | 'high' | null;
   confidenceWeaknesses: string[];
   qualityMetrics: QualityMetric[];
+
+  // How the displayed intrinsic value was produced. The engine replaces its own
+  // DCF result before display (an FCFE model, a sector method, a blend with the
+  // analyst target), so the inputs above may not be the inputs to
+  // intrinsicValue. Shown to dcf only. Optional: older contexts omit them.
+
+  /** The engine's pure DCF value from the inputs above, before those adjustments. */
+  baseIv?: number | null;
+  /** Which path produced intrinsicValue. */
+  ivSourceLabel?: string | null;
+  /** True when an FCFE model replaced the DCF result. */
+  fin415Used?: boolean | null;
+  /** The sector method applied, such as biotech or banking. */
+  sectorValLabel?: string | null;
+  /** The value before the blend with the analyst target. */
+  consensusAnchorPreIv?: number | null;
 }
 
 export interface QualityMetric {

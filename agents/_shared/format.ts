@@ -285,6 +285,24 @@ export function renderValuation(
       `Net debt used by the engine: ${money(v.netDebt, currency)}`,
       `Shares outstanding used by the engine: ${quantity(v.sharesOut)}`,
     );
+    // The inputs above produce the pure discounted cash flow value; the site
+    // then replaces it with the value above, which is what the reader sees.
+    const path = [
+      isNum(v.baseIv)
+        ? `pure discounted cash flow value from these inputs, before the site's later adjustments: ${money(v.baseIv, currency)}`
+        : null,
+      v.ivSourceLabel ? `path the displayed value came from: ${v.ivSourceLabel}` : null,
+      v.fin415Used === true
+        ? 'an FCFE model replaced the discounted cash flow result before display'
+        : null,
+      v.sectorValLabel ? `sector method applied: ${v.sectorValLabel}` : null,
+      isNum(v.consensusAnchorPreIv)
+        ? `value before the blend with the analyst target: ${money(v.consensusAnchorPreIv, currency)}`
+        : null,
+    ].filter((line): line is string => line !== null);
+    if (path.length) {
+      lines.push('How the displayed value was produced:', ...path.map((line) => `  ${line}`));
+    }
   }
   lines.push(`Engine confidence: ${v.confidence ?? NA}`);
   if (v.confidenceWeaknesses.length) {

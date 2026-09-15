@@ -13,6 +13,8 @@ Always assess stage1_growth, terminal_growth and wacc. Add others only when ther
 
 historicalFit: consistent, stretch (above the record but plausible), break (needs a clear departure from it) or unclear.
 
+inputRationale: one or two sentences naming the value your review applies to. You review the inputs above, which produce the engine's pure discounted cash flow value. The site may then replace that value before the reader sees it, through an FCFE model, a sector method or a blend with the analyst target. When the context shows a pure value that differs from the displayed intrinsic value, say so plainly and give both figures, for example: this review is of the pure discounted cash flow value of $34.72, while the page shows $471.68 after the site's later adjustments, which these assumptions do not drive. When the two match, say the review applies to the displayed value.
+
 Rules
 - Use only numbers from the context, and put the figures you relied on in evidence. If a needed figure is missing, say so.
 - When an engine figure does not match the reported figures, say it does not match. Never call a figure fabricated or made up.

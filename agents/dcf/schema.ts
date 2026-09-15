@@ -40,6 +40,8 @@ export const DcfModelSchema = z
   .object({
     headline: prose(200),
     plainEnglish: prose(400),
+    /** Which value the review applies to. run.ts requires both figures when they differ materially. */
+    inputRationale: prose(400),
     historicalFit: z.enum(HISTORICAL_FIT),
     assumptions: z
       .array(
@@ -128,6 +130,8 @@ export const DcfOutputSchema = z.object({
   price: zField(z.number().nullable()),
   marginOfSafetyPct: zField(z.number().nullable()),
   plainEnglish: zField(z.string()),
+  /** Names the value the review applies to: the engine's pure DCF, or the displayed value when they agree. */
+  inputRationale: zField(z.string()),
   historicalFit: zField(z.enum(HISTORICAL_FIT)),
   confidence: zField(z.enum(CONFIDENCE)),
 
@@ -136,6 +140,14 @@ export const DcfOutputSchema = z.object({
     z.object({ key: z.enum(DCF_ASSUMPTION_KEYS), label: z.string(), explanation: z.string() }),
   ),
   confidenceReasons: zField(z.array(z.string())),
+  /** The pure DCF value the review is of, against the value the reader is shown. */
+  valuationBasis: zField(
+    z.object({
+      baseIv: z.number().nullable(),
+      displayIv: z.number().nullable(),
+      differsMaterially: z.boolean(),
+    }),
+  ),
   history: zField(DcfHistorySchema),
 });
 

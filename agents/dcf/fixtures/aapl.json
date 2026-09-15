@@ -2,7 +2,7 @@
   "name": "dcf-aapl-2026-09-12",
   "description": "Illustrative AAPL-shaped context for tests. Statement figures are approximate; the news items and the model reply are synthetic and were written by hand because no API key was available when this fixture was created. Re-record against the live API with `npm run fixtures:record`.",
   "source": "recorded",
-  "recordedAt": "2026-09-14T21:39:23.155Z",
+  "recordedAt": "2026-09-15T23:20:41.426Z",
   "recordedModel": "claude-sonnet-5",
   "input": {
     "ticker": "AAPL",
@@ -392,57 +392,53 @@
     }
   },
   "modelOutput": {
-    "headline": "The valuation rests mainly on the 8.4% discount rate and a terminal growth rate that sits close to it, with the stage one growth assumption running well above Apple's five year trend.",
-    "plainEnglish": "This estimate depends heavily on how much risk is priced into the discount rate and how fast Apple keeps growing far into the future. Recent revenue and cash flow growth have been much slower than what the model assumes for the next few years.",
+    "headline": "The valuation rests on continued double digit revenue acceleration against a five year record of low single digit growth, discounted at a modest rate.",
+    "plainEnglish": "This estimate assumes Apple's growth picks up notably from its recent pace and that its cost of capital stays low. If growth instead tracks its five year average, the fair value would likely be lower.",
+    "inputRationale": "This review applies to the displayed intrinsic value of $198.50, which is the engine's pure discounted cash flow output.",
     "historicalFit": "stretch",
     "assumptions": [
       {
         "key": "stage1_growth",
-        "evidence": "Revenue growth per year across five periods was 3.28% and free cash flow growth was 1.54%, though trailing twelve month revenue grew 5.8%.",
-        "reasoning": "7% stage one growth is well above both the five year trend and the recent trailing twelve month pickup, requiring services and margin expansion to keep accelerating.",
+        "evidence": "Revenue growth per year across five periods is 3.28%, though trailing twelve month revenue is up 5.8% versus the last fiscal year; free cash flow growth per year is 1.54%.",
+        "reasoning": "7.00% stage 1 growth is well above both the multi year revenue trend and the recent uptick, and far above historic free cash flow growth.",
         "engineVsEvidence": "higher"
       },
       {
         "key": "terminal_growth",
-        "evidence": "Terminal growth is set at 2.50% against an 8.40% discount rate, a gap of 5.9 points.",
-        "reasoning": "2 to 3 percent is a reasonable long run terminal rate, but the engine itself flags terminal value at 71% of enterprise value, so this assumption dominates the result.",
+        "evidence": "Terminal growth is 2.50% against an 8.40% discount rate, and terminal value is 71% of enterprise value per the engine's own confidence note.",
+        "reasoning": "2.50% is a reasonable long run assumption, but the narrow 5.9 point gap to WACC combined with the 71% terminal value share means the result depends heavily on the terminal assumptions.",
         "engineVsEvidence": "in_line"
       },
       {
         "key": "wacc",
-        "evidence": "Net debt to EBITDA is 0.45x, described as strong, and Apple is a large, established company with no sovereign backstop noted.",
-        "reasoning": "8.40% seems reasonable for a large, low leverage, high return business, though a large-cap of this quality could arguably support a slightly lower rate.",
+        "evidence": "Debt to equity is 1.38x, net debt to EBITDA is 0.45x, no sovereign backstop is on file, and the company has a $3.51T market cap with 58.2% return on invested capital.",
+        "reasoning": "8.40% seems reasonable to slightly low for a company of this size and financial strength with no sovereign backstop, sitting near the lower end of what a large, stable but non-guaranteed issuer would warrant.",
         "engineVsEvidence": "in_line"
       },
       {
         "key": "fcf_base",
-        "evidence": "Engine uses $98.80B, matching fiscal year 2025 free cash flow of $98.80B, while trailing twelve month free cash flow is $116.60B.",
-        "reasoning": "The engine's base is below the more recent trailing twelve month figure, so it is not using the most current, higher cash generation level.",
+        "evidence": "Engine uses $98.80B, matching the last fiscal year's free cash flow, while trailing twelve month free cash flow is $116.60B and stock compensation is 13.1% of latest free cash flow.",
+        "reasoning": "The engine's base is actually below the more current trailing twelve month figure, so it is conservative rather than inflated relative to recent performance.",
         "engineVsEvidence": "lower"
-      },
-      {
-        "key": "share_count",
-        "evidence": "Engine uses 14.84B shares, matching the latest diluted share count reported for the trailing twelve months.",
-        "reasoning": "This matches the most recent reported figure and continues the buyback-driven decline from 15.00B a year earlier.",
-        "engineVsEvidence": "in_line"
       }
     ],
     "dominantSensitivity": {
       "key": "terminal_growth",
-      "explanation": "With terminal value already 71% of enterprise value and only a 5.9 point gap to the discount rate, small changes in the terminal growth assumption swing the valuation far more than any other input."
+      "explanation": "With terminal value already 71% of enterprise value and only a 5.9 point spread between WACC and terminal growth, small changes to either the terminal growth rate or the discount rate swing the valuation substantially more than changes to stage 1 growth."
     },
     "confidence": "medium",
     "confidenceReasons": [
-      "Terminal value dominates enterprise value at 71%, per the engine's own flagged weakness",
-      "Stage one growth of 7% is notably above the five year revenue and free cash flow trend",
-      "Free cash flow base used is below the more current trailing twelve month figure, understating recent cash generation"
+      "Stage 1 growth of 7% is notably above the five year revenue and free cash flow trend, though closer to the recent trailing twelve month uptick.",
+      "Terminal value dominates the calculation at 71% of enterprise value, per the engine's own flagged weakness.",
+      "Five annual periods provide a reasonably solid but not extensive historical base for judgment.",
+      "Financial strength metrics such as low net debt to EBITDA and high return on invested capital support a stable discount rate assumption."
     ]
   },
   "expected": {
     "status": "ok",
     "data": {
       "headline": {
-        "value": "The valuation rests mainly on the 8.4% discount rate and a terminal growth rate that sits close to it, with the stage one growth assumption running well above Apple's five year trend.",
+        "value": "The valuation rests on continued double digit revenue acceleration against a five year record of low single digit growth, discounted at a modest rate.",
         "visibility": "headline",
         "source": "model"
       },
@@ -479,7 +475,12 @@
         "source": "computed"
       },
       "plainEnglish": {
-        "value": "This estimate depends heavily on how much risk is priced into the discount rate and how fast Apple keeps growing far into the future. Recent revenue and cash flow growth have been much slower than what the model assumes for the next few years.",
+        "value": "This estimate assumes Apple's growth picks up notably from its recent pace and that its cost of capital stays low. If growth instead tracks its five year average, the fair value would likely be lower.",
+        "visibility": "summary",
+        "source": "model"
+      },
+      "inputRationale": {
+        "value": "This review applies to the displayed intrinsic value of $198.50, which is the engine's pure discounted cash flow output.",
         "visibility": "summary",
         "source": "model"
       },
@@ -501,8 +502,8 @@
             "engineValue": 7,
             "unit": "pct",
             "assessment": "aggressive",
-            "reasoning": "7% stage one growth is well above both the five year trend and the recent trailing twelve month pickup, requiring services and margin expansion to keep accelerating.",
-            "evidence": "Revenue growth per year across five periods was 3.28% and free cash flow growth was 1.54%, though trailing twelve month revenue grew 5.8%."
+            "reasoning": "7.00% stage 1 growth is well above both the multi year revenue trend and the recent uptick, and far above historic free cash flow growth.",
+            "evidence": "Revenue growth per year across five periods is 3.28%, though trailing twelve month revenue is up 5.8% versus the last fiscal year; free cash flow growth per year is 1.54%."
           },
           {
             "key": "terminal_growth",
@@ -510,8 +511,8 @@
             "engineValue": 2.5,
             "unit": "pct",
             "assessment": "supported",
-            "reasoning": "2 to 3 percent is a reasonable long run terminal rate, but the engine itself flags terminal value at 71% of enterprise value, so this assumption dominates the result.",
-            "evidence": "Terminal growth is set at 2.50% against an 8.40% discount rate, a gap of 5.9 points."
+            "reasoning": "2.50% is a reasonable long run assumption, but the narrow 5.9 point gap to WACC combined with the 71% terminal value share means the result depends heavily on the terminal assumptions.",
+            "evidence": "Terminal growth is 2.50% against an 8.40% discount rate, and terminal value is 71% of enterprise value per the engine's own confidence note."
           },
           {
             "key": "wacc",
@@ -519,8 +520,8 @@
             "engineValue": 8.4,
             "unit": "pct",
             "assessment": "supported",
-            "reasoning": "8.40% seems reasonable for a large, low leverage, high return business, though a large-cap of this quality could arguably support a slightly lower rate.",
-            "evidence": "Net debt to EBITDA is 0.45x, described as strong, and Apple is a large, established company with no sovereign backstop noted."
+            "reasoning": "8.40% seems reasonable to slightly low for a company of this size and financial strength with no sovereign backstop, sitting near the lower end of what a large, stable but non-guaranteed issuer would warrant.",
+            "evidence": "Debt to equity is 1.38x, net debt to EBITDA is 0.45x, no sovereign backstop is on file, and the company has a $3.51T market cap with 58.2% return on invested capital."
           },
           {
             "key": "fcf_base",
@@ -528,17 +529,8 @@
             "engineValue": 98800000000,
             "unit": "money",
             "assessment": "conservative",
-            "reasoning": "The engine's base is below the more recent trailing twelve month figure, so it is not using the most current, higher cash generation level.",
-            "evidence": "Engine uses $98.80B, matching fiscal year 2025 free cash flow of $98.80B, while trailing twelve month free cash flow is $116.60B."
-          },
-          {
-            "key": "share_count",
-            "label": "Share count",
-            "engineValue": 14840000000,
-            "unit": "shares",
-            "assessment": "supported",
-            "reasoning": "This matches the most recent reported figure and continues the buyback-driven decline from 15.00B a year earlier.",
-            "evidence": "Engine uses 14.84B shares, matching the latest diluted share count reported for the trailing twelve months."
+            "reasoning": "The engine's base is actually below the more current trailing twelve month figure, so it is conservative rather than inflated relative to recent performance.",
+            "evidence": "Engine uses $98.80B, matching the last fiscal year's free cash flow, while trailing twelve month free cash flow is $116.60B and stock compensation is 13.1% of latest free cash flow."
           }
         ],
         "visibility": "detail",
@@ -549,19 +541,30 @@
         "value": {
           "key": "terminal_growth",
           "label": "Long-run growth",
-          "explanation": "With terminal value already 71% of enterprise value and only a 5.9 point gap to the discount rate, small changes in the terminal growth assumption swing the valuation far more than any other input."
+          "explanation": "With terminal value already 71% of enterprise value and only a 5.9 point spread between WACC and terminal growth, small changes to either the terminal growth rate or the discount rate swing the valuation substantially more than changes to stage 1 growth."
         },
         "visibility": "detail",
         "source": "model"
       },
       "confidenceReasons": {
         "value": [
-          "Terminal value dominates enterprise value at 71%, per the engine's own flagged weakness",
-          "Stage one growth of 7% is notably above the five year revenue and free cash flow trend",
-          "Free cash flow base used is below the more current trailing twelve month figure, understating recent cash generation"
+          "Stage 1 growth of 7% is notably above the five year revenue and free cash flow trend, though closer to the recent trailing twelve month uptick.",
+          "Terminal value dominates the calculation at 71% of enterprise value, per the engine's own flagged weakness.",
+          "Five annual periods provide a reasonably solid but not extensive historical base for judgment.",
+          "Financial strength metrics such as low net debt to EBITDA and high return on invested capital support a stable discount rate assumption."
         ],
         "visibility": "detail",
         "source": "model"
+      },
+      "valuationBasis": {
+        "value": {
+          "baseIv": null,
+          "displayIv": 198.5,
+          "differsMaterially": false
+        },
+        "visibility": "detail",
+        "source": "computed",
+        "note": "baseIv is the engine's pure discounted cash flow value; displayIv is what the reader is shown"
       },
       "history": {
         "value": {
