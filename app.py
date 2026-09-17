@@ -2329,6 +2329,64 @@ def calc_multiples_val(info, sector, industry, fx_rate, ebitda_ttm=None, moat_pr
 # whichever is higher.  Catches both the "19,000% MOS" upper-tail nonsense and
 # the "IV = 0.01 on a healthy stock" lower-tail nonsense, a single function
 # every IV-generating path goes through, eliminating bypass routes.
+def _company_facts(info):
+    """
+    Plain company facts for the ticker page's company panel. Straight from the
+    data layer, no model: sector and industry already ship at the top level, so
+    this carries the rows that did not exist in the payload before.
+    """
+    if not isinstance(info, dict):
+        return {}
+    hq = ", ".join([x for x in (info.get("city"), info.get("state"), info.get("country")) if x])
+    employees = info.get("fullTimeEmployees")
+    try:
+        employees = int(employees) if employees is not None else None
+    except (TypeError, ValueError):
+        employees = None
+    summary = (info.get("longBusinessSummary") or "").strip()
+    return {
+        "employees":    employees,
+        "headquarters": hq or None,
+        "ceo":          _company_ceo(info.get("companyOfficers")),
+        "summary":      (summary[:420].rstrip() + "...") if len(summary) > 420 else (summary or None),
+    }
+
+
+# Titles that make someone chief executive of a division, an adviser to the
+# CEO, or a former one. None of them is the company's CEO.
+_NOT_COMPANY_CEO = re.compile(
+    r"\b(?:former|interim|deputy|vice)\b|\b(?:to|of)\s+the\s+ceo\b|"
+    r"\bceo\s+of\s+(?!the\s+company\b)\w|\bchief\s+executive\s+officer\s+of\s+\w",
+    re.I,
+)
+_IS_CEO = re.compile(r"\bceo\b|\bchief\s+executive\s+officer\b", re.I)
+
+
+def _company_ceo(officers):
+    """The officer who is chief executive of the whole company, or None."""
+    if not isinstance(officers, list):
+        return None
+    names = []
+    for o in officers:
+        if not isinstance(o, dict):
+            continue
+        title = str(o.get("title") or "")
+        name = str(o.get("name") or "").strip()
+        if not name or not _IS_CEO.search(title) or _NOT_COMPANY_CEO.search(title):
+            continue
+        # Drop honorifics and trailing credentials: "Mr. Tim  Cook" -> "Tim Cook".
+        name = re.sub(r"^(?:Mr|Mrs|Ms|Miss|Dr|Prof)\.?\s+", "", name)
+        name = re.sub(r",?\s+(?:Ph\.?D|M\.?B\.?A|CFA|CPA|J\.?D|M\.?D)\.?$", "", name, flags=re.I)
+        names.append(re.sub(r"\s{2,}", " ", name).strip())
+    if len(names) == 1:
+        return names[0]
+    # Co-CEOs are listed together; any other ambiguity omits the row.
+    if len(names) == 2 and all(re.search(r"\bco[- ]ceo\b", str(o.get("title") or ""), re.I)
+                               for o in officers if str(o.get("name") or "").strip() in names):
+        return " and ".join(names)
+    return None
+
+
 def _clamp_iv(iv, price, analyst_target=None):
     """
     Returns clamped IV, or None if inputs are unusable.
@@ -12356,6 +12414,8 @@ def analyze():
             "industry":     industry,
             "currency":     info.get("currency", "USD"),
             "exchange":     info.get("exchange", ""),
+            # Company panel on the ticker page: data-layer facts, no model.
+            "company_facts": _company_facts(info),
             # Price
             "current_price": f2(price),
             "52w_high":      f2(info.get("fiftyTwoWeekHigh")),

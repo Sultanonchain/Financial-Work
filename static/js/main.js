@@ -121,85 +121,6 @@ function itemGradeChip(it) {
     </span>`;
 }
 
-// ── Grade explainer modal ────────────────────────────────────────────
-// Single source of truth for the band data on the frontend.  Mirrors
-// app.py::VALUS_GRADE_BANDS so the modal copy matches the server-side
-// classifier exactly.  If you adjust thresholds in compute_valus_grade,
-// adjust GRADE_BANDS here too.
-const GRADE_BANDS = [
-  { grade: "A", range: "MOS ≥ +30%",
-    label: "Deeply undervalued",
-    desc:  "Market price is well below VALUS fair value, a significant margin of safety. The kind of mispricing value investors look for." },
-  { grade: "B", range: "+15% to +30%",
-    label: "Moderately undervalued",
-    desc:  "Trading below VALUS fair value with a comfortable cushion. Less extreme than A but still attractive on the DCF view." },
-  { grade: "C", range: "−15% to +15%",
-    label: "Fairly priced",
-    desc:  "Market price tracks VALUS fair value, no obvious mispricing. The market and the model roughly agree on what this is worth." },
-  { grade: "D", range: "−30% to −15%",
-    label: "Moderately overvalued",
-    desc:  "Trading above VALUS fair value. Investors are paying for growth or quality that exceeds what the DCF baseline supports." },
-  { grade: "F", range: "MOS ≤ −30%",
-    label: "Severely overvalued",
-    desc:  "Market price is far above VALUS fair value, expectations look stretched. Either the model is missing something, or the price is." },
-];
-
-function renderGradeExplainerList() {
-  const list = document.getElementById("gradeExplainerList");
-  if (!list) return;
-  list.innerHTML = GRADE_BANDS.map(b => `
-    <li class="grade-explainer__item">
-      <span class="grade-explainer__badge" data-grade="${b.grade}">${b.grade}</span>
-      <div class="grade-explainer__text">
-        <div class="grade-explainer__label">
-          ${escHtml(b.label)}
-          <span class="grade-explainer__range">${escHtml(b.range)}</span>
-        </div>
-        <p class="grade-explainer__desc">${escHtml(b.desc)}</p>
-      </div>
-    </li>`).join("");
-}
-
-function openGradeExplainer() {
-  const m = document.getElementById("gradeExplainerModal");
-  if (!m) return;
-  renderGradeExplainerList();
-  m.classList.remove("hidden");
-}
-function closeGradeExplainer() {
-  document.getElementById("gradeExplainerModal")?.classList.add("hidden");
-}
-
-function setupGradeExplainer() {
-  // The dedicated "How?" link on the stock detail page.
-  const why = document.getElementById("vValusGradeWhy");
-  if (why) why.onclick = openGradeExplainer;
-
-  // Event-delegate: any .valus-grade chip (anywhere on the page, present
-  // or future) opens the modal when clicked.  Opt out per-element with
-  // .is-static when nesting inside another clickable row.
-  document.addEventListener("click", (e) => {
-    const chip = e.target.closest(".valus-grade");
-    if (!chip) return;
-    if (chip.classList.contains("is-static")) return;
-    // Skip if the chip lives inside another anchor/button that owns the
-    // click (e.g. a Top Picks card or a portfolio row).  The chip
-    // visually communicates "this is clickable for explanation"; in
-    // wrapped contexts we let the parent's click win to avoid surprise.
-    const wrapper = chip.closest("button, a, [data-pf-pick], [data-wl-open], [data-toppick], [data-pf-ticker]");
-    if (wrapper && wrapper !== chip && !wrapper.classList.contains("valus-grade")) return;
-    e.preventDefault();
-    e.stopPropagation();
-    openGradeExplainer();
-  });
-
-  // Escape closes (the global modal-dismiss handler also covers backdrop
-  // clicks via data-modal-close, so we don't need to re-bind those).
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeGradeExplainer();
-  });
-}
-
 /* ════════════════════════════════════════════════════════════════════════
    Tier color mapping
    ════════════════════════════════════════════════════════════════════════ */
@@ -471,8 +392,7 @@ function renderResults(d) {
   $("results").classList.remove("hidden");
 
   // Live-tick the analyze view: poll /api/quote every 30s for the displayed
-  // ticker and patch price + MOS in place.  IV is stable until the next
-  // hourly cron refresh, so client-side recompute is cheap and accurate.
+  // ticker and patch price + MOS in place.
   if (_ANALYZE_TICK_TIMER) clearInterval(_ANALYZE_TICK_TIMER);
   if (d && d.ticker) {
     _ANALYZE_TICK_TIMER = setInterval(() => refreshAnalyzeTick(d.ticker), 30000);
@@ -484,9 +404,8 @@ function renderResults(d) {
     b.classList.toggle("active", b.dataset.dcfSc === "base")
   );
 
-  // If the drawer was open from a previous analysis, collapse it so the user
-  // sees the new fresh hero+verdict at the top instead of being stuck deep
-  // inside another stock's drilldown.  They can re-expand if they want.
+  // Collapse the drawer so a new ticker opens on its verdict, not inside the
+  // previous company's detail.
   const drawer  = $("drawer");
   const trigger = $("drawerTrigger");
   if (drawer && drawer.classList.contains("open")) {
@@ -495,34 +414,53 @@ function renderResults(d) {
       trigger.classList.remove("open");
       trigger.setAttribute("aria-expanded", "false");
       const txt = $("drawerTriggerTxt");
-      if (txt) txt.textContent = "View detailed analysis";
+      if (txt) txt.textContent = "Assumptions";
     }
   }
 
-  renderHeroVerdict(d);
-  renderHaikuVerdict(d);
-  renderMethodology(d);
-  renderSanityCard(d);
-  renderFlipCard(d);
-  renderReverseDcfCard(d);
-  renderScenarios(d);
-  renderMiniStats(d);
-  renderQualityCard(d);
-  renderMoatCard(d);
-  renderBuffettCard(d);
-  renderMomentumCard(d);
-  renderEarningsQualityCard(d);
-  renderRiskCard(d);
-  renderInsiderCard(d.ticker);
-  renderCongressCard(d.ticker);
-  renderNewsSummaryCard(d);
-  renderDrawerContent(d);
-  syncAddPortfolioButtonForCurrent();
-  syncAddWatchlistButtonForCurrent();
-  if (typeof window._cdReset === "function") window._cdReset();
-
-  attachCardGlow();
+  // Zone 1 needs the valuation and nothing else, so it paints on its own and
+  // the panels below can resolve in their own time.
+  resetPanels();
+  renderZone1(d);
   $("results").scrollIntoView({ behavior: "smooth", block: "start" });
+
+  // Zone 2 on the next frame: four independent panels.
+  requestAnimationFrame(() => {
+    renderPanels(d);
+    // Zone 3 after them: collapsed detail, never in the way of either zone.
+    requestAnimationFrame(() => renderZone3(d));
+  });
+}
+
+// Everything tiered detail. Each step is isolated: one card failing leaves
+// the rest of the drawer, and both zones above it, intact.
+function renderZone3(d) {
+  const steps = [
+    () => renderValuationDetail(d),
+    () => renderAssumptionEditor(d),
+    () => renderHaikuVerdict(d),
+    () => renderMethodology(d),
+    () => renderSanityCard(d),
+    () => renderFlipCard(d),
+    () => renderReverseDcfCard(d),
+    () => renderScenarios(d),
+    () => renderMiniStats(d),
+    () => renderQualityCard(d),
+    () => renderMoatCard(d),
+    () => renderBuffettCard(d),
+    () => renderMomentumCard(d),
+    () => renderEarningsQualityCard(d),
+    () => renderInsiderCard(d.ticker),
+    () => renderCongressCard(d.ticker),
+    () => renderDrawerContent(d),
+    () => syncAddPortfolioButtonForCurrent(),
+    () => syncAddWatchlistButtonForCurrent(),
+    () => { if (typeof window._cdReset === "function") window._cdReset(); },
+    () => attachCardGlow(),
+  ];
+  for (const step of steps) {
+    try { step(); } catch (e) { console.error("[zone3]", e); }
+  }
 }
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -771,101 +709,151 @@ function renderBTCHero(d) {
    Hero verdict card
    ════════════════════════════════════════════════════════════════════════ */
 
-function renderHeroVerdict(d) {
-  const hero = $("heroVerdict");
+/* ════════════════════════════════════════════════════════════════════════
+   Zone 1, the verdict card: six fields, nothing else
+   ════════════════════════════════════════════════════════════════════════ */
+
+// Port of agents/_shared/valuation.ts. The engine reaches its number by a
+// banking blend, an analyst target or a sector method on some tickers, and the
+// page must not present any of those as a discounted cash flow.
+const NON_DCF_METHOD = /analyst target|multiple|p\s*\/\s*[be]\b|price[- ]to[- ](?:book|earnings|sales|revenue)|book value|ev\s*\/\s*(?:revenue|sales|ebitda)|p\s*\/\s*revenue|cash[- ]only|distress|liquidation|comparable|banking|net asset value|sultan split/i;
+const METHOD_BLEND = /\+[^%]*\d\s*%|\d\s*%[^+]*\+|\bblend/i;
+
+function valuationPathOf(d) {
+  const raw = d && typeof d.iv_source_label === "string" ? d.iv_source_label.trim() : "";
+  // No label: the engine's default path is a discounted cash flow.
+  if (!raw) return { label: null, isDcf: true };
+  return {
+    label: raw,
+    isDcf: /\bdcf\b/i.test(raw) && !NON_DCF_METHOD.test(raw) && !METHOD_BLEND.test(raw),
+  };
+}
+
+// Plain words for the method field, in the reader's vocabulary.
+function methodSentence(path) {
+  if (path.isDcf) return "Discounted cash flow";
+  const l = (path.label || "").toLowerCase();
+  if (l.includes("analyst target")) return "Analyst price targets, not a cash-flow model";
+  if (l.includes("banking"))        return "A banking blend of book value and earnings, not a cash-flow model";
+  if (l.includes("multiple"))       return "Valuation multiples, not a cash-flow model";
+  if (l.includes("distress") || l.includes("cash-only"))
+    return "A distress-based estimate, not a cash-flow model";
+  return path.label + ", not a cash-flow model";
+}
+
+const CONF_WORD = { high: "High", medium: "Medium", moderate: "Medium", low: "Low" };
+
+// Zone 1 needs only the valuation itself, so it paints before the panels and
+// never waits on them. Every slot is written on every render, so a missing
+// value leaves the card the same height it already was.
+function renderZone1(d) {
+  const card = $("heroVerdict");
   const vs   = d.verdict_summary || {};
   const pf   = d.priced_for || {};
-  const tier = pf.tier || "fair_value";
-  const tierCls = tierClassFor(tier);
+  const tierCls = tierClassFor(pf.tier || "fair_value");
 
-  // Reset tier classes, apply new
-  hero.classList.remove("tier-positive", "tier-info", "tier-warning", "tier-negative");
-  hero.classList.add(tierCls);
+  card.classList.remove("tier-positive", "tier-info", "tier-warning", "tier-negative");
+  card.classList.add(tierCls);
 
-  // Company info
-  $("vName").textContent = d.company_name || d.ticker;
-  $("vTicker").textContent = d.ticker;
-  $("vSector").textContent = d.sector || "N/A";
-  $("vRange").textContent = d["52w_low"] && d["52w_high"]
-    ? `52W $${fmt(d["52w_low"])}, $${fmt(d["52w_high"])}`
-    : "";
+  $("vName").textContent   = d.company_name || d.ticker || "N/A";
+  $("vTicker").textContent = d.ticker || "";
 
-  // Price + IV with count-up
-  const price = d.current_price || 0;
-  const iv    = d.intrinsic_value || 0;
-  animateNumber($("vPrice"), 0, price, 600, v => fmtPrice(v));
-  animateNumber($("vIV"),    0, iv,    600, v => fmtPrice(v));
+  // 1. Verdict
+  const badge = $("vTierBadge");
+  badge.classList.remove("tier-positive", "tier-info", "tier-warning", "tier-negative");
+  badge.classList.add(d.extreme_mos_flag ? "tier-info" : tierCls);
+  $("vTierLabel").textContent = d.extreme_mos_flag
+    ? "Unreliable data"
+    : (pf.label || "Verdict pending");
+
+  // 2. What it looks worth. The band is the answer; a point estimate to the
+  //    cent implies a precision this model does not have.
+  const lo = d.iv_range_low, hi = d.iv_range_high;
+  $("vIvBandHeadline").textContent =
+    d.extreme_mos_flag                ? "Not available"
+    : (lo != null && hi != null)      ? `${fmtPrice(lo)} to ${fmtPrice(hi)}`
+    : (d.intrinsic_value != null)     ? `about ${fmtPrice(d.intrinsic_value)}`
+    : "Not available";
+
+  // 3. Price today
+  animateNumber($("vPrice"), 0, d.current_price || 0, 600, v => fmtPrice(v));
+
+  // 4. Confidence
+  const conf = (d.dcf_confidence || "").toLowerCase();
+  const confEl = $("vConfidence");
+  if (confEl) {
+    confEl.textContent = conf && conf !== "not_applicable"
+      ? (CONF_WORD[conf] || (d.dcf_confidence_label || conf))
+      : "Not applicable";
+    confEl.className = "vfield__value" + (conf ? ` conf-${conf}` : "");
+    const warn = (d.dcf_confidence_warnings || [])[0];
+    confEl.title = warn ? String(warn).trim() : "";
+  }
+
+  // 5. How it was valued
+  const path = valuationPathOf(d);
+  const methodEl = $("vMethod");
+  if (methodEl) {
+    methodEl.textContent = methodSentence(path);
+    methodEl.title = path.label || "";
+    methodEl.classList.toggle("vfield__value--warn", !path.isDcf);
+  }
+
+  // 6. In one line
+  $("vVerdict").textContent = d.extreme_mos_flag
+    ? "VALUS can't produce a reliable valuation for this ticker, likely a data issue (share-class mismatch, forward-earnings spike, or a stale/split-adjusted price). Treat this as no signal."
+    : (vs.verdict || pf.narrative || "");
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Zone 3, valuation detail: the numbers that used to crowd the hero
+   ════════════════════════════════════════════════════════════════════════ */
+
+function renderValuationDetail(d) {
+  const iv = d.intrinsic_value || 0;
+  const ivEl = $("vIV");
+  if (ivEl) animateNumber(ivEl, 0, iv, 400, v => fmtPrice(v));
+
+  const rangeEl = $("vRange");
+  if (rangeEl) {
+    rangeEl.textContent = d["52w_low"] && d["52w_high"]
+      ? `${fmtPrice(d["52w_low"])} to ${fmtPrice(d["52w_high"])}`
+      : "N/A";
+  }
+
   renderIvBand(d);
 
-  // MOS
+  // Margin of safety
   const mos = d.margin_of_safety;
   const fillEl = $("vMosFill");
   const pctEl  = $("vMosPct");
-  if (d.extreme_mos_flag) {
-    // Data-quality outlier (share-class mismatch like BRK.B, forward-earnings
-    // spike, stale/split price). A wildly large MOS is almost always a data
-    // error, not a real opportunity, so we SUPPRESS the misleading number
-    // instead of showing "200%+" / "19,000%" with a chip.
-    pctEl.innerHTML = `<span class="mos-na">N/A</span><span class="mos-confidence-chip" title="VALUS can't produce a reliable margin of safety for this ticker. The underlying data (often a share-class mismatch, a forward-earnings spike, or a stale/split-adjusted price) makes the valuation unreliable, treat it as no signal, not as undervalued.">data issue</span>`;
-    pctEl.classList.remove("mos-pct--up","mos-pct--down");
-    if (fillEl) { fillEl.style.width = "0%"; fillEl.classList.remove("positive","negative"); }
-  } else if (mos != null) {
-    if (d.iv_confidence === "low" || d.iv_confidence === "medium") {
-      // Surface emergency / multiples-only IV provenance.
-      const conf = d.iv_confidence === "low" ? "Low Conf" : "Medium";
-      const tip  = d.iv_source_label
-        ? `Source: ${d.iv_source_label}. DCF was unavailable or low-confidence, IV anchored to a fallback method.`
-        : "IV from a fallback method (multiples, analyst target, distressed P/B, etc.).";
-      pctEl.innerHTML = `${fmtPct(mos)}<span class="mos-confidence-chip" title="${escHtml(tip)}">${conf}</span>`;
-    } else {
+  if (pctEl) {
+    if (d.extreme_mos_flag) {
+      pctEl.innerHTML = `<span class="mos-na">N/A</span><span class="mos-confidence-chip" title="VALUS can't produce a reliable margin of safety for this ticker. The underlying data (often a share-class mismatch, a forward-earnings spike, or a stale/split-adjusted price) makes the valuation unreliable, treat it as no signal, not as undervalued.">data issue</span>`;
+      pctEl.classList.remove("mos-pct--up", "mos-pct--down");
+      if (fillEl) { fillEl.style.width = "0%"; fillEl.classList.remove("positive", "negative"); }
+    } else if (mos != null) {
       pctEl.textContent = fmtPct(mos);
-    }
-    // #12: colour the MOS number by its sign — green when positive — so a
-    // positive MOS reads green even on "expensive" tiers (Growth/Excellence/
-    // Miracle/Fair) instead of inheriting the tier's warning/red accent.
-    pctEl.classList.toggle("mos-pct--up", mos > 0);
-    pctEl.classList.toggle("mos-pct--down", mos < 0);
-    // MOS bar fills outward from center toward the side that wins
-    const cap = Math.min(Math.abs(mos), 100);
-    const widthPct = cap / 2;  // half of total bar
-    if (mos >= 0) {
-      fillEl.style.left = "50%"; fillEl.style.right = "auto"; fillEl.style.width = `${widthPct}%`;
-      fillEl.classList.add("positive"); fillEl.classList.remove("negative");
+      pctEl.classList.toggle("mos-pct--up", mos > 0);
+      pctEl.classList.toggle("mos-pct--down", mos < 0);
+      if (fillEl) {
+        const widthPct = Math.min(Math.abs(mos), 100) / 2;
+        if (mos >= 0) {
+          fillEl.style.left = "50%"; fillEl.style.right = "auto"; fillEl.style.width = `${widthPct}%`;
+          fillEl.classList.add("positive"); fillEl.classList.remove("negative");
+        } else {
+          fillEl.style.right = "50%"; fillEl.style.left = "auto"; fillEl.style.width = `${widthPct}%`;
+          fillEl.classList.add("negative"); fillEl.classList.remove("positive");
+        }
+      }
     } else {
-      fillEl.style.right = "50%"; fillEl.style.left = "auto"; fillEl.style.width = `${widthPct}%`;
-      fillEl.classList.add("negative"); fillEl.classList.remove("positive");
-    }
-  } else {
-    pctEl.textContent = "N/A";
-    pctEl.classList.remove("mos-pct--up","mos-pct--down");
-    if (fillEl) fillEl.style.width = "0%";
-  }
-
-  // Tier badge
-  const tierBadge = $("vTierBadge");
-  tierBadge.classList.remove("tier-positive","tier-info","tier-warning","tier-negative");
-  tierBadge.classList.add(d.extreme_mos_flag ? "tier-info" : tierCls);
-  $("vTierLabel").textContent = d.extreme_mos_flag ? "Unreliable data" : (pf.label || "Verdict pending");
-
-  // VALUS A-F grade badge (large) + one-line explanation.
-  const gRow     = $("vValusGradeRow");
-  const gBadgeEl = $("vValusGradeBadge");
-  const gExplain = $("vValusGradeExplain");
-  const g = d.valus_grade;
-  if (gRow && gBadgeEl && gExplain) {
-    if (g && g.grade && !d.extreme_mos_flag) {
-      gBadgeEl.innerHTML  = renderGradeBadge(g, { large: true });
-      gExplain.textContent = g.explanation || "";
-      gRow.hidden = false;
-    } else {
-      gBadgeEl.innerHTML = "";
-      gExplain.textContent = "";
-      gRow.hidden = true;
+      pctEl.textContent = "N/A";
+      pctEl.classList.remove("mos-pct--up", "mos-pct--down");
+      if (fillEl) fillEl.style.width = "0%";
     }
   }
 
-  // Strategic IV floor breakdown, only when survival_floor tier lifted DCF.
-  // Format: DCF model: $X · Strategic floor: $Y · Used: $Z
+  // Strategic floor breakdown
   const floorEl = $("vIvFloorBreakdown");
   if (floorEl) {
     const sf = d.strategic_floor;
@@ -886,14 +874,10 @@ function renderHeroVerdict(d) {
     }
   }
 
-  // AI-adjusted IV, the "VALUS" number Haiku produces by nudging Stage 1
-  // growth and WACC inside industry guardrails.  Renders alongside the
-  // deterministic DCF so users see both: the pure-math number and the
-  // AI-aware number that captures news + sovereign-capital signal.
+  // AI-adjusted IV breakdown
   const aiEl = $("vAiIvBreakdown");
   if (aiEl) {
-    const ai  = d.ai_adjusted_iv;
-    const meta = d.ai_dcf_tweaks;
+    const ai = d.ai_adjusted_iv, meta = d.ai_dcf_tweaks;
     if (ai != null && d.intrinsic_value != null && meta) {
       const up = meta.uplift_pct;
       const upTxt = up != null ? `${up >= 0 ? "+" : ""}${up.toFixed(1)}%` : "";
@@ -918,71 +902,202 @@ function renderHeroVerdict(d) {
     }
   }
 
-  // ── Strategic Asset banner ───────────────────────────────────────────
-  // Renders only when the backend tags this ticker as a strategic asset
-  // (CHIPS Act recipient, defense prime, energy sovereignty, critical
-  // material).  Includes per-ticker reason and any live policy tailwinds
-  // detected from the news scanner.
-  const stratBanner = $("vStrategicBanner");
-  if (stratBanner) {
-    if (d.is_strategic && d.strategic_label) {
-      stratBanner.classList.remove("hidden");
-      stratBanner.dataset.tier = d.strategic_tier || "";
-      $("vStrategicLabel").textContent = d.strategic_label;
-      $("vStrategicReason").textContent = d.strategic_reason || "";
-      $("vStrategicLive").classList.toggle("hidden", !d.strategic_live_amplified);
-      const chips = [];
-      if (d.policy_tailwind) {
-        const headlines = (d.policy_tailwind_labels || []).slice(0, 2)
-          .map(t => escHtml(t)).join("</span><span class='strategic-chip'>");
-        chips.push(`<span class="strategic-chip strategic-chip--up">⬈ Policy tailwind</span>`);
-        if (headlines) chips.push(`<span class="strategic-chip strategic-chip--news">${headlines}</span>`);
-      }
-      if (d.policy_headwind) {
-        chips.push(`<span class="strategic-chip strategic-chip--down">⬊ Policy headwind</span>`);
-      }
-      if (d.strategic_floor_applied) {
-        chips.push(`<span class="strategic-chip strategic-chip--info" title="Pure DCF said overvalued; strategic floor lifted IV toward sovereign-backstop level.">IV floor applied</span>`);
-      }
-      if (d.strategic_wacc_delta_pp) {
-        chips.push(`<span class="strategic-chip strategic-chip--info" title="WACC reduced to reflect government backstop on cost of capital.">WACC −${Math.abs(d.strategic_wacc_delta_pp).toFixed(2)}pp</span>`);
-      }
-      $("vStrategicChips").innerHTML = chips.join("");
-    } else {
-      stratBanner.classList.add("hidden");
-    }
+  // Reasons behind the verdict
+  const reasons = $("vReasons");
+  if (reasons) {
+    reasons.innerHTML = ((d.verdict_summary || {}).reasons || []).map((r, i) =>
+      `<div class="reason"><span class="reason__num">${i + 1}</span><span class="reason__txt">${escHtml(r)}</span></div>`
+    ).join("");
   }
 
-  // Reasons
-  const reasonsHtml = (vs.reasons || []).map((r, i) =>
-    `<div class="reason"><span class="reason__num">${i+1}</span><span class="reason__txt">${escHtml(r)}</span></div>`
-  ).join("");
-  $("vReasons").innerHTML = reasonsHtml;
-
-  // ── News block, visible chip + expandable list of catalyst headlines.
-  // Renders for *every* ticker with catalysts (not just strategic ones)
-  // so investors see the news that's affecting valuation.  Color-coded:
-  //   green  = positive catalyst, no material risk
-  //   amber  = both positive AND risk present
-  //   red    = material risk only
-  //   neutral = generic news, no scoring signal
-  renderNewsBlock(d);
-
-  // Verdict line, suppressed for data-quality outliers (extreme MOS).
-  $("vVerdict").textContent = d.extreme_mos_flag
-    ? "VALUS can't produce a reliable valuation for this ticker, likely a data issue (share-class mismatch, forward-earnings spike, or a stale/split-adjusted price). Treat this as no signal."
-    : (vs.verdict || pf.narrative || "");
-
-  // Hero insights (replaces the old Bear/Base/Bull toggle).
   renderHeroInsights(d);
 }
 
-// Populates the inline confidence + implied-growth + 52-week range row.
-// All three are independent, each hidden when its data is missing.
-// The fair-value band. Where the backend could test the valuation across
-// +/-1pp of discount rate and +/-0.5pp of terminal growth, that band is the
-// honest answer and the point estimate is only its midpoint. Where it could
-// not, the band is hidden rather than faked.
+/* ════════════════════════════════════════════════════════════════════════
+   Zone 2, panels: catalyst, news, red flags, company
+   Each renders on its own and reports its own state. A panel that throws
+   never stops the next one, and none of them can hold up zone 1.
+   ════════════════════════════════════════════════════════════════════════ */
+
+function setPanelState(id, state, message) {
+  const panel = document.getElementById(id);
+  if (!panel) return;
+  panel.dataset.state = state;
+  const msg = panel.querySelector("[data-panel-msg]");
+  if (msg) msg.textContent = message || "";
+  const status = panel.querySelector("[data-panel-status]");
+  if (status) status.textContent = state === "unavailable" ? "not available" : "";
+}
+
+function resetPanels() {
+  for (const id of ["panelCatalyst", "panelNews", "panelRedflags", "panelCompany"]) {
+    setPanelState(id, "loading", "");
+  }
+}
+
+function renderPanels(d) {
+  const panels = [
+    ["panelCatalyst", renderCatalystPanel],
+    ["panelNews",     renderNewsPanel],
+    ["panelRedflags", renderRedflagPanel],
+    ["panelCompany",  renderCompanyPanel],
+  ];
+  for (const [id, fn] of panels) {
+    try {
+      const unavailable = fn(d);
+      setPanelState(id, unavailable ? "unavailable" : "ready", unavailable || "");
+    } catch (e) {
+      console.error("[panel]", id, e);
+      setPanelState(id, "unavailable", "This panel could not be built from the data returned.");
+    }
+  }
+}
+
+// Returns a reason string when the panel has nothing to show, else null.
+function renderCatalystPanel(d) {
+  const banner = $("vStrategicBanner");
+  if (banner) {
+    if (d.is_strategic && d.strategic_label) {
+      banner.classList.remove("hidden");
+      banner.dataset.tier = d.strategic_tier || "";
+      $("vStrategicLabel").textContent  = d.strategic_label;
+      $("vStrategicReason").textContent = d.strategic_reason || "";
+      $("vStrategicLive").classList.toggle("hidden", !d.strategic_live_amplified);
+      const chips = [];
+      if (d.policy_tailwind) chips.push(`<span class="strategic-chip strategic-chip--up">⬈ Policy tailwind</span>`);
+      if (d.policy_headwind) chips.push(`<span class="strategic-chip strategic-chip--down">⬊ Policy headwind</span>`);
+      if (d.strategic_floor_applied) chips.push(`<span class="strategic-chip strategic-chip--info">IV floor applied</span>`);
+      $("vStrategicChips").innerHTML = chips.join("");
+    } else {
+      banner.classList.add("hidden");
+    }
+  }
+
+  const list = $("catalystList");
+  const rows = [
+    ...(d.catalyst_insights || []).map(t => ({ text: t, kind: "pos" })),
+    ...(d.catalyst_labels   || []).map(t => ({ text: t, kind: "pos" })),
+    ...(d.policy_tailwind_labels || []).map(t => ({ text: t, kind: "pos" })),
+    ...(d.policy_headwind_labels || []).map(t => ({ text: t, kind: "neg" })),
+  ].filter(r => r.text).slice(0, 6);
+
+  if (list) {
+    list.innerHTML = rows.map(r =>
+      `<div class="catalyst-row catalyst-row--${r.kind}"><span class="catalyst-row__dot"></span><span>${escHtml(r.text)}</span></div>`
+    ).join("");
+  }
+
+  const hasBanner = !!(d.is_strategic && d.strategic_label);
+  return (rows.length || hasBanner) ? null : "No dated catalysts in view for this ticker.";
+}
+
+function renderNewsPanel(d) {
+  renderNewsBlock(d);
+
+  const body = $("newsSummaryBody");
+  const items = [
+    ...(d.catalyst_labels || []).map(l => ({ label: l, kind: "pos" })),
+    ...(d.risk_labels     || []).map(l => ({ label: l, kind: "neg" })),
+  ].filter(i => i.label).slice(0, 6);
+  if (body) {
+    body.innerHTML = items.map(it => `
+      <div class="news-line news-line--${it.kind}">
+        <span class="news-line__dot"></span>
+        <span class="news-line__txt">${escHtml(it.label)}</span>
+      </div>`).join("");
+  }
+
+  const headlines = (d.news_interpretation || []).length || (d.catalyst_insights || []).length;
+  return (headlines || items.length) ? null : "No recent coverage found for this ticker.";
+}
+
+function renderRedflagPanel(d) {
+  const summary = $("riskSummary");
+  const chips   = $("riskChips");
+  const bullets = $("riskBullets");
+  if (!summary || !chips || !bullets) return "Red-flag panel is missing from the page.";
+
+  const conf  = (d.iv_confidence || "").toLowerCase();
+  const risks = (d.risk_labels || []).filter(Boolean);
+  const head  = (d.policy_headwind_labels || []).filter(Boolean);
+  const warns = (d.dcf_confidence_warnings || []).filter(Boolean);
+  const waccRisk = !!d.wacc_risk_applied;
+  const hasAnything = risks.length || head.length || warns.length || waccRisk || (conf && conf !== "high");
+
+  if (!hasAnything) {
+    summary.innerHTML = `<span class="risk-pill risk-pill--clean">Clean read, no material risk flags</span>`;
+    chips.innerHTML = "";
+    bullets.innerHTML = "";
+    return null;
+  }
+
+  const confTone = conf === "high" ? "clean"
+                 : (conf === "moderate" || conf === "medium") ? "warn"
+                 : conf === "low" ? "neg" : "info";
+  summary.innerHTML =
+    `<span class="risk-pill risk-pill--${confTone}">${escHtml(conf ? `Confidence: ${conf}` : "Confidence: n/a")}</span>` +
+    (waccRisk ? `<span class="risk-pill risk-pill--neg">WACC surcharge +100bp</span>` : "");
+
+  chips.innerHTML = [
+    ...risks.map(r => `<span class="risk-chip risk-chip--neg">${escHtml(r)}</span>`),
+    ...head.map(h => `<span class="risk-chip risk-chip--neg">Policy headwind: ${escHtml(h)}</span>`),
+  ].join("");
+  bullets.innerHTML = warns.slice(0, 5).map(w => `<li>${escHtml(w)}</li>`).join("");
+  return null;
+}
+
+function renderCompanyPanel(d) {
+  const facts = d.company_facts || {};
+  const dl = $("companyFacts");
+  const rows = [
+    ["Sector",       d.sector || null],
+    ["Industry",     d.industry || null],
+    ["Headquarters", facts.headquarters || null],
+    ["Employees",    facts.employees != null ? Number(facts.employees).toLocaleString() : null],
+    ["CEO",          facts.ceo || null],
+    ["Listed on",    d.exchange || null],
+    ["Market cap",   d.market_cap != null ? fmtBig(d.market_cap) : null],
+  ].filter(([, v]) => v);
+
+  if (dl) {
+    dl.innerHTML = rows.map(([k, v]) =>
+      `<div class="fact"><dt class="fact__key">${escHtml(k)}</dt><dd class="fact__val">${escHtml(String(v))}</dd></div>`
+    ).join("");
+  }
+  const sum = $("companySummary");
+  if (sum) sum.textContent = facts.summary || "";
+
+  return rows.length ? null : "No company profile available for this ticker.";
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Zone 3, the assumption editor. Auto-calibrated by default, editable here.
+   ════════════════════════════════════════════════════════════════════════ */
+
+function renderAssumptionEditor(d) {
+  const num = v => (v == null || isNaN(v)) ? "" : String(Math.round(Number(v) * 10) / 10);
+  const set = (id, v) => { const el = $(id); if (el) el.value = v; };
+  set("drwS1", num(d.stage1_growth));
+  set("drwS2", num(d.stage2_growth));
+  set("drwTg", num(d.terminal_growth));
+  set("drwYrs", d.projection_years || 10);
+
+  const ticker = d.ticker;
+  const apply = $("drwApply");
+  if (apply) apply.onclick = () => {
+    const params = {};
+    const s1 = $("drwS1").value, s2 = $("drwS2").value;
+    const tg = $("drwTg").value, yrs = $("drwYrs").value;
+    if (yrs) params.years    = yrs;
+    if (s1)  params.growth1  = s1;
+    if (s2)  params.growth2  = s2;
+    if (tg)  params.terminal = tg;
+    analyze(ticker, params);
+  };
+  const reset = $("drwReset");
+  if (reset) reset.onclick = () => analyze(ticker, {});
+}
+
 function renderIvBand(d) {
   const wrap = document.getElementById("vIvBand");
   if (!wrap) return;
@@ -994,8 +1109,7 @@ function renderIvBand(d) {
   }
   wrap.classList.remove("hidden");
 
-  document.getElementById("vIvBandHeadline").textContent =
-    `VALUS thinks this is worth roughly ${fmtPrice(lo)} to ${fmtPrice(hi)} a share.`;
+  // Zone 1 owns the range line; this draws the bar and its footnote.
 
   // Plot lo..hi across the bar, widening the axis if the price sits outside
   // the band so the marker never falls off the end.
@@ -1040,30 +1154,6 @@ function renderIvBand(d) {
 }
 
 function renderHeroInsights(d) {
-  // ── Confidence ──
-  const confWrap = document.getElementById("viConfidenceWrap");
-  const confEl   = document.getElementById("viConfidence");
-  const confHint = document.getElementById("viConfidenceHint");
-  const conf     = d.dcf_confidence;
-  if (conf && conf !== "not_applicable") {
-    const label = (d.dcf_confidence_label || conf).replace(/^\w/, c => c.toUpperCase());
-    confEl.textContent = label;
-    confEl.className = `hero-insight__value conf-${conf}`;
-    const reason = (d.dcf_confidence_warnings || [])[0];
-    // Show the whole warning.  This used to split on /[, -]/ and take index 0,
-    // so "Thin FCF margin (2.1%), a 1pp change in WACC moves IV +/-25%"
-    // rendered as the single word "Thin".
-    confHint.textContent = reason ? String(reason).trim() : "";
-    confWrap.hidden = false;
-  } else {
-    // Clear as well as hide: these elements are reused across tickers, so a
-    // value left in place is one CSS change away from being visible again
-    // under the wrong company.
-    if (confEl)   { confEl.textContent = ""; confEl.className = "hero-insight__value"; }
-    if (confHint) confHint.textContent = "";
-    if (confWrap) confWrap.hidden = true;
-  }
-
   // ── Market-implied scenario line (under the fair-value block) ──
   // Frames the gap between price and fair value as "what the market is
   // pricing in", not as the model being wrong.  Lynch's reframe.
@@ -1604,7 +1694,7 @@ function renderDrawerContent(d) {
       const isOpen = drawer.classList.toggle("open");
       trigger.classList.toggle("open", isOpen);
       trigger.setAttribute("aria-expanded", isOpen ? "true" : "false");
-      if (triggerTxt) triggerTxt.textContent = isOpen ? "Hide detailed analysis" : "View detailed analysis";
+      if (triggerTxt) triggerTxt.textContent = isOpen ? "Hide assumptions" : "Assumptions";
       // Lazy-load financial statements on first open (Yahoo-sourced)
       if (isOpen && !drawer.dataset.statementsLoaded) {
         renderFinancialsTabs(d).catch(() => {});
@@ -1893,64 +1983,6 @@ function renderHaikuVerdict(d) {
 // Surfaces the risk signals already computed server-side: IV confidence,
 // risk_labels, policy headwinds/tailwinds, dcf_confidence_warnings, and the
 // WACC risk surcharge flag.  Empty-state shows a single clean-read line.
-function renderRiskCard(d) {
-  const card     = document.getElementById("riskCard");
-  const summary  = document.getElementById("riskSummary");
-  const chips    = document.getElementById("riskChips");
-  const bullets  = document.getElementById("riskBullets");
-  const insightsGrid = document.getElementById("insightsGrid");
-  if (!card || !summary || !chips || !bullets) return;
-
-  const conf  = (d.iv_confidence || "").toLowerCase();
-  const risks = (d.risk_labels || []).filter(Boolean);
-  const head  = (d.policy_headwind_labels || []).filter(Boolean);
-  const tail  = (d.policy_tailwind_labels || []).filter(Boolean);
-  const warns = (d.dcf_confidence_warnings || []).filter(Boolean);
-  const waccRisk = !!d.wacc_risk_applied;
-
-  const hasAnything = risks.length || head.length || warns.length || waccRisk
-    || (conf && conf !== "high");
-
-  if (!hasAnything) {
-    summary.innerHTML = `<span class="risk-pill risk-pill--clean">Clean read, no material risk flags</span>`;
-    chips.innerHTML = "";
-    bullets.innerHTML = "";
-    card.hidden = false;
-    if (insightsGrid) insightsGrid.classList.remove("hidden");
-    return;
-  }
-
-  // Confidence pill
-  const confTone = conf === "high" ? "clean"
-                 : conf === "moderate" || conf === "medium" ? "warn"
-                 : conf === "low" ? "neg" : "info";
-  const confLabel = conf ? `Confidence: ${conf}` : "Confidence: n/a";
-  const surchargePill = waccRisk
-    ? `<span class="risk-pill risk-pill--neg">WACC surcharge +100bp</span>`
-    : "";
-  summary.innerHTML =
-    `<span class="risk-pill risk-pill--${confTone}">${escHtml(confLabel)}</span>` +
-    surchargePill;
-
-  // Chips: red for risk + headwinds, green for tailwinds
-  const chipParts = [];
-  for (const r of risks)
-    chipParts.push(`<span class="risk-chip risk-chip--neg">${escHtml(r)}</span>`);
-  for (const h of head)
-    chipParts.push(`<span class="risk-chip risk-chip--neg">Policy headwind: ${escHtml(h)}</span>`);
-  for (const t of tail)
-    chipParts.push(`<span class="risk-chip risk-chip--pos">Tailwind: ${escHtml(t)}</span>`);
-  chips.innerHTML = chipParts.join("");
-
-  // Bullets from confidence warnings (leverage, FCF inconsistency, cyclical, etc.)
-  bullets.innerHTML = warns.slice(0, 5).map(w =>
-    `<li>${escHtml(w)}</li>`
-  ).join("");
-
-  card.hidden = false;
-  if (insightsGrid) insightsGrid.classList.remove("hidden");
-}
-
 // ── Congressional STOCK Act trades ───────────────────────────────────────
 // Fetches /api/congress?ticker=… separately so a slow community feed never
 // blocks the main analyze render.  Hides on no data.
@@ -2265,28 +2297,6 @@ async function renderInsiderCard(ticker) {
 // ── News & catalysts summary ─────────────────────────────────────────────
 // Reuses the catalyst_insights / news_interpretation already on the payload.
 // Top 3 lines, deduped, with sentiment tint.
-function renderNewsSummaryCard(d) {
-  const card = document.getElementById("newsSummaryCard");
-  const body = document.getElementById("newsSummaryBody");
-  const insightsGrid = document.getElementById("insightsGrid");
-  if (!card || !body) return;
-  const cats = (d.catalyst_labels || []).map(l => ({ label: l, kind: "pos" }));
-  const risks = (d.risk_labels || []).map(l => ({ label: l, kind: "neg" }));
-  const items = [...cats, ...risks].slice(0, 6);
-  if (items.length === 0) {
-    card.hidden = true;
-    return;
-  }
-  body.innerHTML = items.map(it => `
-    <div class="news-line news-line--${it.kind}">
-      <span class="news-line__dot"></span>
-      <span class="news-line__txt">${escHtml(it.label)}</span>
-    </div>
-  `).join("");
-  card.hidden = false;
-  if (insightsGrid) insightsGrid.classList.remove("hidden");
-}
-
 // #5: compact date label for chart x-axes, "2021-06-01" -> "Jun '21".
 const _MONTHS_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 function fmtAxisDate(lbl) {
@@ -3228,24 +3238,11 @@ function setupSearch() {
     if (timer) { clearTimeout(timer); timer = null; }
     closeDropdown();
     input.blur();
-    const params = {};
-    const yrs = $("advYrs").value;
-    const s1  = $("advS1").value;
-    const s2  = $("advS2").value;
-    const tg  = $("advTg").value;
-    if (yrs) params.years = yrs;
-    if (s1)  params.growth1 = s1;
-    if (s2)  params.growth2 = s2;
-    if (tg)  params.terminal = tg;
-    analyze(t, params);
+    // Assumptions live in the drawer on the ticker page, not in the search box.
+    analyze(t);
   }
 }
 
-function setupAdvancedToggle() {
-  const btn = $("advancedToggle");
-  const panel = $("advancedPanel");
-  btn.onclick = () => panel.classList.toggle("hidden");
-}
 
 function setupCopyButton() {
   const btn = $("copyBtn");
@@ -7546,7 +7543,6 @@ document.addEventListener("DOMContentLoaded", () => {
   setupBrandHome();
   setupStorageWarnBanner();
   setupSearch();
-  setupAdvancedToggle();
   setupCopyButton();
   setupAddPortfolioButton();
   setupAddWatchlistButton();
@@ -7555,7 +7551,6 @@ document.addEventListener("DOMContentLoaded", () => {
   setupTemplatesTabs();
   setupTierGlossary();
   setupModalDismiss();
-  setupGradeExplainer();
   setupOnboardingCallout();
   setupCustomDCFSliders();
   setupSharePortfolio();

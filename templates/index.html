@@ -391,40 +391,6 @@
         </button>
       </div>
 
-      <button type="button" class="advanced-toggle" id="advancedToggle">
-        <span><svg class="ic" aria-hidden="true"><use href="#vi-settings"></use></svg></span> Customize DCF assumptions
-      </button>
-
-      <div class="advanced-panel hidden" id="advancedPanel">
-        <div class="advanced-field">
-          <label for="advYrs">
-            Projection years
-            <span class="field-help" data-tip="How many years of free cash flow VALUS forecasts before applying terminal growth. Default is 10, longer horizons add uncertainty.">?</span>
-          </label>
-          <input id="advYrs" type="number" placeholder="10" min="3" max="20"/>
-        </div>
-        <div class="advanced-field">
-          <label for="advS1">
-            Stage 1 growth (%)
-            <span class="field-help" data-tip="Annual revenue/FCF growth rate during years 1-5 of the forecast. 'Auto' uses analyst consensus + sector ceiling.">?</span>
-          </label>
-          <input id="advS1" type="number" placeholder="auto" step="0.1"/>
-        </div>
-        <div class="advanced-field">
-          <label for="advS2">
-            Stage 2 growth (%)
-            <span class="field-help" data-tip="Annual growth during years 6-10, typically lower than Stage 1 as companies mature. 'Auto' tapers from Stage 1 toward terminal.">?</span>
-          </label>
-          <input id="advS2" type="number" placeholder="auto" step="0.1"/>
-        </div>
-        <div class="advanced-field">
-          <label for="advTg">
-            Terminal growth (%)
-            <span class="field-help" data-tip="Perpetual growth rate after year 10. Default 2.5% ≈ long-run GDP growth. Higher = more aggressive valuation.">?</span>
-          </label>
-          <input id="advTg" type="number" placeholder="2.5" step="0.1"/>
-        </div>
-      </div>
     </div>
   </div>
 </section>
@@ -503,35 +469,6 @@
       </div>
       <div class="cmp-error hidden" id="cmpError"></div>
       <div class="cmp-results hidden" id="cmpResults"></div>
-    </div>
-  </div>
-</div>
-
-<!-- ── VALUS GRADE EXPLAINER MODAL ─────────────────────────────────── -->
-<!-- Opens from any clickable .valus-grade badge OR the "How are grades
-     calculated?" link on the stock detail page.  Band thresholds mirror
-     app.py::VALUS_GRADE_BANDS, single source for the data lives in
-     setupGradeExplainer() in main.js so we can iterate the bands. -->
-<div class="modal hidden" id="gradeExplainerModal" role="dialog" aria-modal="true" aria-labelledby="gradeExplainerTitle">
-  <div class="modal__backdrop" data-modal-close></div>
-  <div class="modal__panel" style="max-width: 560px;">
-    <div class="modal__head">
-      <h2 class="modal__title" id="gradeExplainerTitle" data-i18n="modal.grades">How VALUS grades work</h2>
-      <button class="modal__close" data-modal-close aria-label="Close">✕</button>
-    </div>
-    <div class="modal__body">
-      <p class="signin-detail" style="margin-bottom: 14px;" data-i18n-html="grade.intro">
-        Every stock gets a single A-F letter that compares its <strong>current market price</strong> to <strong>VALUS fair value</strong>. The percent next to the letter is the <em>margin of safety</em>, how far below (positive) or above (negative) fair value the stock is trading.
-      </p>
-      <ul class="grade-explainer__list" id="gradeExplainerList">
-        <!-- Populated by setupGradeExplainer(); single data source. -->
-      </ul>
-      <p class="plus-fineprint" style="margin-top: 14px;" data-i18n-html="grade.fineprint">
-        The letter is derived purely from the DCF model + the current price.
-        It's <strong>not</strong> a buy/sell signal, read the full verdict
-        and the underlying methodology before acting on it.
-        <a href="/methodology" style="color: var(--accent);">Read the methodology →</a>
-      </p>
     </div>
   </div>
 </div>
@@ -1083,7 +1020,13 @@
   </div>
 </main>
 
-<!-- ── RESULTS ────────────────────────────────────────────────────────── -->
+<!-- ── RESULTS ────────────────────────────────────────────────────────────
+     Three zones:
+       1. Verdict card, six fields, painted as soon as the valuation resolves.
+       2. Panels: catalyst, news, red flags, company facts. Each renders on its
+          own and none of them blocks zone 1.
+       3. Assumptions drawer, collapsed, everything tiered detail.
+     ──────────────────────────────────────────────────────────────────────── -->
 <main class="results hidden" id="results">
   <div class="container">
 
@@ -1097,405 +1040,156 @@
       <a href="/terms">Terms</a></span>
     </div>
 
-    <!-- HERO VERDICT CARD -->
-    <section class="hero-verdict tier-info" id="heroVerdict" data-tier-class="tier-info">
-      <div class="hero-verdict__head">
-        <div class="hero-verdict__company">
-          <h2 class="hero-verdict__name" id="vName">N/A</h2>
-          <div class="hero-verdict__ticker">
-            <span class="pill" id="vTicker">N/A</span>
-            <span id="vSector">N/A</span>
-            <span>·</span>
-            <span id="vRange">N/A</span>
-          </div>
-        </div>
-        <div class="hero-verdict__actions">
-          <button class="copy-btn" id="addPortfolioBtn" type="button" aria-label="Add to portfolio">
-            <span id="addPortfolioTxt">★ Add to Portfolio</span>
-          </button>
-          <button class="copy-btn" id="addWatchlistBtn" type="button" aria-label="Add to watchlist">
-            <span id="addWatchlistTxt">Add to Watchlist</span>
-          </button>
-          <button class="copy-btn" id="copyBtn" type="button">
-            <span id="copyBtnTxt">Copy summary</span>
+    <!-- ── ZONE 1 ─ VERDICT CARD ──────────────────────────────────────────
+         Exactly six fields: verdict, range, price, confidence, method, and
+         the one-line read. Company name and ticker are chrome. Every slot
+         renders in place, so a missing value never reflows the card. -->
+    <section class="verdict-card tier-info" id="heroVerdict" data-tier-class="tier-info">
+      <div class="verdict-card__id">
+        <h2 class="verdict-card__name" id="vName">N/A</h2>
+        <span class="ticker-chip" id="vTicker">N/A</span>
+      </div>
+
+      <div class="verdict-card__grid">
+        <div class="vfield vfield--verdict-badge">
+          <span class="vfield__label">Verdict</span>
+          <button class="tier-badge tier-badge--btn" id="vTierBadge" type="button" aria-label="See what this verdict means">
+            <span class="tier-badge__dot"></span>
+            <span id="vTierLabel">N/A</span>
+            <span class="tier-badge__info" aria-hidden="true">ⓘ</span>
           </button>
         </div>
-      </div>
 
-      <div class="price-iv">
-        <div class="pi-block">
-          <span class="pi-label" data-i18n="res.currentPrice">Current price</span>
-          <span class="pi-value numeric" id="vPrice">N/A</span>
+        <div class="vfield">
+          <span class="vfield__label">What it looks worth</span>
+          <span class="vfield__value numeric" id="vIvBandHeadline">N/A</span>
         </div>
-        <div class="mos-bar">
-          <span class="mos-label" data-i18n="res.mos">Margin of safety</span>
-          <div class="mos-track">
-            <span class="mos-fill" id="vMosFill" style="width: 0%"></span>
-          </div>
-          <span class="mos-pct" id="vMosPct">N/A</span>
+
+        <div class="vfield">
+          <span class="vfield__label" data-i18n="res.currentPrice">Current price</span>
+          <span class="vfield__value numeric" id="vPrice">N/A</span>
         </div>
-        <div class="pi-block right">
-          <span class="pi-label" data-i18n="res.fairValue">Fair value</span>
-          <span class="pi-value iv numeric" id="vIV">N/A</span>
+
+        <div class="vfield">
+          <span class="vfield__label" data-i18n="insight.confidence">Confidence</span>
+          <span class="vfield__value" id="vConfidence">N/A</span>
+        </div>
+
+        <div class="vfield vfield--method">
+          <span class="vfield__label">How it was valued</span>
+          <span class="vfield__value vfield__value--text" id="vMethod">N/A</span>
+        </div>
+
+        <div class="vfield vfield--line">
+          <span class="vfield__label">In one line</span>
+          <p class="vfield__prose" id="vVerdict">N/A</p>
         </div>
       </div>
+    </section>
 
-      <!-- The fair-value RANGE. This is the headline when it is available:
-           a single number to the cent implies a precision this model does not
-           have (a 1pp move in the discount rate shifts the answer 17-40%), so
-           the band is the answer and #vIV above is its midpoint. -->
-      <div class="iv-band hidden" id="vIvBand">
-        <div class="iv-band__headline" id="vIvBandHeadline"></div>
-        <div class="iv-band__bar">
-          <div class="iv-band__span" id="vIvBandSpan"></div>
-          <div class="iv-band__mid" id="vIvBandMid"></div>
-          <div class="iv-band__price" id="vIvBandPrice"></div>
-        </div>
-        <div class="iv-band__foot" id="vIvBandFoot"></div>
-      </div>
-
-      <!-- Strategic IV floor breakdown, only shown when survival_floor tier
-           lifted DCF.  Format: DCF model: $X · Strategic floor: $Y · Used: $Z -->
-      <div class="iv-floor-breakdown hidden" id="vIvFloorBreakdown"></div>
-
-      <!-- AI-adjusted IV breakdown, the "VALUS" number rendered alongside
-           the deterministic DCF.  Shown only when the AI model returned bounded
-           DCF tweaks that lifted IV. Format: DCF: $X · VALUS: $Y (+Z%) -->
-      <div class="iv-floor-breakdown ai-iv-breakdown hidden" id="vAiIvBreakdown"></div>
-
-      <!-- Market-implied scenario: contextualizes the price vs fair value gap.
-           Reads d.implied_growth_pct + d.model_growth_pct so users see WHY
-           the market price differs from VALUS fair value, not just THAT it does. -->
-      <div class="iv-scenario hidden" id="vIvScenario">
-        <span class="iv-scenario__icon" aria-hidden="true">↳</span>
-        <span class="iv-scenario__text" id="vIvScenarioText">N/A</span>
-      </div>
-
-      <button class="tier-badge tier-badge--btn" id="vTierBadge" type="button" aria-label="See what this verdict means">
-        <span class="tier-badge__dot"></span>
-        <span id="vTierLabel">N/A</span>
-        <span class="tier-badge__info" aria-hidden="true">ⓘ</span>
+    <!-- Actions sit below the card so zone 1 stays six fields. -->
+    <div class="results-actions">
+      <button class="copy-btn" id="addPortfolioBtn" type="button" aria-label="Add to portfolio">
+        <span id="addPortfolioTxt">★ Add to Portfolio</span>
       </button>
+      <button class="copy-btn" id="addWatchlistBtn" type="button" aria-label="Add to watchlist">
+        <span id="addWatchlistTxt">Add to Watchlist</span>
+      </button>
+      <button class="copy-btn" id="copyBtn" type="button">
+        <span id="copyBtnTxt">Copy summary</span>
+      </button>
+    </div>
 
-      <!-- VALUS A-F letter grade (Phase 5), large badge + one-line
-           explanation, slotted right after the verdict tier so the two
-           views of the same signal sit together. -->
-      <div class="valus-grade-row" id="vValusGradeRow" hidden>
-        <span id="vValusGradeBadge"></span>
-        <p class="valus-grade-explain" id="vValusGradeExplain"></p>
-        <button type="button" class="grade-explain-link" id="vValusGradeWhy">
-          <span aria-hidden="true">ⓘ</span>
-          <span>How are grades calculated?</span>
-        </button>
-      </div>
+    <!-- ── ZONE 2 ─ PANELS ────────────────────────────────────────────────
+         Fixed order: catalyst, news, red flags, company. Each panel owns its
+         loading and unavailable state via data-state, and reserves its own
+         body height so resolving one never moves the others. -->
+    <section class="panels" id="zonePanels">
 
-      <!-- Strategic Asset banner, only shown when is_strategic=true.
-           Surfaces the curated thesis (CHIPS Act, defense prime, etc.)
-           plus any live policy tailwinds detected from news. -->
-      <div class="strategic-banner hidden" id="vStrategicBanner">
-        <div class="strategic-banner__head">
-          <span class="strategic-banner__icon" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#vi-shield"></use></svg></span>
-          <span class="strategic-banner__label" id="vStrategicLabel">Strategic Asset</span>
-          <span class="strategic-banner__live hidden" id="vStrategicLive" title="Live policy tailwind detected in recent news">● Live policy tailwind</span>
+      <section class="panel" id="panelCatalyst" data-state="loading">
+        <div class="panel__head">
+          <h3 class="panel__title">Catalysts</h3>
+          <span class="panel__status" data-panel-status></span>
         </div>
-        <div class="strategic-banner__reason" id="vStrategicReason">N/A</div>
-        <div class="strategic-banner__chips" id="vStrategicChips"></div>
-      </div>
-
-      <div class="reasons" id="vReasons"></div>
-
-      <!-- News block, visible on every analyze view when catalysts are
-           present (not just strategic tickers).  Shows a chip and an
-           expandable list of headlines from yfinance, EDGAR 8-K, and
-           Google News, scored by the heuristic + Claude tie-breaker. -->
-      <div class="news-block hidden" id="vNewsBlock">
-        <button class="news-chip" id="vNewsChip" type="button" aria-expanded="false">
-          <span class="news-chip__icon" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#vi-news"></use></svg></span>
-          <span class="news-chip__count" id="vNewsCount">N/A</span>
-          <span class="news-chip__hint">click to expand</span>
-          <span class="news-chip__caret" aria-hidden="true">▾</span>
-        </button>
-        <div class="news-list hidden" id="vNewsList"></div>
-      </div>
-
-      <div class="verdict-line" id="vVerdict">N/A</div>
-
-      <!-- Inline insight row: confidence + implied growth + 52w range.
-           Replaces the previous Bear/Base/Bull toggle (redundant with the
-           detailed Scenario Analysis card below). -->
-      <div class="hero-insights" id="vInsights">
-        <div class="hero-insight" id="viConfidenceWrap" hidden>
-          <span class="hero-insight__label" data-i18n="insight.confidence">Confidence</span>
-          <span class="hero-insight__value" id="viConfidence">N/A</span>
-          <span class="hero-insight__hint" id="viConfidenceHint"></span>
-        </div>
-        <div class="hero-insight" id="viImpliedWrap" hidden>
-          <span class="hero-insight__label" data-i18n="insight.implied">Implied growth</span>
-          <span class="hero-insight__value" id="viImplied">N/A</span>
-          <span class="hero-insight__hint" id="viImpliedHint"></span>
-        </div>
-        <div class="hero-insight hero-insight--range" id="viRangeWrap" hidden>
-          <span class="hero-insight__label" data-i18n="insight.range">52-week range</span>
-          <div class="hr-bar">
-            <div class="hr-bar__track">
-              <div class="hr-bar__marker" id="viRangeMarker"></div>
+        <div class="panel__body">
+          <div class="panel__skeleton" aria-hidden="true"><span></span><span></span><span></span></div>
+          <p class="panel__msg" data-panel-msg></p>
+          <div class="panel__content">
+            <div class="strategic-banner hidden" id="vStrategicBanner">
+              <div class="strategic-banner__head">
+                <span class="strategic-banner__icon" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#vi-shield"></use></svg></span>
+                <span class="strategic-banner__label" id="vStrategicLabel">Strategic Asset</span>
+                <span class="strategic-banner__live hidden" id="vStrategicLive" title="Live policy tailwind detected in recent news">● Live policy tailwind</span>
+              </div>
+              <div class="strategic-banner__reason" id="vStrategicReason">N/A</div>
+              <div class="strategic-banner__chips" id="vStrategicChips"></div>
             </div>
-            <div class="hr-bar__ends">
-              <span id="viRangeLow">N/A</span>
-              <span id="viRangeHigh">N/A</span>
+            <div class="catalyst-list" id="catalystList"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="panelNews" data-state="loading">
+        <div class="panel__head">
+          <h3 class="panel__title">News</h3>
+          <span class="panel__status" data-panel-status></span>
+        </div>
+        <div class="panel__body">
+          <div class="panel__skeleton" aria-hidden="true"><span></span><span></span><span></span></div>
+          <p class="panel__msg" data-panel-msg></p>
+          <div class="panel__content">
+            <div class="news-block hidden" id="vNewsBlock">
+              <button class="news-chip" id="vNewsChip" type="button" aria-expanded="false">
+                <span class="news-chip__icon" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#vi-news"></use></svg></span>
+                <span class="news-chip__count" id="vNewsCount">N/A</span>
+                <span class="news-chip__hint">click to expand</span>
+                <span class="news-chip__caret" aria-hidden="true">▾</span>
+              </button>
+              <div class="news-list hidden" id="vNewsList"></div>
             </div>
+            <div class="news-summary-body" id="newsSummaryBody"></div>
           </div>
         </div>
-      </div>
+      </section>
+
+      <section class="panel" id="panelRedflags" data-state="loading">
+        <div class="panel__head">
+          <h3 class="panel__title">Red flags</h3>
+          <span class="panel__status" data-panel-status></span>
+        </div>
+        <div class="panel__body">
+          <div class="panel__skeleton" aria-hidden="true"><span></span><span></span><span></span></div>
+          <p class="panel__msg" data-panel-msg></p>
+          <div class="panel__content">
+            <div class="risk-summary" id="riskSummary"></div>
+            <div class="risk-chips" id="riskChips"></div>
+            <ul class="risk-bullets" id="riskBullets"></ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="panelCompany" data-state="loading">
+        <div class="panel__head">
+          <h3 class="panel__title">Company</h3>
+          <span class="panel__status" data-panel-status></span>
+        </div>
+        <div class="panel__body">
+          <div class="panel__skeleton" aria-hidden="true"><span></span><span></span><span></span></div>
+          <p class="panel__msg" data-panel-msg></p>
+          <div class="panel__content">
+            <dl class="facts" id="companyFacts"></dl>
+            <p class="facts__summary" id="companySummary"></p>
+          </div>
+        </div>
+      </section>
+
     </section>
 
-    <!-- SCENARIOS, moved up so users see bear/base/bull immediately -->
-    <section class="card scenarios">
-      <div class="scenarios__head">
-        <span class="scenarios__title">Scenario analysis</span>
-        <span class="scenarios__weight-note" id="scWeightNote">N/A</span>
-      </div>
-      <div class="scenarios__grid" id="scGrid"></div>
-      <div class="weighted-bar">
-        <span class="weighted-bar__label">Probability-weighted fair value</span>
-        <span class="weighted-bar__value numeric" id="scWeighted">N/A</span>
-        <span class="weighted-bar__delta numeric" id="scWeightedDelta">N/A</span>
-      </div>
-    </section>
-
-    <!-- VERDICT INTELLIGENCE ROW, sanity check, what-flips, reverse-DCF -->
-    <section class="verdict-grid hidden" id="verdictGrid">
-      <div class="card vg-card" id="sanityCard" hidden>
-        <div class="vg-head">
-          <span class="vg-icon" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#vi-scale"></use></svg></span>
-          <span class="vg-title" data-i18n="vg.sanity">Sanity check vs Wall Street</span>
-          <span class="vg-pill" id="sanityTier">N/A</span>
-        </div>
-        <div class="vg-row">
-          <div class="vg-stat">
-            <span class="vg-stat__label">VALUS fair value</span>
-            <span class="vg-stat__value numeric" id="sanityValusIv">N/A</span>
-          </div>
-          <div class="vg-stat">
-            <span class="vg-stat__label">Analyst consensus</span>
-            <span class="vg-stat__value numeric" id="sanityAnalyst">N/A</span>
-          </div>
-          <div class="vg-stat">
-            <span class="vg-stat__label">Gap</span>
-            <span class="vg-stat__value numeric" id="sanityGap">N/A</span>
-          </div>
-        </div>
-        <p class="vg-narrative" id="sanityNarrative">N/A</p>
-      </div>
-
-      <div class="card vg-card" id="flipCard" hidden>
-        <div class="vg-head">
-          <span class="vg-icon" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#vi-target"></use></svg></span>
-          <span class="vg-title" data-i18n="vg.flip">What would change this verdict</span>
-        </div>
-        <div class="flip-list" id="flipList"></div>
-      </div>
-
-      <div class="card vg-card" id="reverseDcfCard" hidden>
-        <div class="vg-head">
-          <span class="vg-icon" aria-hidden="true">↩</span>
-          <span class="vg-title">Reverse-DCF, what is the market pricing in?</span>
-          <span class="vg-pill" id="reverseDcfTier">N/A</span>
-        </div>
-        <div class="vg-row">
-          <div class="vg-stat">
-            <span class="vg-stat__label">Market-implied growth</span>
-            <span class="vg-stat__value numeric" id="rdcfImplied">N/A</span>
-          </div>
-          <div class="vg-stat">
-            <span class="vg-stat__label">Sector ceiling</span>
-            <span class="vg-stat__value numeric" id="rdcfCeiling">N/A</span>
-          </div>
-        </div>
-        <p class="vg-narrative" id="rdcfNarrative">N/A</p>
-      </div>
-    </section>
-
-    <!-- MINI STATS, moved up; sits right under scenarios -->
-    <section class="mini-stats">
-      <div class="mini-stat">
-        <span class="mini-stat__label">Market Cap</span>
-        <span class="mini-stat__value numeric" id="mMcap">N/A</span>
-      </div>
-      <div class="mini-stat">
-        <span class="mini-stat__label">P/E (TTM)</span>
-        <span class="mini-stat__value numeric" id="mPE">N/A</span>
-      </div>
-      <div class="mini-stat">
-        <span class="mini-stat__label">Dividend Yield</span>
-        <span class="mini-stat__value numeric" id="mDiv">N/A</span>
-      </div>
-      <div class="mini-stat">
-        <span class="mini-stat__label">Analyst Target</span>
-        <span class="mini-stat__value numeric" id="mTarget">N/A</span>
-      </div>
-    </section>
-
-    <!-- VALUATION HISTORY (5y price vs intrinsic value) -->
-    <section class="card valuation-history hidden" id="valuationHistoryCard">
-      <div class="vh-head">
-        <div class="vh-title-block">
-          <div class="vh-title">Valuation History</div>
-          <div class="vh-sub" id="vhSub">5-year price vs. intrinsic value · point-in-time DCF replay</div>
-        </div>
-        <div class="vh-stats" id="vhStats"></div>
-      </div>
-      <!-- Cyclical-pattern caveat: shown when the deterministic IV is
-           consistently far below price (auto/airline/semi trough names).
-           Pure DCF systematically undervalues these, surface that. -->
-      <div class="vh-caveat hidden" id="vhCaveat">
-        <span class="vh-caveat__icon" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#vi-alert"></use></svg></span>
-        <span class="vh-caveat__text" id="vhCaveatText"></span>
-      </div>
-      <div class="vh-chart-wrap">
-        <canvas id="valuationHistoryChart" aria-label="Valuation history chart"></canvas>
-      </div>
-      <div class="vh-legend">
-        <span class="vh-legend__item"><span class="vh-dot vh-dot--iv"></span><strong>VALUS Intrinsic Value</strong></span>
-        <span class="vh-legend__item"><span class="vh-dot vh-dot--price"></span>Market price</span>
-        <span class="vh-legend__hint">When price dips below the mint line = undervalued window. IV is recomputed each year from data filed by that date.</span>
-      </div>
-      <div class="vh-empty hidden" id="vhEmpty">
-        Historical valuation requires SEC EDGAR data, available for US-listed filers with sufficient history.
-      </div>
-    </section>
-
-    <!-- LYNCH LENS: per-ticker AI valuation read (full-width, hero-adjacent) -->
-    <section class="lynch-card card hidden" id="lynchCard">
-      <div class="lynch-head">
-        <div class="lynch-title">
-          Lynch Lens <span class="lynch-badge">AI</span>
-          <span class="lynch-asof" id="lynchAsOf"></span>
-        </div>
-        <div class="lynch-pill-row">
-          <span class="lynch-cat" id="lynchCategory"></span>
-          <span class="lynch-verdict" id="lynchVerdict"></span>
-          <span class="lynch-regime hidden" id="lynchRegime"></span>
-        </div>
-      </div>
-      <!-- Plain-language reading first, the analyst-register thesis under it.
-           `plain` is always present: the AI path returns one and the DCF-only
-           fallback writes one by hand, so this line is never empty. -->
-      <div class="lynch-plain" id="lynchPlain"></div>
-      <div class="lynch-thesis" id="lynchThesis"></div>
-      <div class="lynch-cols">
-        <div class="lynch-col lynch-col--bull">
-          <div class="lynch-col__hd">Bull case</div>
-          <ul class="lynch-list" id="lynchBulls"></ul>
-        </div>
-        <div class="lynch-col lynch-col--bear">
-          <div class="lynch-col__hd">Bear case</div>
-          <ul class="lynch-list" id="lynchBears"></ul>
-        </div>
-      </div>
-      <div class="lynch-backstop hidden" id="lynchBackstop"></div>
-    </section>
-
-    <!-- INSIGHTS GRID: quality scorecard + risk + insider + congress + news -->
-    <section class="insights-grid hidden" id="insightsGrid">
-      <div class="card insights-card" id="qualityCard" hidden>
-        <div class="ic-head">
-          <div class="ic-title">Quality scorecard</div>
-          <div class="ic-sub" id="qualitySub">Profitability, returns, leverage</div>
-        </div>
-        <div class="quality-score hidden" id="qualityScoreBlock">
-          <div class="quality-score__num numeric" id="qualityScoreNum">N/A</div>
-          <div class="quality-score__meta">
-            <span class="quality-score__grade" id="qualityScoreGrade">N/A</span>
-            <span class="quality-score__sub">0-100 composite</span>
-          </div>
-        </div>
-        <div class="quality-grid" id="qualityGrid"></div>
-      </div>
-      <div class="card insights-card" id="moatCard" hidden>
-        <div class="ic-head">
-          <div class="ic-title">Moat breakdown</div>
-          <div class="ic-sub"><span id="moatStrength">N/A</span></div>
-        </div>
-        <div class="moat-list" id="moatList"></div>
-      </div>
-      <div class="card insights-card" id="buffettCard" hidden>
-        <div class="ic-head">
-          <div class="ic-title">Buffett checklist</div>
-          <div class="ic-sub"><span id="buffettScore">N/A</span></div>
-        </div>
-        <ul class="buffett-list" id="buffettList"></ul>
-      </div>
-      <div class="card insights-card" id="momentumCard" hidden>
-        <div class="ic-head">
-          <div class="ic-title">Momentum overlay</div>
-          <div class="ic-sub" id="momentumSub">50/200-day moving averages</div>
-        </div>
-        <div class="momentum-body">
-          <div class="momentum-tier" id="momentumTier">N/A</div>
-          <div class="momentum-mas">
-            <div class="momentum-ma">
-              <span class="momentum-ma__label">Price</span>
-              <span class="momentum-ma__value numeric" id="momPrice">N/A</span>
-            </div>
-            <div class="momentum-ma">
-              <span class="momentum-ma__label">50-day MA</span>
-              <span class="momentum-ma__value numeric" id="momMa50">N/A</span>
-              <span class="momentum-ma__gap" id="momMa50Gap"></span>
-            </div>
-            <div class="momentum-ma">
-              <span class="momentum-ma__label">200-day MA</span>
-              <span class="momentum-ma__value numeric" id="momMa200">N/A</span>
-              <span class="momentum-ma__gap" id="momMa200Gap"></span>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="card insights-card" id="earningsQualityCard" hidden>
-        <div class="ic-head">
-          <div class="ic-title">Earnings quality</div>
-          <div class="ic-sub">FCF vs reported EPS</div>
-        </div>
-        <div class="eq-tier" id="eqTier">N/A</div>
-        <p class="eq-narrative" id="eqNarrative">N/A</p>
-      </div>
-      <div class="card insights-card" id="riskCard" hidden>
-        <div class="ic-head">
-          <div class="ic-title">Risk analysis</div>
-          <div class="ic-sub" id="riskSub">Confidence, leverage, policy &amp; news flags</div>
-        </div>
-        <div class="risk-summary" id="riskSummary"></div>
-        <div class="risk-chips" id="riskChips"></div>
-        <ul class="risk-bullets" id="riskBullets"></ul>
-      </div>
-      <div class="card insights-card" id="insiderCard" hidden>
-        <div class="ic-head">
-          <div class="ic-title">Insider activity (90d)</div>
-          <div class="ic-sub" id="insiderSub">SEC Form 4, last 90 days</div>
-        </div>
-        <div class="insider-summary" id="insiderSummary"></div>
-        <div class="insider-list" id="insiderList"></div>
-      </div>
-      <div class="card insights-card" id="congressCard" hidden>
-        <div class="ic-head">
-          <div class="ic-title">Congressional trades (180d)</div>
-          <div class="ic-sub" id="congressSub">STOCK Act PTRs, House + Senate</div>
-        </div>
-        <div class="insider-summary" id="congressSummary"></div>
-        <div class="insider-list" id="congressList"></div>
-      </div>
-      <div class="card insights-card" id="newsSummaryCard" hidden>
-        <div class="ic-head">
-          <div class="ic-title">News &amp; catalysts</div>
-          <div class="ic-sub" id="newsSummarySub">Top recent signals</div>
-        </div>
-        <div class="news-summary-body" id="newsSummaryBody"></div>
-      </div>
-    </section>
-
-    <!-- DETAILED ANALYSIS DRAWER -->
+    <!-- ── ZONE 3 ─ ASSUMPTIONS DRAWER ────────────────────────────────────
+         Collapsed by default, open to everyone. Everything tiered detail
+         lives here, including the assumption editor and the sliders. -->
     <button class="drawer-trigger" id="drawerTrigger" type="button" aria-expanded="false">
-      <span id="drawerTriggerTxt">View detailed analysis</span>
+      <span id="drawerTriggerTxt">Assumptions</span>
       <span class="drawer-trigger__chev">▾</span>
     </button>
 
@@ -1503,7 +1197,98 @@
       <div class="drawer__inner">
         <div class="drawer__content">
 
-          <!-- Custom DCF assumptions (top, most engaging) -->
+          <!-- Valuation detail: the numbers that used to crowd the hero -->
+          <div class="card">
+            <div class="section-title">Valuation detail</div>
+            <div class="price-iv">
+              <div class="pi-block">
+                <span class="pi-label" data-i18n="res.fairValue">Fair value</span>
+                <span class="pi-value iv numeric" id="vIV">N/A</span>
+              </div>
+              <div class="mos-bar">
+                <span class="mos-label" data-i18n="res.mos">Margin of safety</span>
+                <div class="mos-track">
+                  <span class="mos-fill" id="vMosFill" style="width: 0%"></span>
+                </div>
+                <span class="mos-pct" id="vMosPct">N/A</span>
+              </div>
+              <div class="pi-block right">
+                <span class="pi-label" data-i18n="insight.range">52-week range</span>
+                <span class="pi-value numeric" id="vRange">N/A</span>
+              </div>
+            </div>
+
+            <div class="iv-band hidden" id="vIvBand">
+              <div class="iv-band__bar">
+                <div class="iv-band__span" id="vIvBandSpan"></div>
+                <div class="iv-band__mid" id="vIvBandMid"></div>
+                <div class="iv-band__price" id="vIvBandPrice"></div>
+              </div>
+              <div class="iv-band__foot" id="vIvBandFoot"></div>
+            </div>
+
+            <div class="iv-floor-breakdown hidden" id="vIvFloorBreakdown"></div>
+            <div class="iv-floor-breakdown ai-iv-breakdown hidden" id="vAiIvBreakdown"></div>
+
+            <div class="iv-scenario hidden" id="vIvScenario">
+              <span class="iv-scenario__icon" aria-hidden="true">↳</span>
+              <span class="iv-scenario__text" id="vIvScenarioText">N/A</span>
+            </div>
+
+            <div class="hero-insights" id="vInsights">
+              <div class="hero-insight" id="viImpliedWrap" hidden>
+                <span class="hero-insight__label" data-i18n="insight.implied">Implied growth</span>
+                <span class="hero-insight__value" id="viImplied">N/A</span>
+                <span class="hero-insight__hint" id="viImpliedHint"></span>
+              </div>
+              <div class="hero-insight hero-insight--range" id="viRangeWrap" hidden>
+                <span class="hero-insight__label" data-i18n="insight.range">52-week range</span>
+                <div class="hr-bar">
+                  <div class="hr-bar__track">
+                    <div class="hr-bar__marker" id="viRangeMarker"></div>
+                  </div>
+                  <div class="hr-bar__ends">
+                    <span id="viRangeLow">N/A</span>
+                    <span id="viRangeHigh">N/A</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="reasons" id="vReasons"></div>
+          </div>
+
+          <!-- Assumption editor: auto-calibrated by default, editable here -->
+          <div class="card assume-card">
+            <div class="section-title-row">
+              <div class="section-title">Assumptions used</div>
+              <span class="assume-card__hint" id="assumeHint">Auto-calibrated. Change one and re-run.</span>
+            </div>
+            <div class="assume-grid">
+              <div class="assume-field">
+                <label for="drwS1">Stage 1 growth (%)</label>
+                <input id="drwS1" type="number" placeholder="auto" step="0.1" inputmode="decimal"/>
+              </div>
+              <div class="assume-field">
+                <label for="drwS2">Stage 2 growth (%)</label>
+                <input id="drwS2" type="number" placeholder="auto" step="0.1" inputmode="decimal"/>
+              </div>
+              <div class="assume-field">
+                <label for="drwTg">Terminal growth (%)</label>
+                <input id="drwTg" type="number" placeholder="auto" step="0.1" inputmode="decimal"/>
+              </div>
+              <div class="assume-field">
+                <label for="drwYrs">Projection years</label>
+                <input id="drwYrs" type="number" placeholder="10" min="3" max="20" inputmode="numeric"/>
+              </div>
+            </div>
+            <div class="assume-actions">
+              <button class="copy-btn copy-btn--primary" id="drwApply" type="button">Re-run with these</button>
+              <button class="copy-btn copy-btn--small" id="drwReset" type="button">↺ Back to auto</button>
+            </div>
+          </div>
+
+          <!-- Custom DCF sliders -->
           <div class="card custom-dcf">
             <div class="section-title-row">
               <div class="section-title">Try your own assumptions</div>
@@ -1529,34 +1314,256 @@
             <div class="cd-sliders">
               <div class="cd-slider-row">
                 <div class="cd-slider-head">
-                  <span class="cd-slider-label">Stage 1 growth · g₁</span>
+                  <span class="cd-slider-label">Stage 1 growth</span>
                   <span class="cd-slider-value numeric" id="cdS1Val">N/A</span>
                 </div>
                 <input type="range" class="dcf-slider cd-slider" id="cdS1" aria-label="Stage 1 growth rate, percent" min="0" max="60" step="0.5"/>
               </div>
               <div class="cd-slider-row">
                 <div class="cd-slider-head">
-                  <span class="cd-slider-label">Stage 2 growth · g₂</span>
+                  <span class="cd-slider-label">Stage 2 growth</span>
                   <span class="cd-slider-value numeric" id="cdS2Val">N/A</span>
                 </div>
                 <input type="range" class="dcf-slider cd-slider" id="cdS2" aria-label="Stage 2 growth rate, percent" min="0" max="40" step="0.5"/>
               </div>
               <div class="cd-slider-row">
                 <div class="cd-slider-head">
-                  <span class="cd-slider-label">Discount rate · WACC</span>
+                  <span class="cd-slider-label">Discount rate</span>
                   <span class="cd-slider-value numeric" id="cdWaccVal">N/A</span>
                 </div>
-                <input type="range" class="dcf-slider cd-slider" id="cdWacc" aria-label="Discount rate (WACC), percent" min="3" max="25" step="0.1"/>
+                <input type="range" class="dcf-slider cd-slider" id="cdWacc" aria-label="Discount rate, percent" min="3" max="25" step="0.1"/>
               </div>
               <div class="cd-slider-row">
                 <div class="cd-slider-head">
-                  <span class="cd-slider-label">Terminal growth · g_T</span>
+                  <span class="cd-slider-label">Terminal growth</span>
                   <span class="cd-slider-value numeric" id="cdTgVal">N/A</span>
                 </div>
                 <input type="range" class="dcf-slider cd-slider" id="cdTg" aria-label="Terminal growth rate, percent" min="0.5" max="6" step="0.1"/>
               </div>
             </div>
           </div>
+
+          <!-- Scenario analysis -->
+          <section class="card scenarios">
+            <div class="scenarios__head">
+              <span class="scenarios__title">Scenario analysis</span>
+              <span class="scenarios__weight-note" id="scWeightNote">N/A</span>
+            </div>
+            <div class="scenarios__grid" id="scGrid"></div>
+            <div class="weighted-bar">
+              <span class="weighted-bar__label">Probability-weighted fair value</span>
+              <span class="weighted-bar__value numeric" id="scWeighted">N/A</span>
+              <span class="weighted-bar__delta numeric" id="scWeightedDelta">N/A</span>
+            </div>
+          </section>
+
+          <!-- Sanity check, what-flips, reverse-DCF -->
+          <section class="verdict-grid hidden" id="verdictGrid">
+            <div class="card vg-card" id="sanityCard" hidden>
+              <div class="vg-head">
+                <span class="vg-icon" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#vi-scale"></use></svg></span>
+                <span class="vg-title" data-i18n="vg.sanity">Sanity check vs Wall Street</span>
+                <span class="vg-pill" id="sanityTier">N/A</span>
+              </div>
+              <div class="vg-row">
+                <div class="vg-stat">
+                  <span class="vg-stat__label">VALUS fair value</span>
+                  <span class="vg-stat__value numeric" id="sanityValusIv">N/A</span>
+                </div>
+                <div class="vg-stat">
+                  <span class="vg-stat__label">Analyst consensus</span>
+                  <span class="vg-stat__value numeric" id="sanityAnalyst">N/A</span>
+                </div>
+                <div class="vg-stat">
+                  <span class="vg-stat__label">Gap</span>
+                  <span class="vg-stat__value numeric" id="sanityGap">N/A</span>
+                </div>
+              </div>
+              <p class="vg-narrative" id="sanityNarrative">N/A</p>
+            </div>
+
+            <div class="card vg-card" id="flipCard" hidden>
+              <div class="vg-head">
+                <span class="vg-icon" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#vi-target"></use></svg></span>
+                <span class="vg-title" data-i18n="vg.flip">What would change this verdict</span>
+              </div>
+              <div class="flip-list" id="flipList"></div>
+            </div>
+
+            <div class="card vg-card" id="reverseDcfCard" hidden>
+              <div class="vg-head">
+                <span class="vg-icon" aria-hidden="true">↩</span>
+                <span class="vg-title">Reverse-DCF, what is the market pricing in?</span>
+                <span class="vg-pill" id="reverseDcfTier">N/A</span>
+              </div>
+              <div class="vg-row">
+                <div class="vg-stat">
+                  <span class="vg-stat__label">Market-implied growth</span>
+                  <span class="vg-stat__value numeric" id="rdcfImplied">N/A</span>
+                </div>
+                <div class="vg-stat">
+                  <span class="vg-stat__label">Sector ceiling</span>
+                  <span class="vg-stat__value numeric" id="rdcfCeiling">N/A</span>
+                </div>
+              </div>
+              <p class="vg-narrative" id="rdcfNarrative">N/A</p>
+            </div>
+          </section>
+
+          <!-- Mini stats -->
+          <section class="mini-stats">
+            <div class="mini-stat">
+              <span class="mini-stat__label">Market Cap</span>
+              <span class="mini-stat__value numeric" id="mMcap">N/A</span>
+            </div>
+            <div class="mini-stat">
+              <span class="mini-stat__label">P/E (TTM)</span>
+              <span class="mini-stat__value numeric" id="mPE">N/A</span>
+            </div>
+            <div class="mini-stat">
+              <span class="mini-stat__label">Dividend Yield</span>
+              <span class="mini-stat__value numeric" id="mDiv">N/A</span>
+            </div>
+            <div class="mini-stat">
+              <span class="mini-stat__label">Analyst Target</span>
+              <span class="mini-stat__value numeric" id="mTarget">N/A</span>
+            </div>
+          </section>
+
+          <!-- Valuation history -->
+          <section class="card valuation-history hidden" id="valuationHistoryCard">
+            <div class="vh-head">
+              <div class="vh-title-block">
+                <div class="vh-title">Valuation History</div>
+                <div class="vh-sub" id="vhSub">5-year price vs. intrinsic value · point-in-time DCF replay</div>
+              </div>
+              <div class="vh-stats" id="vhStats"></div>
+            </div>
+            <div class="vh-caveat hidden" id="vhCaveat">
+              <span class="vh-caveat__icon" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#vi-alert"></use></svg></span>
+              <span class="vh-caveat__text" id="vhCaveatText"></span>
+            </div>
+            <div class="vh-chart-wrap">
+              <canvas id="valuationHistoryChart" aria-label="Valuation history chart"></canvas>
+            </div>
+            <div class="vh-legend">
+              <span class="vh-legend__item"><span class="vh-dot vh-dot--iv"></span><strong>VALUS Intrinsic Value</strong></span>
+              <span class="vh-legend__item"><span class="vh-dot vh-dot--price"></span>Market price</span>
+              <span class="vh-legend__hint">When price dips below the mint line = undervalued window. IV is recomputed each year from data filed by that date.</span>
+            </div>
+            <div class="vh-empty hidden" id="vhEmpty">
+              Historical valuation requires SEC EDGAR data, available for US-listed filers with sufficient history.
+            </div>
+          </section>
+
+          <!-- Lynch Lens -->
+          <section class="lynch-card card hidden" id="lynchCard">
+            <div class="lynch-head">
+              <div class="lynch-title">
+                Lynch Lens <span class="lynch-badge">AI</span>
+                <span class="lynch-asof" id="lynchAsOf"></span>
+              </div>
+              <div class="lynch-pill-row">
+                <span class="lynch-cat" id="lynchCategory"></span>
+                <span class="lynch-verdict" id="lynchVerdict"></span>
+                <span class="lynch-regime hidden" id="lynchRegime"></span>
+              </div>
+            </div>
+            <div class="lynch-plain" id="lynchPlain"></div>
+            <div class="lynch-thesis" id="lynchThesis"></div>
+            <div class="lynch-cols">
+              <div class="lynch-col lynch-col--bull">
+                <div class="lynch-col__hd">Bull case</div>
+                <ul class="lynch-list" id="lynchBulls"></ul>
+              </div>
+              <div class="lynch-col lynch-col--bear">
+                <div class="lynch-col__hd">Bear case</div>
+                <ul class="lynch-list" id="lynchBears"></ul>
+              </div>
+            </div>
+            <div class="lynch-backstop hidden" id="lynchBackstop"></div>
+          </section>
+
+          <!-- Quality, moat, checklist, momentum, earnings quality, insider, congress -->
+          <section class="insights-grid hidden" id="insightsGrid">
+            <div class="card insights-card" id="qualityCard" hidden>
+              <div class="ic-head">
+                <div class="ic-title">Quality scorecard</div>
+                <div class="ic-sub" id="qualitySub">Profitability, returns, leverage</div>
+              </div>
+              <div class="quality-score hidden" id="qualityScoreBlock">
+                <div class="quality-score__num numeric" id="qualityScoreNum">N/A</div>
+                <div class="quality-score__meta">
+                  <span class="quality-score__grade" id="qualityScoreGrade">N/A</span>
+                  <span class="quality-score__sub">0-100 composite</span>
+                </div>
+              </div>
+              <div class="quality-grid" id="qualityGrid"></div>
+            </div>
+            <div class="card insights-card" id="moatCard" hidden>
+              <div class="ic-head">
+                <div class="ic-title">Moat breakdown</div>
+                <div class="ic-sub"><span id="moatStrength">N/A</span></div>
+              </div>
+              <div class="moat-list" id="moatList"></div>
+            </div>
+            <div class="card insights-card" id="buffettCard" hidden>
+              <div class="ic-head">
+                <div class="ic-title">Buffett checklist</div>
+                <div class="ic-sub"><span id="buffettScore">N/A</span></div>
+              </div>
+              <ul class="buffett-list" id="buffettList"></ul>
+            </div>
+            <div class="card insights-card" id="momentumCard" hidden>
+              <div class="ic-head">
+                <div class="ic-title">Momentum overlay</div>
+                <div class="ic-sub" id="momentumSub">50/200-day moving averages</div>
+              </div>
+              <div class="momentum-body">
+                <div class="momentum-tier" id="momentumTier">N/A</div>
+                <div class="momentum-mas">
+                  <div class="momentum-ma">
+                    <span class="momentum-ma__label">Price</span>
+                    <span class="momentum-ma__value numeric" id="momPrice">N/A</span>
+                  </div>
+                  <div class="momentum-ma">
+                    <span class="momentum-ma__label">50-day MA</span>
+                    <span class="momentum-ma__value numeric" id="momMa50">N/A</span>
+                    <span class="momentum-ma__gap" id="momMa50Gap"></span>
+                  </div>
+                  <div class="momentum-ma">
+                    <span class="momentum-ma__label">200-day MA</span>
+                    <span class="momentum-ma__value numeric" id="momMa200">N/A</span>
+                    <span class="momentum-ma__gap" id="momMa200Gap"></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="card insights-card" id="earningsQualityCard" hidden>
+              <div class="ic-head">
+                <div class="ic-title">Earnings quality</div>
+                <div class="ic-sub">FCF vs reported EPS</div>
+              </div>
+              <div class="eq-tier" id="eqTier">N/A</div>
+              <p class="eq-narrative" id="eqNarrative">N/A</p>
+            </div>
+            <div class="card insights-card" id="insiderCard" hidden>
+              <div class="ic-head">
+                <div class="ic-title">Insider activity (90d)</div>
+                <div class="ic-sub" id="insiderSub">SEC Form 4, last 90 days</div>
+              </div>
+              <div class="insider-summary" id="insiderSummary"></div>
+              <div class="insider-list" id="insiderList"></div>
+            </div>
+            <div class="card insights-card" id="congressCard" hidden>
+              <div class="ic-head">
+                <div class="ic-title">Congressional trades (180d)</div>
+                <div class="ic-sub" id="congressSub">STOCK Act PTRs, House + Senate</div>
+              </div>
+              <div class="insider-summary" id="congressSummary"></div>
+              <div class="insider-list" id="congressList"></div>
+            </div>
+          </section>
 
           <!-- Comparables-based profitability model (early-stage names) -->
           <div class="card cmp-card hidden" id="comparablesCard">
@@ -1618,7 +1625,6 @@
               </div>
             </div>
 
-            <!-- Selected-year highlight: huge numbers driven by the slider -->
             <div class="dcf-year-card" id="dcfYearCard">
               <div class="dcf-year-card__head">
                 <span class="dcf-year-card__label">Year <span id="dyYearN">1</span></span>
@@ -1639,14 +1645,12 @@
               </div>
             </div>
 
-            <!-- Slider -->
             <div class="dcf-slider-wrap">
               <input type="range" min="1" max="10" value="1" step="1"
                      class="dcf-slider" id="dcfSlider" aria-label="Select projection year"/>
               <div class="dcf-slider-ticks" id="dcfSliderTicks"></div>
             </div>
 
-            <!-- Mini chart strip for visual context -->
             <div class="chart-wrap chart-wrap--small">
               <canvas id="dcfChart"></canvas>
             </div>
