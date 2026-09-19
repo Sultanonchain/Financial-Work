@@ -1770,9 +1770,13 @@ a.auth-menu__btn { text-decoration: none; }
 /* Price + IV layout */
 .price-iv {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  /* Fair value and margin of safety are the same fact stated two ways, so they
+     sit adjacent at a shared weight rather than anchored to opposite edges
+     with a dead middle third between them. */
+  grid-template-columns: auto auto;
+  justify-content: start;
   gap: var(--space-5);
-  align-items: center;
+  align-items: end;
   margin-bottom: var(--space-3);
   position: relative; z-index: 1;
 }
@@ -1805,7 +1809,8 @@ a.auth-menu__btn { text-decoration: none; }
 }
 .iv-band__bar {
   position: relative;
-  height: 10px; margin: 14px 0 12px;
+  /* Top margin leaves room for the price label riding above the track. */
+  height: 10px; margin: 26px 0 6px;
   border-radius: var(--radius-pill);
   background: rgba(255,255,255,0.06);
 }
@@ -1829,6 +1834,41 @@ a.auth-menu__btn { text-decoration: none; }
   transform: translateX(-5px);
 }
 .iv-band__price.hidden { display: none; }
+/* Price outside the band: the marker becomes a caret just past the end it left.
+   Same ink as the marker, no tone colour — above the range and below it are
+   both just statements about where the price sits. */
+.iv-band__price--below,
+.iv-band__price--above {
+  width: 0; height: 0;
+  top: -2px;
+  border-radius: 0;
+  background: transparent;
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+}
+.iv-band__price--below {
+  border-right: 9px solid var(--ink-primary); border-left: 0;
+  transform: translateX(-100%);
+}
+.iv-band__price--above {
+  border-left: 9px solid var(--ink-primary); border-right: 0;
+  transform: translateX(0);
+}
+/* Reference marks, not headline figures: small, muted, sans (inherited from
+   #results, since none of these carry .numeric). */
+.iv-band__pricelabel {
+  position: absolute; top: -20px;
+  font-size: 11px; line-height: 1;
+  color: var(--ink-secondary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.iv-band__ends {
+  display: flex; justify-content: space-between;
+  font-size: 11px; color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 10px;
+}
 .iv-band__foot {
   font-size: 12.5px; line-height: 1.5; color: var(--ink-secondary);
 }
@@ -1880,7 +1920,6 @@ a.auth-menu__btn { text-decoration: none; }
 }
 
 .pi-block { display: flex; flex-direction: column; gap: 4px; }
-.pi-block.right { text-align: right; }
 
 .pi-label {
   font-family: var(--font-mono);
@@ -1906,6 +1945,24 @@ a.auth-menu__btn { text-decoration: none; }
   text-shadow: 0 0 60px var(--tier-glow, var(--accent-glow));
   filter: drop-shadow(0 0 24px var(--tier-glow, var(--accent-glow)));
 }
+
+/* Valuation-detail scope ONLY.  The ETF hero reuses .pi-block / .pi-value at
+   full display size, so none of this may be global.  Sans, and at a weight
+   that matches the margin-of-safety figure it now sits beside: the glow and
+   the 52px gradient were carrying more emphasis than a drawer figure needs. */
+#results .price-iv .pi-value,
+#results .price-iv .pi-value.iv {
+  font-family: var(--font-display);
+  font-size: 28px;
+  letter-spacing: -0.01em;
+  background: none;
+  -webkit-text-fill-color: currentColor;
+  color: var(--ink-primary);
+  text-shadow: none;
+  filter: none;
+}
+#results .price-iv .mos-pct { font-family: var(--font-display); font-size: 22px; }
+.price-iv .mos-bar { align-items: flex-start; min-width: 160px; }
 
 /* MOS bar in the middle */
 .mos-bar {
@@ -2249,7 +2306,6 @@ a.auth-menu__btn { text-decoration: none; }
   .hero-verdict__actions { width: 100%; }
   .copy-btn { flex: 1; justify-content: center; }
   .price-iv { grid-template-columns: 1fr; gap: var(--space-4); }
-  .pi-block.right { text-align: left; }
   .mos-bar { width: 100%; min-width: 0; }
   .pi-value { font-size: 38px; }
   .scenario-toggle { grid-template-columns: 1fr; gap: 4px; }
@@ -3698,6 +3754,28 @@ a:focus-visible {
   border-radius: 50%; background: #f5f7fa; transform: translateX(-50%);
   box-shadow: 0 0 0 2px rgba(20,24,32,0.95);
 }
+/* Price outside the 52-week span: the dot becomes a caret sitting just past the
+   end it left, so the bar reads as "off the scale this way" instead of as a
+   thumb jammed against the stop.  Same ink as the dot, no tone colour: a fresh
+   high and a fresh low are both just facts about where the price is. */
+.hr-bar__marker--below,
+.hr-bar__marker--above {
+  width: 0; height: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+}
+.hr-bar__marker--below {
+  border-right: 8px solid var(--ink-primary);
+  transform: translateX(-100%);
+}
+.hr-bar__marker--above {
+  border-left: 8px solid var(--ink-primary);
+  transform: translateX(0);
+}
+.hr-bar__out { font-size: 11px; line-height: 1.45; color: var(--ink-secondary); }
 .hr-bar__ends {
   display: flex; justify-content: space-between;
   font-size: 11px; color: #8892a3; font-variant-numeric: tabular-nums;
@@ -4388,16 +4466,15 @@ a.insider-row:hover { background: rgba(255,255,255,0.05); }
   /* Hero verdict card — keep numbers prominent on small screens. */
   .hero-verdict { padding: var(--space-5) var(--space-4); }
   .price-iv {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
     grid-template-areas:
-      "price iv"
-      "mos   mos";
+      "price"
+      "mos";
     gap: var(--space-3);
     text-align: left;
   }
   .price-iv .pi-block:first-child { grid-area: price; }
   .price-iv .mos-bar              { grid-area: mos; }
-  .price-iv .pi-block.right       { grid-area: iv; text-align: right; }
   .pi-value, .pi-value.iv { font-size: 26px; }
 
   /* Scenario grid → single column on phone (3 cards stack). */
@@ -5795,9 +5872,9 @@ button:disabled { cursor: not-allowed; }
 }
 .vfield__value--text { font-size: 15px; font-weight: 500; }
 .vfield__value--warn { color: var(--warning); }
-.vfield__value.conf-low    { color: var(--negative); }
-.vfield__value.conf-medium { color: var(--warning); }
-.vfield__value.conf-high   { color: var(--positive); }
+/* Confidence deliberately has no tone colour. It measures how much the model
+   trusts its own inputs, not whether the stock is attractive, so it inherits
+   the body colour from .vfield__value above. */
 .vfield__prose {
   margin: 0;
   font-size: 15px;
@@ -5814,7 +5891,9 @@ button:disabled { cursor: not-allowed; }
 /* ── Zone 2 ─────────────────────────────────────────────────────────── */
 .panels {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  /* Fixed 2x2.  auto-fit with a 300px minimum resolved to three columns in the
+     1180px container, so the four panels laid out 3 + 1 and left a hole. */
+  grid-template-columns: repeat(2, 1fr);
   gap: var(--space-4);
   margin-bottom: var(--space-5);
 }
@@ -5868,6 +5947,13 @@ button:disabled { cursor: not-allowed; }
 .fact__key { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-muted); }
 .fact__val { margin: 0; font-size: 14px; color: var(--ink-primary); overflow-wrap: break-word; }
 .facts__summary { margin: var(--space-3) 0 0; font-size: 13px; line-height: 1.6; color: var(--ink-secondary); }
+/* Separates the key figures from the company profile inside the merged panel. */
+.facts__subhead {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--ink-muted);
+}
 
 /* ── Zone 3, the assumption editor ──────────────────────────────────── */
 .assume-card__hint { font-size: 12px; color: var(--ink-muted); }
@@ -5879,6 +5965,22 @@ button:disabled { cursor: not-allowed; }
 }
 .assume-field { display: flex; flex-direction: column; gap: 6px; }
 .assume-field label { font-size: 12px; color: var(--ink-muted); }
+/* Same affordance as the read-only assumptions grid: a dim ⓘ marks a field that
+   carries an explanation.  It sits beside the label, not inside it, so clicking
+   the label text still focuses the input.  Shared with the custom-DCF sliders,
+   whose heads are space-between and so need the same label+icon wrapper to stop
+   the icon being flung to the middle of the row. */
+.assume-field__head,
+.cd-slider-labelwrap { display: inline-flex; align-items: baseline; gap: 4px; }
+.tip-icon {
+  font-size: 10px;
+  line-height: 1;
+  color: var(--ink-muted);
+  opacity: 0.45;
+  cursor: help;
+}
+.tip-icon:hover,
+.tip-icon:focus-visible { opacity: 0.85; }
 .assume-field input {
   font-family: var(--font-mono);
   font-size: 14px;

@@ -19,6 +19,19 @@ const fmt = (n, d = 2) => {
 
 const fmtPrice = (n) => n == null || isNaN(n) ? NA : `$${fmt(n, 2)}`;
 
+// Headline rounding: whole dollars once the numbers are big enough that cents
+// are noise, two places below that.  fmt(0.85, 0) is "1", so rounding a sub-$10
+// name unconditionally would collapse a real range to "$1 – $1".  The precision
+// is decided once from the smaller end so both ends of a band always match.
+const _priceDigits = (n) => (Math.abs(n) >= 10 ? 0 : 2);
+const fmtPriceCompact = (n) =>
+  n == null || isNaN(n) ? NA : `$${fmt(n, _priceDigits(n))}`;
+const fmtBand = (lo, hi) => {
+  if (lo == null || hi == null || isNaN(lo) || isNaN(hi)) return NA;
+  const d = _priceDigits(Math.min(Math.abs(lo), Math.abs(hi)));
+  return `$${fmt(lo, d)} – $${fmt(hi, d)}`;
+};
+
 const fmtPct = (n, d = 1) => {
   if (n == null || isNaN(n)) return NA;
   const sign = n > 0 ? "+" : "";
@@ -138,6 +151,15 @@ const TIER_CLASSES = {
 
 function tierClassFor(tier) {
   return TIER_CLASSES[tier] || "tier-info";
+}
+
+// Stored portfolio / watchlist rows hold the stable tier KEY ("excellence"), so
+// renaming a verdict label reaches rows saved months ago without a migration.
+// Anything that is not a known key passes through unchanged: rows written
+// before this change hold the label itself, and the ETF / crypto builders store
+// their own sentinels ("ETF", "HODL").
+function tierLabelFor(tier) {
+  return (TIER_META[tier] && TIER_META[tier].label) || tier || "";
 }
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -743,6 +765,49 @@ function methodSentence(path) {
 
 const CONF_WORD = { high: "High", medium: "Medium", moderate: "Medium", low: "Low" };
 
+// Plain-English copy for every DCF input, keyed by display label.  Module-level
+// so the read-only assumptions grid and the editable assumption fields quote the
+// same sentence and cannot drift apart.
+const ASSUMPTION_TIPS = {
+  "WACC":            "Weighted Average Cost of Capital, the blended discount rate VALUS uses to bring future cash flows to today's value. Higher WACC = lower fair value.",
+  "Cost of Equity":  "What equity investors demand as a return, given the stock's risk (beta) relative to the broader market. Built from CAPM: risk-free rate + beta × equity risk premium.",
+  "Cost of Debt":    "After-tax interest rate the company effectively pays on its borrowings. Lower than cost of equity because interest is tax-deductible.",
+  "Beta":             "How volatile the stock is vs. the S&P 500. 1.0 = moves with the market; >1 = more volatile; <1 = less volatile. Higher beta → higher cost of equity.",
+  "Stage 1 growth":  "Annual revenue/FCF growth rate VALUS assumes for years 1-5 of the forecast.",
+  "Stage 2 growth":  "Growth during years 6-10, typically tapered down from Stage 1 as competition compresses margins.",
+  "Terminal growth": "Perpetual growth rate after year 10. Usually 2-3% (≈ long-run GDP). Anchors the terminal-value calculation.",
+  "Tax rate":         "Effective tax rate applied to operating income. Used to compute after-tax cash flows.",
+  "Base FCF":         "Trailing twelve-month free cash flow, the starting point for the 10-year projection.",
+  "Net debt":         "Total debt minus cash. Subtracted from enterprise value to get equity value. Negative means the company has more cash than debt.",
+  "Shares out":       "Diluted shares outstanding. Equity value is divided by this to get per-share fair value.",
+  "Years projected":  "How many years of explicit cash flow are forecast before applying the terminal value formula.",
+};
+
+// Attach the shared assumption copy to a ⓘ icon, given [elementId, TIPS key]
+// pairs.  The floating-tip system is delegated on document and auto-augments any
+// [data-tip] with tabindex, role and aria-label, so setting the attribute is the
+// whole wiring: hover, tap, Enter/Space and screen readers all come along.  Each
+// icon is a sibling of its label rather than part of it, so clicking the label
+// text still reaches the control.
+function wireTipIcons(pairs) {
+  for (const [tipId, key] of pairs) {
+    const el = $(tipId);
+    if (!el) continue;
+    const tip = ASSUMPTION_TIPS[key];
+    if (tip) {
+      el.setAttribute("data-tip", tip);
+      // Name it ourselves: _augment derives aria-label from element text, and a
+      // bare glyph would otherwise announce as "ⓘ: Annual revenue…".
+      el.setAttribute("aria-label", `${key}: ${tip}`);
+      el.hidden = false;
+    } else {
+      el.removeAttribute("data-tip");
+      el.removeAttribute("aria-label");
+      el.hidden = true;
+    }
+  }
+}
+
 // Zone 1 needs only the valuation itself, so it paints before the panels and
 // never waits on them. Every slot is written on every render, so a missing
 // value leaves the card the same height it already was.
@@ -771,8 +836,8 @@ function renderZone1(d) {
   const lo = d.iv_range_low, hi = d.iv_range_high;
   $("vIvBandHeadline").textContent =
     d.extreme_mos_flag                ? "Not available"
-    : (lo != null && hi != null)      ? `${fmtPrice(lo)} to ${fmtPrice(hi)}`
-    : (d.intrinsic_value != null)     ? `about ${fmtPrice(d.intrinsic_value)}`
+    : (lo != null && hi != null)      ? fmtBand(lo, hi)
+    : (d.intrinsic_value != null)     ? `about ${fmtPriceCompact(d.intrinsic_value)}`
     : "Not available";
 
   // 3. Price today
@@ -785,7 +850,9 @@ function renderZone1(d) {
     confEl.textContent = conf && conf !== "not_applicable"
       ? (CONF_WORD[conf] || (d.dcf_confidence_label || conf))
       : "Not applicable";
-    confEl.className = "vfield__value" + (conf ? ` conf-${conf}` : "");
+    // No tone class: confidence is not a good/bad axis. It reports how far the
+    // model trusts its own inputs, so a green "High" would read as a buy signal.
+    confEl.className = "vfield__value";
     const warn = (d.dcf_confidence_warnings || [])[0];
     confEl.title = warn ? String(warn).trim() : "";
   }
@@ -814,12 +881,8 @@ function renderValuationDetail(d) {
   const ivEl = $("vIV");
   if (ivEl) animateNumber(ivEl, 0, iv, 400, v => fmtPrice(v));
 
-  const rangeEl = $("vRange");
-  if (rangeEl) {
-    rangeEl.textContent = d["52w_low"] && d["52w_high"]
-      ? `${fmtPrice(d["52w_low"])} to ${fmtPrice(d["52w_high"])}`
-      : "N/A";
-  }
+  // The 52-week range lives on the hr-bar slider further down this card; a
+  // second copy as a headline figure said the same thing twice.
 
   renderIvBand(d);
 
@@ -1048,7 +1111,10 @@ function renderRedflagPanel(d) {
 
 function renderCompanyPanel(d) {
   const facts = d.company_facts || {};
-  const dl = $("companyFacts");
+  const factRow = ([k, v]) =>
+    `<div class="fact"><dt class="fact__key">${escHtml(k)}</dt><dd class="fact__val">${escHtml(String(v))}</dd></div>`;
+
+  // Market cap now sits with the key figures below, so it is not stated twice.
   const rows = [
     ["Sector",       d.sector || null],
     ["Industry",     d.industry || null],
@@ -1056,18 +1122,33 @@ function renderCompanyPanel(d) {
     ["Employees",    facts.employees != null ? Number(facts.employees).toLocaleString() : null],
     ["CEO",          facts.ceo || null],
     ["Listed on",    d.exchange || null],
-    ["Market cap",   d.market_cap != null ? fmtBig(d.market_cap) : null],
   ].filter(([, v]) => v);
 
-  if (dl) {
-    dl.innerHTML = rows.map(([k, v]) =>
-      `<div class="fact"><dt class="fact__key">${escHtml(k)}</dt><dd class="fact__val">${escHtml(String(v))}</dd></div>`
-    ).join("");
-  }
+  const dl = $("companyFacts");
+  if (dl) dl.innerHTML = rows.map(factRow).join("");
+
+  // Key figures: data-layer numbers only, nothing the model produced.  Each is
+  // formatted before the filter so a legitimate zero still renders.
+  const lo = d["52w_low"], hi = d["52w_high"];
+  const figures = [
+    ["P/E (TTM)",      d.pe_ratio       != null ? fmt(d.pe_ratio, 1)            : null],
+    ["52-week range",  (lo != null && hi != null) ? `${fmtPrice(lo)} – ${fmtPrice(hi)}` : null],
+    ["Market cap",     d.market_cap     != null ? fmtBig(d.market_cap)          : null],
+    ["Dividend yield", d.dividend_yield != null ? `${fmt(d.dividend_yield, 2)}%` : null],
+    ["Analyst target", d.analyst_target != null ? fmtPrice(d.analyst_target)    : null],
+  ].filter(([, v]) => v);
+
+  const kf   = $("keyFigures");
+  const kfHd = $("keyFiguresHead");
+  if (kf)   kf.innerHTML = figures.map(factRow).join("");
+  if (kfHd) kfHd.hidden = figures.length === 0;
+
   const sum = $("companySummary");
   if (sum) sum.textContent = facts.summary || "";
 
-  return rows.length ? null : "No company profile available for this ticker.";
+  return (rows.length || figures.length)
+    ? null
+    : "No company profile or key figures available for this ticker.";
 }
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -1081,6 +1162,15 @@ function renderAssumptionEditor(d) {
   set("drwS2", num(d.stage2_growth));
   set("drwTg", num(d.terminal_growth));
   set("drwYrs", d.projection_years || 10);
+
+  // Quote the same copy the read-only assumptions grid uses, so the two
+  // descriptions of a field can never drift apart.
+  wireTipIcons([
+    ["tipDrwS1",  "Stage 1 growth"],
+    ["tipDrwS2",  "Stage 2 growth"],
+    ["tipDrwTg",  "Terminal growth"],
+    ["tipDrwYrs", "Years projected"],
+  ]);
 
   const ticker = d.ticker;
   const apply = $("drwApply");
@@ -1111,23 +1201,51 @@ function renderIvBand(d) {
 
   // Zone 1 owns the range line; this draws the bar and its footnote.
 
-  // Plot lo..hi across the bar, widening the axis if the price sits outside
-  // the band so the marker never falls off the end.
-  const axLo = Math.min(lo, px != null ? px : lo);
-  const axHi = Math.max(hi, px != null ? px : hi);
-  const span = (axHi - axLo) || 1;
-  const pos  = v => Math.max(0, Math.min(100, ((v - axLo) / span) * 100));
+  // The track is exactly the IV range: lo at 0%, hi at 100%.  The axis used to
+  // widen to swallow an outside price, which kept the marker on the track but
+  // squeezed the band itself into a sliver at one end.  Now the price marker
+  // becomes a caret just past the end it left, matching the 52-week bar.
+  const span = (hi - lo) || 1;
+  const raw  = v => ((v - lo) / span) * 100;
+  const pos  = v => Math.max(0, Math.min(100, raw(v)));
+
   const spanEl = document.getElementById("vIvBandSpan");
   spanEl.style.left  = `${pos(lo)}%`;
   spanEl.style.width = `${Math.max(1, pos(hi) - pos(lo))}%`;
   document.getElementById("vIvBandMid").style.left = `${pos(mid)}%`;
+
+  // Endpoint reference marks. Full precision here: the rounding is a headline
+  // concern, and these sit under the track as small muted numbers.
+  const loEl = document.getElementById("vIvBandLow");
+  const hiEl = document.getElementById("vIvBandHigh");
+  if (loEl) loEl.textContent = fmtPrice(lo);
+  if (hiEl) hiEl.textContent = fmtPrice(hi);
+
   const priceEl = document.getElementById("vIvBandPrice");
+  const labelEl = document.getElementById("vIvBandPriceLabel");
   if (px != null) {
-    priceEl.style.left = `${pos(px)}%`;
+    const rawPx = raw(px);
+    const at    = pos(px);
+    priceEl.style.left = `${at}%`;
     priceEl.classList.remove("hidden");
+    priceEl.classList.toggle("iv-band__price--below", rawPx < 0);
+    priceEl.classList.toggle("iv-band__price--above", rawPx > 100);
     priceEl.title = `Today's price ${fmtPrice(px)}`;
+    if (labelEl) {
+      labelEl.textContent = fmtPrice(px);
+      // The label rides the marker mid-track and pins flush at either end, which
+      // is exactly where the caret sits when the price is out of range, so it
+      // can never bleed past the card edge.  Percentages only: the drawer is
+      // collapsed on first render, so nothing here can be measured.
+      if (at <= 8)       { labelEl.style.left = "0%";     labelEl.style.transform = "translateX(0)"; }
+      else if (at >= 92) { labelEl.style.left = "100%";   labelEl.style.transform = "translateX(-100%)"; }
+      else               { labelEl.style.left = `${at}%`; labelEl.style.transform = "translateX(-50%)"; }
+      labelEl.hidden = false;
+    }
   } else {
     priceEl.classList.add("hidden");
+    priceEl.classList.remove("iv-band__price--below", "iv-band__price--above");
+    if (labelEl) { labelEl.textContent = ""; labelEl.hidden = true; }
   }
 
   // Say why the band is the width it is, and say plainly where the price sits
@@ -1202,23 +1320,54 @@ function renderHeroInsights(d) {
   }
 
   // ── 52-week range marker ──
+  // The track always spans the true 52-week low..high.  When today's price sits
+  // outside that span the thumb becomes a caret pinned just past the end it
+  // left, and a note says how far out it is.  Clamping the dot to the edge
+  // instead read as a broken control, and a price outside its own 52-week range
+  // is usually real news (a fresh high or low) rather than a data glitch.
   const lo = d.fifty_two_week_low;
   const hi = d.fifty_two_week_high;
   const px = d.current_price;
   const rWrap = document.getElementById("viRangeWrap");
+  const mk    = document.getElementById("viRangeMarker");
+  const rl    = document.getElementById("viRangeLow");
+  const rh    = document.getElementById("viRangeHigh");
+  const out   = document.getElementById("viRangeOut");
   if (lo != null && hi != null && px != null && hi > lo) {
-    const pct = Math.max(0, Math.min(100, ((px - lo) / (hi - lo)) * 100));
-    document.getElementById("viRangeMarker").style.left = `${pct}%`;
-    document.getElementById("viRangeLow").textContent  = `$${fmt(lo, 2)}`;
-    document.getElementById("viRangeHigh").textContent = `$${fmt(hi, 2)}`;
+    const raw   = ((px - lo) / (hi - lo)) * 100;
+    const below = raw < 0;
+    const above = raw > 100;
+    if (mk) {
+      mk.classList.toggle("hr-bar__marker--below", below);
+      mk.classList.toggle("hr-bar__marker--above", above);
+      mk.style.left = `${Math.max(0, Math.min(100, raw))}%`;
+      mk.title = `Today's price ${fmtPrice(px)}`;
+    }
+    if (rl) rl.textContent = `$${fmt(lo, 2)}`;
+    if (rh) rh.textContent = `$${fmt(hi, 2)}`;
+    if (out) {
+      if (below || above) {
+        const edge = below ? lo : hi;
+        const by   = edge ? Math.abs((px - edge) / edge) * 100 : null;
+        const side = below ? "below the 52-week low" : "above the 52-week high";
+        out.textContent = by != null
+          ? `Today ${fmtPrice(px)}, ${fmt(by, 1)}% ${side}.`
+          : `Today ${fmtPrice(px)}, ${side}.`;
+        out.hidden = false;
+      } else {
+        out.textContent = "";
+        out.hidden = true;
+      }
+    }
     rWrap.hidden = false;
   } else {
-    const mk = document.getElementById("viRangeMarker");
-    if (mk) mk.style.left = "0%";
-    const rl = document.getElementById("viRangeLow");
-    const rh = document.getElementById("viRangeHigh");
+    if (mk) {
+      mk.style.left = "0%";
+      mk.classList.remove("hr-bar__marker--below", "hr-bar__marker--above");
+    }
     if (rl) rl.textContent = "";
     if (rh) rh.textContent = "";
+    if (out) { out.textContent = ""; out.hidden = true; }
     if (rWrap) rWrap.hidden = true;
   }
 }
@@ -1707,20 +1856,6 @@ function renderDrawerContent(d) {
   try {
     const ag = $("assumptionsGrid");
     if (ag) {
-      const TIPS = {
-        "WACC":            "Weighted Average Cost of Capital, the blended discount rate VALUS uses to bring future cash flows to today's value. Higher WACC = lower fair value.",
-        "Cost of Equity":  "What equity investors demand as a return, given the stock's risk (beta) relative to the broader market. Built from CAPM: risk-free rate + beta × equity risk premium.",
-        "Cost of Debt":    "After-tax interest rate the company effectively pays on its borrowings. Lower than cost of equity because interest is tax-deductible.",
-        "Beta":             "How volatile the stock is vs. the S&P 500. 1.0 = moves with the market; >1 = more volatile; <1 = less volatile. Higher beta → higher cost of equity.",
-        "Stage 1 growth":  "Annual revenue/FCF growth rate VALUS assumes for years 1-5 of the forecast.",
-        "Stage 2 growth":  "Growth during years 6-10, typically tapered down from Stage 1 as competition compresses margins.",
-        "Terminal growth": "Perpetual growth rate after year 10. Usually 2-3% (≈ long-run GDP). Anchors the terminal-value calculation.",
-        "Tax rate":         "Effective tax rate applied to operating income. Used to compute after-tax cash flows.",
-        "Base FCF":         "Trailing twelve-month free cash flow, the starting point for the 10-year projection.",
-        "Net debt":         "Total debt minus cash. Subtracted from enterprise value to get equity value. Negative means the company has more cash than debt.",
-        "Shares out":       "Diluted shares outstanding. Equity value is divided by this to get per-share fair value.",
-        "Years projected":  "How many years of explicit cash flow are forecast before applying the terminal value formula.",
-      };
       const rows = [
         ["WACC",            d.wacc != null ? `${fmt(d.wacc, 1)}%` : "N/A"],
         ["Cost of Equity",  d.cost_of_equity != null ? `${fmt(d.cost_of_equity, 1)}%` : "N/A"],
@@ -1737,7 +1872,7 @@ function renderDrawerContent(d) {
       ];
       const esc = s => String(s).replace(/"/g, "&quot;");
       ag.innerHTML = rows.map(([l, v]) => {
-        const tip = TIPS[l] ? ` data-tip="${esc(TIPS[l])}"` : "";
+        const tip = ASSUMPTION_TIPS[l] ? ` data-tip="${esc(ASSUMPTION_TIPS[l])}"` : "";
         return `<div class="assumption" tabindex="0"${tip}><span class="assumption__label">${l}</span><span class="assumption__value numeric">${v}</span></div>`;
       }).join("");
       _alignAssumptionTooltips(ag);
@@ -4006,7 +4141,7 @@ function setupAddWatchlistButton() {
       price:  _LAST_DATA.current_price,
       iv:     _LAST_DATA.intrinsic_value,
       mos:    _LAST_DATA.margin_of_safety,
-      tier:   _LAST_DATA.priced_for?.label || "",
+      tier:   _LAST_DATA.priced_for?.tier || "",
       // Snapshot reconciled grade, see pfAdd for rationale.
       grade:  _LAST_DATA.valus_grade?.grade || null,
     });
@@ -4229,7 +4364,7 @@ function _itemsToCsv(items) {
       (typeof it.iv    === "number") ? it.iv.toFixed(2)    : "",
       (typeof it.mos   === "number") ? it.mos.toFixed(2)   : "",
       grade,
-      it.tier   || "",
+      tierLabelFor(it.tier),
       added,
     ].map(_csvEscape).join(",");
   });
@@ -4309,7 +4444,7 @@ function setupAddPortfolioButton() {
       price: _LAST_DATA.current_price,
       iv: _LAST_DATA.intrinsic_value,
       mos: _LAST_DATA.margin_of_safety,
-      tier: _LAST_DATA.priced_for?.label || "",
+      tier: _LAST_DATA.priced_for?.tier || "",
       // Snapshot the server-reconciled letter grade so the portfolio row
       // shows the same grade the user saw on the detail page, important
       // when a tier override (e.g. Strategic Discount) bumped the grade
@@ -5207,7 +5342,7 @@ async function addTickersToPortfolio(tickers, btn, restoreLabel) {
         price:  d.current_price ?? null,
         iv:     d.intrinsic_value ?? null,
         mos:    d.margin_of_safety ?? null,
-        tier:   d.priced_for?.label || (d.is_etf ? "ETF" : ""),
+        tier:   d.priced_for?.tier || (d.is_etf ? "ETF" : ""),
         grade:  d.valus_grade?.grade || null,
       });
     } catch {
@@ -5235,17 +5370,17 @@ function setupTemplatesTabs() {
 const TIER_META = {
   // No `distress` entry: _priced_for_verdict never returns it — deep_discount
   // is an open-ended `mos >= 40` band, so nothing can land above it.
-  deep_discount: { label: "Priced for Deep Discount", mos: "MOS +40% or more",      color: "tier-positive",
+  deep_discount: { label: "Deeply Undervalued",  mos: "MOS +40% or more",      color: "tier-positive",
                    desc: "Significantly undervalued, strong signal if VALUS's growth assumptions hold. Worth a quality check to avoid value traps." },
-  discount:      { label: "Priced for Discount",      mos: "MOS +15% to +40%",      color: "tier-positive",
+  discount:      { label: "Undervalued",         mos: "MOS +15% to +40%",      color: "tier-positive",
                    desc: "Trading below fundamental value. Modest opportunity zone, model and analysts both see room above current price." },
-  fair_value:    { label: "Priced for Fair Value",    mos: "MOS −10% to +15%",      color: "tier-info",
+  fair_value:    { label: "Fairly Valued",       mos: "MOS −10% to +15%",      color: "tier-info",
                    desc: "Market and VALUS aligned. The price reflects fundamentals as the model sees them, no clear edge in either direction." },
-  growth:        { label: "Priced for Growth",        mos: "MOS −10% to −25%",      color: "tier-warning",
+  growth:        { label: "Modestly Overvalued", mos: "MOS −10% to −25%",      color: "tier-warning",
                    desc: "Market is paying a growth premium, modestly overvalued by VALUS. Acceptable if you believe execution will deliver above-base growth." },
-  excellence:    { label: "Priced for Excellence",    mos: "MOS −25% to −50%",      color: "tier-warning",
+  excellence:    { label: "Overvalued",          mos: "MOS −25% to −50%",      color: "tier-warning",
                    desc: "Market expects flawless execution. Premium pricing requires growth, margins, and capital discipline to all work together, limited margin of error if any leg slips." },
-  miracle:       { label: "Priced for Miracle",       mos: "MOS < −50% or speculative growth", color: "tier-negative",
+  miracle:       { label: "Speculative",         mos: "MOS < −50% or speculative growth", color: "tier-negative",
                    desc: "Market is pricing in extraordinary outcomes that fewer than 1% of public companies achieve over a decade. Speculative, driven by momentum, not fundamentals." },
 };
 
@@ -5255,7 +5390,7 @@ function setupTierGlossary() {
   if (tierBtn && modal) {
     tierBtn.onclick = () => openTierModal();
   }
-  // Expand/collapse "see all 7 tiers"
+  // Expand/collapse "see all 6 tiers" (must match the .tg-row count in index.html)
   const expandBtn = $("tgExpandBtn");
   const fullList  = $("tgFullList");
   if (expandBtn && fullList) {
@@ -5265,7 +5400,7 @@ function setupTierGlossary() {
       expandBtn.setAttribute("aria-expanded", String(next));
       fullList.classList.toggle("hidden", !next);
       expandBtn.querySelector("span").textContent =
-        next ? "Hide other tiers" : "See all 7 verdict tiers";
+        next ? "Hide other tiers" : "See all 6 verdict tiers";
     };
   }
 }
@@ -5291,7 +5426,7 @@ function openTierModal() {
   fullList.classList.add("hidden");
   if (expandBtn) {
     expandBtn.setAttribute("aria-expanded", "false");
-    expandBtn.querySelector("span").textContent = "See all 7 verdict tiers";
+    expandBtn.querySelector("span").textContent = "See all 6 verdict tiers";
   }
 
   const mos = _LAST_DATA.margin_of_safety;
@@ -5414,6 +5549,16 @@ function setupCustomDCFSliders() {
   const ids = ["cdS1", "cdS2", "cdWacc", "cdTg"];
   const sliders = ids.map($).filter(Boolean);
   if (sliders.length !== 4) return;
+
+  // "Discount rate" is this slider's label; WACC is what the model calls the
+  // same number, and that entry's copy opens "the blended discount rate VALUS
+  // uses", so it reads correctly against either name.
+  wireTipIcons([
+    ["tipCdS1",   "Stage 1 growth"],
+    ["tipCdS2",   "Stage 2 growth"],
+    ["tipCdWacc", "WACC"],
+    ["tipCdTg",   "Terminal growth"],
+  ]);
 
   // While true, the sliders haven't been moved since the last reset.
   // Pristine state mirrors VALUS's headline IV exactly (with the
@@ -6077,7 +6222,7 @@ const I18N = {
     "lb.title": "Clasificación",
     "lb.emptyTitle": "Nadie ha enviado todavía",
     "lb.emptySub": "Sé el primero: crea una cartera y pulsa \"Enviar a la clasificación\".",
-    "insight.confidence": "Confianza",
+    "insight.confidence": "Confianza en esta estimación",
     "insight.implied": "Crecimiento implícito",
     "insight.range": "Rango de 52 semanas",
     "footer.desc": "Herramienta educativa de investigación · Datos vía Yahoo Finance · No es asesoramiento financiero",
@@ -6208,7 +6353,7 @@ const I18N = {
     "lb.title": "排行榜",
     "lb.emptyTitle": "还没有人提交",
     "lb.emptySub": "成为第一人：建立组合并点击“提交到排行榜”。",
-    "insight.confidence": "置信度",
+    "insight.confidence": "本估值的置信度",
     "insight.implied": "隐含增长",
     "insight.range": "52 周区间",
     "footer.desc": "教育性研究工具 · 数据来自 Yahoo Finance · 非投资建议",
@@ -7324,7 +7469,7 @@ async function openSharedPortfolio(tickers) {
         price:  d.current_price,
         iv:     d.intrinsic_value,
         mos:    d.margin_of_safety,
-        tier:   d.priced_for?.label || "",
+        tier:   d.priced_for?.tier || "",
         grade:  d.valus_grade?.grade || null,
       };
     } catch { return null; }

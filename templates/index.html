@@ -753,7 +753,7 @@
         <div class="tg-row tier-positive" data-tier="deep_discount">
           <span class="tg-dot"></span>
           <div class="tg-body">
-            <span class="tg-label">Priced for Deep Discount</span>
+            <span class="tg-label">Deeply Undervalued</span>
             <span class="tg-mos">MOS +40% or more</span>
             <span class="tg-desc">Significantly undervalued, strong signal if VALUS's growth assumptions hold.</span>
           </div>
@@ -761,7 +761,7 @@
         <div class="tg-row tier-positive" data-tier="discount">
           <span class="tg-dot"></span>
           <div class="tg-body">
-            <span class="tg-label">Priced for Discount</span>
+            <span class="tg-label">Undervalued</span>
             <span class="tg-mos">MOS +15% to +40%</span>
             <span class="tg-desc">Trading below fundamental value. Modest opportunity zone.</span>
           </div>
@@ -769,7 +769,7 @@
         <div class="tg-row tier-info" data-tier="fair_value">
           <span class="tg-dot"></span>
           <div class="tg-body">
-            <span class="tg-label">Priced for Fair Value</span>
+            <span class="tg-label">Fairly Valued</span>
             <span class="tg-mos">MOS −10% to +15%</span>
             <span class="tg-desc">Market and VALUS aligned. No clear edge, hold or wait for a better entry.</span>
           </div>
@@ -777,7 +777,7 @@
         <div class="tg-row tier-warning" data-tier="growth">
           <span class="tg-dot"></span>
           <div class="tg-body">
-            <span class="tg-label">Priced for Growth</span>
+            <span class="tg-label">Modestly Overvalued</span>
             <span class="tg-mos">MOS −10% to −25%</span>
             <span class="tg-desc">Market paying a growth premium, acceptable if execution delivers above-base growth.</span>
           </div>
@@ -785,7 +785,7 @@
         <div class="tg-row tier-warning" data-tier="excellence">
           <span class="tg-dot"></span>
           <div class="tg-body">
-            <span class="tg-label">Priced for Excellence</span>
+            <span class="tg-label">Overvalued</span>
             <span class="tg-mos">MOS −25% to −50%</span>
             <span class="tg-desc">Market expects flawless execution. Limited margin of error if any leg slips.</span>
           </div>
@@ -793,7 +793,7 @@
         <div class="tg-row tier-negative" data-tier="miracle">
           <span class="tg-dot"></span>
           <div class="tg-body">
-            <span class="tg-label">Priced for Miracle</span>
+            <span class="tg-label">Speculative</span>
             <span class="tg-mos">MOS &lt; −50% or implied growth &gt; sector ceiling × 1.2</span>
             <span class="tg-desc">Market pricing in outcomes fewer than 1% of public companies achieve. Speculative.</span>
           </div>
@@ -1062,7 +1062,7 @@
 
         <div class="vfield">
           <span class="vfield__label">What it looks worth</span>
-          <span class="vfield__value numeric" id="vIvBandHeadline">N/A</span>
+          <span class="vfield__value" id="vIvBandHeadline">N/A</span>
         </div>
 
         <div class="vfield">
@@ -1071,7 +1071,7 @@
         </div>
 
         <div class="vfield">
-          <span class="vfield__label" data-i18n="insight.confidence">Confidence</span>
+          <span class="vfield__label" data-i18n="insight.confidence">Confidence in this estimate</span>
           <span class="vfield__value" id="vConfidence">N/A</span>
         </div>
 
@@ -1170,7 +1170,7 @@
 
       <section class="panel" id="panelCompany" data-state="loading">
         <div class="panel__head">
-          <h3 class="panel__title">Company</h3>
+          <h3 class="panel__title">Company &amp; key figures</h3>
           <span class="panel__status" data-panel-status></span>
         </div>
         <div class="panel__body">
@@ -1178,6 +1178,8 @@
           <p class="panel__msg" data-panel-msg></p>
           <div class="panel__content">
             <dl class="facts" id="companyFacts"></dl>
+            <div class="facts__subhead" id="keyFiguresHead" hidden>Key figures</div>
+            <dl class="facts" id="keyFigures"></dl>
             <p class="facts__summary" id="companySummary"></p>
           </div>
         </div>
@@ -1212,10 +1214,6 @@
                 </div>
                 <span class="mos-pct" id="vMosPct">N/A</span>
               </div>
-              <div class="pi-block right">
-                <span class="pi-label" data-i18n="insight.range">52-week range</span>
-                <span class="pi-value numeric" id="vRange">N/A</span>
-              </div>
             </div>
 
             <div class="iv-band hidden" id="vIvBand">
@@ -1223,6 +1221,11 @@
                 <div class="iv-band__span" id="vIvBandSpan"></div>
                 <div class="iv-band__mid" id="vIvBandMid"></div>
                 <div class="iv-band__price" id="vIvBandPrice"></div>
+                <div class="iv-band__pricelabel" id="vIvBandPriceLabel" hidden></div>
+              </div>
+              <div class="iv-band__ends">
+                <span id="vIvBandLow">N/A</span>
+                <span id="vIvBandHigh">N/A</span>
               </div>
               <div class="iv-band__foot" id="vIvBandFoot"></div>
             </div>
@@ -1251,6 +1254,7 @@
                     <span id="viRangeLow">N/A</span>
                     <span id="viRangeHigh">N/A</span>
                   </div>
+                  <div class="hr-bar__out" id="viRangeOut" hidden></div>
                 </div>
               </div>
             </div>
@@ -1266,19 +1270,31 @@
             </div>
             <div class="assume-grid">
               <div class="assume-field">
-                <label for="drwS1">Stage 1 growth (%)</label>
+                <span class="assume-field__head">
+                  <label for="drwS1">Stage 1 growth (%)</label>
+                  <span class="tip-icon" id="tipDrwS1" hidden>ⓘ</span>
+                </span>
                 <input id="drwS1" type="number" placeholder="auto" step="0.1" inputmode="decimal"/>
               </div>
               <div class="assume-field">
-                <label for="drwS2">Stage 2 growth (%)</label>
+                <span class="assume-field__head">
+                  <label for="drwS2">Stage 2 growth (%)</label>
+                  <span class="tip-icon" id="tipDrwS2" hidden>ⓘ</span>
+                </span>
                 <input id="drwS2" type="number" placeholder="auto" step="0.1" inputmode="decimal"/>
               </div>
               <div class="assume-field">
-                <label for="drwTg">Terminal growth (%)</label>
+                <span class="assume-field__head">
+                  <label for="drwTg">Terminal growth (%)</label>
+                  <span class="tip-icon" id="tipDrwTg" hidden>ⓘ</span>
+                </span>
                 <input id="drwTg" type="number" placeholder="auto" step="0.1" inputmode="decimal"/>
               </div>
               <div class="assume-field">
-                <label for="drwYrs">Projection years</label>
+                <span class="assume-field__head">
+                  <label for="drwYrs">Projection years</label>
+                  <span class="tip-icon" id="tipDrwYrs" hidden>ⓘ</span>
+                </span>
                 <input id="drwYrs" type="number" placeholder="10" min="3" max="20" inputmode="numeric"/>
               </div>
             </div>
@@ -1314,28 +1330,40 @@
             <div class="cd-sliders">
               <div class="cd-slider-row">
                 <div class="cd-slider-head">
-                  <span class="cd-slider-label">Stage 1 growth</span>
+                  <span class="cd-slider-labelwrap">
+                    <span class="cd-slider-label">Stage 1 growth</span>
+                    <span class="tip-icon" id="tipCdS1" hidden>ⓘ</span>
+                  </span>
                   <span class="cd-slider-value numeric" id="cdS1Val">N/A</span>
                 </div>
                 <input type="range" class="dcf-slider cd-slider" id="cdS1" aria-label="Stage 1 growth rate, percent" min="0" max="60" step="0.5"/>
               </div>
               <div class="cd-slider-row">
                 <div class="cd-slider-head">
-                  <span class="cd-slider-label">Stage 2 growth</span>
+                  <span class="cd-slider-labelwrap">
+                    <span class="cd-slider-label">Stage 2 growth</span>
+                    <span class="tip-icon" id="tipCdS2" hidden>ⓘ</span>
+                  </span>
                   <span class="cd-slider-value numeric" id="cdS2Val">N/A</span>
                 </div>
                 <input type="range" class="dcf-slider cd-slider" id="cdS2" aria-label="Stage 2 growth rate, percent" min="0" max="40" step="0.5"/>
               </div>
               <div class="cd-slider-row">
                 <div class="cd-slider-head">
-                  <span class="cd-slider-label">Discount rate</span>
+                  <span class="cd-slider-labelwrap">
+                    <span class="cd-slider-label">Discount rate</span>
+                    <span class="tip-icon" id="tipCdWacc" hidden>ⓘ</span>
+                  </span>
                   <span class="cd-slider-value numeric" id="cdWaccVal">N/A</span>
                 </div>
                 <input type="range" class="dcf-slider cd-slider" id="cdWacc" aria-label="Discount rate, percent" min="3" max="25" step="0.1"/>
               </div>
               <div class="cd-slider-row">
                 <div class="cd-slider-head">
-                  <span class="cd-slider-label">Terminal growth</span>
+                  <span class="cd-slider-labelwrap">
+                    <span class="cd-slider-label">Terminal growth</span>
+                    <span class="tip-icon" id="tipCdTg" hidden>ⓘ</span>
+                  </span>
                   <span class="cd-slider-value numeric" id="cdTgVal">N/A</span>
                 </div>
                 <input type="range" class="dcf-slider cd-slider" id="cdTg" aria-label="Terminal growth rate, percent" min="0.5" max="6" step="0.1"/>
