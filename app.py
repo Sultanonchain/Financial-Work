@@ -4032,7 +4032,7 @@ def _priced_for_verdict(implied_g, sector_ceiling, price, iv, margin_of_safety=N
 
     This matches what the top card shows: positive MOS → undervalued tiers,
     negative MOS → overvalued tiers.  Eliminates the inconsistency where
-    an OVERVALUED stock could be tagged "Priced for Discount".
+    an OVERVALUED stock could be tagged "Undervalued".
 
     Returns dict: {tier, label, color, narrative}
     """
@@ -4051,38 +4051,38 @@ def _priced_for_verdict(implied_g, sector_ceiling, price, iv, margin_of_safety=N
     # noisy on highly-leveraged or low-FCF stocks (e.g. Ford).
     if (mos < -10 and implied_g is not None and sector_ceiling
             and implied_g > sector_ceiling * 1.20):
-        return {"tier": "miracle", "label": "Priced for Miracle", "color": "red",
+        return {"tier": "miracle", "label": "Speculative", "color": "red",
                 "narrative": (f"Market implies {implied_g*100:.1f}% growth, exceeds sector "
                               f"ceiling × 1.2; speculative.")}
 
     # Hard speculative override, independent of MOS sign.  When implied
     # growth blows past ceiling × 1.5, the model is fragile regardless of
     # which direction MOS leans; surface it so investors don't see a
-    # "Priced for Discount" tag on a moonshot.
+    # "Undervalued" tag on a moonshot.
     if (implied_g is not None and sector_ceiling
             and implied_g > sector_ceiling * 1.50):
-        return {"tier": "miracle", "label": "Priced for Miracle", "color": "red",
+        return {"tier": "miracle", "label": "Speculative", "color": "red",
                 "narrative": (f"Market implies {implied_g*100:.1f}% growth, far above sector "
                               f"ceiling; treat output as low-confidence.")}
 
     if mos >= 40:
-        return {"tier": "deep_discount", "label": "Priced for Deep Discount", "color": "green",
+        return {"tier": "deep_discount", "label": "Deeply Undervalued", "color": "green",
                 "narrative": f"Trading {mos:.0f}% below VALUS fair value, market overly pessimistic."}
     if mos >= 15:
-        return {"tier": "discount", "label": "Priced for Discount", "color": "green",
+        return {"tier": "discount", "label": "Undervalued", "color": "green",
                 "narrative": f"Trading {mos:.0f}% below VALUS fair value, undervalued."}
     if mos >= -10:
-        return {"tier": "fair_value", "label": "Priced for Fair Value", "color": "blue",
+        return {"tier": "fair_value", "label": "Fairly Valued", "color": "blue",
                 "narrative": "VALUS and market are aligned, fair value zone."}
     if mos >= -25:
-        return {"tier": "growth", "label": "Priced for Growth", "color": "amber",
+        return {"tier": "growth", "label": "Modestly Overvalued", "color": "amber",
                 "narrative": (f"Market paying a growth premium, VALUS sees stock as "
                               f"overvalued by {abs(mos):.0f}%.")}
     if mos >= -50:
-        return {"tier": "excellence", "label": "Priced for Excellence", "color": "amber",
+        return {"tier": "excellence", "label": "Overvalued", "color": "amber",
                 "narrative": (f"Market expecting flawless execution, VALUS sees stock as "
                               f"overvalued by {abs(mos):.0f}%.")}
-    return {"tier": "miracle", "label": "Priced for Miracle", "color": "red",
+    return {"tier": "miracle", "label": "Speculative", "color": "red",
             "narrative": (f"Market pricing in extraordinary outcomes, VALUS sees stock as "
                           f"overvalued by {abs(mos):.0f}%.")}
 
@@ -10234,7 +10234,10 @@ def api_valuations():
             "price":    payload.get("current_price"),
             "iv":       payload.get("intrinsic_value"),
             "mos":      mos if reliable else None,
-            "tier":     (payload.get("priced_for") or {}).get("label"),
+            # The stable tier KEY, not the label.  Stored rows keep the key and
+            # derive the display label at read time, so renaming a label reaches
+            # existing portfolio / watchlist rows with no migration.
+            "tier":     (payload.get("priced_for") or {}).get("tier"),
             "grade":    (payload.get("valus_grade") or {}).get("grade") if reliable else None,
             "reliable": reliable,
             # Peter Lynch classification (slowGrower/stalwart/fastGrower/cyclical/
@@ -11878,7 +11881,7 @@ def analyze():
 
         # Strategic Discount override, when a strategic asset prints a
         # negative MOS but the market signal says "discount, not warning,"
-        # the standard "Priced for Growth/Excellence/Miracle" tier mislabels
+        # the standard Modestly Overvalued / Overvalued / Speculative tier mislabels
         # it.  Promote to a "Strategic Discount" tier (green) with narrative.
         #
         # Two trigger paths:
