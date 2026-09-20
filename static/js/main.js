@@ -977,6 +977,36 @@ function renderValuationDetail(d) {
 
   renderIvBand(d);
 
+  // Say how this one number relates to the range the hero leads with. The
+  // point estimate is the model run at VALUS's own assumptions; the range is
+  // the same model at +/-1pp of WACC and +/-0.5pp of long-run growth. The
+  // estimate is NOT the midpoint of that range -- the DCF is convex in the
+  // discount rate, so it usually sits below centre -- and saying "midpoint"
+  // would be a fourth claim the numbers don't support.
+  const relEl = $("vIvRelation");
+  if (relEl) {
+    const lo = d.iv_range_low, hi = d.iv_range_high;
+    if (d.extreme_mos_flag || iv <= 0) {
+      relEl.textContent = "";
+    } else if (lo != null && hi != null && hi > lo) {
+      const at = Math.round(((iv - lo) / (hi - lo)) * 100);
+      const where = at <= 2  ? "at the bottom of"
+                  : at >= 98 ? "at the top of"
+                  : Math.abs(at - 50) <= 3 ? "near the centre of"
+                  : `${at}% of the way up`;
+      relEl.textContent =
+        `${fmtPrice(iv)} is the estimate at VALUS's own assumptions. It sits `
+        + `${where} the ${fmtPrice(lo)} to ${fmtPrice(hi)} range in the verdict above, `
+        + `which moves the discount rate a point either way and long-run growth `
+        + `half a point either way.`;
+    } else {
+      relEl.textContent =
+        `${fmtPrice(iv)} is the estimate at VALUS's own assumptions. VALUS could `
+        + `not price this company across a range of rates, so there is no range `
+        + `to compare it against.`;
+    }
+  }
+
   // Margin of safety
   const mos = d.margin_of_safety;
   const fillEl = $("vMosFill");
@@ -1813,8 +1843,6 @@ function renderScenarios(d) {
       `<div class="sc-empty">${escHtml(sc.reason ||
         "VALUS is not showing a downside or upside case for this company.")}</div>`;
     $("scWeightNote").textContent = "";
-    $("scWeighted").textContent = "N/A";
-    $("scWeightedDelta").textContent = "";
     return;
   }
 
@@ -1854,7 +1882,7 @@ function renderScenarios(d) {
   const meta = fromBand ? {
     bear: { label: "Lower end", valClass: "negative", priorityIdx: 0,
             case: "The same forecast, discounted at a rate one percentage point higher and with long-run growth half a point lower. Nothing about the business changes here, only the two assumptions nobody can observe." },
-    base: { label: "Midpoint",  valClass: "neutral",  priorityIdx: 1,
+    base: { label: "Fair value", valClass: "neutral",  priorityIdx: 1,
             case: "VALUS's central estimate: Stage 1 growth tapering to Stage 2 and then to the long-run rate, discounted at the model's cost of capital." },
     bull: { label: "Upper end", valClass: "positive", priorityIdx: 2,
             case: "The same forecast at a discount rate one percentage point lower and long-run growth half a point higher. Again, the business is unchanged; only the assumptions move." },
@@ -1896,10 +1924,12 @@ function renderScenarios(d) {
 
   grid.innerHTML = cards.join("");
 
-  const w = sc.weighted;
-  const wd = sc.weighted_upside;
-  $("scWeighted").textContent = w != null ? fmtPrice(w) : "N/A";
-  $("scWeightedDelta").textContent = wd != null ? fmtPct(wd) + " potential" : "";
+  // The probability-weighted figure is off the surface. It is a fourth
+  // number for the same question -- 60/20/20 across three points of one
+  // sensitivity band, which is not a probability in any sense the reader
+  // would recognise -- and it differed from fair value for reasons the page
+  // never explained. scenarios.weighted stays in the payload; nothing on the
+  // page reads it.
 }
 
 /* ════════════════════════════════════════════════════════════════════════

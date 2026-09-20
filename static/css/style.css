@@ -2599,34 +2599,6 @@ a.auth-menu__btn { text-decoration: none; }
 .sc-card__assumptions span { display: inline-flex; align-items: center; gap: 4px; }
 .sc-card__assumptions strong { color: var(--ink-secondary); font-weight: 500; }
 
-.weighted-bar {
-  margin-top: var(--space-4);
-  padding: var(--space-4) var(--space-5);
-  background: var(--bg-elevated-2);
-  border: 1px solid rgba(255,255,255,0.04);
-  border-radius: var(--radius);
-  display: flex; align-items: center; justify-content: space-between;
-  gap: var(--space-4);
-}
-.weighted-bar__label {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--ink-muted);
-}
-.weighted-bar__value {
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--ink-primary);
-  font-feature-settings: "tnum" 1;
-}
-.weighted-bar__delta {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--ink-secondary);
-}
-
 @media (max-width: 768px) {
   .scenarios__grid { grid-template-columns: 1fr; }
   .sc-card__value { font-size: 24px; }
@@ -2693,6 +2665,15 @@ a.auth-menu__btn { text-decoration: none; }
 /* Only the active tab's children are laid out; the rest are removed from
    flow entirely so the column gap doesn't leave holes behind them. */
 .tabpanels__content > [data-tab][hidden] { display: none !important; }
+
+/* The one line under fair value that ties it to the hero's range. */
+.pi-note {
+  margin: var(--space-3) 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-muted);
+}
+.pi-note:empty { display: none; }
 
 .section-title {
   font-size: 11px;
@@ -5795,7 +5776,6 @@ button:disabled { cursor: not-allowed; }
 #results .scenarios__weight-note,
 #results .sc-card__label,
 #results .sc-card__weight,
-#results .weighted-bar__label,
 #results .cmp-card__pill,
 #results .method-step__detail,
 #results .vg-stat__label { font-family: var(--font-display); }
