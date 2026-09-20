@@ -1356,8 +1356,8 @@ function renderIvBand(d) {
       labelEl.textContent = fmtPrice(px);
       // The label rides the marker mid-track and pins flush at either end, which
       // is exactly where the caret sits when the price is out of range, so it
-      // can never bleed past the card edge.  Percentages only: the drawer is
-      // collapsed on first render, so nothing here can be measured.
+      // can never bleed past the card edge.  Percentages only: this card can
+      // be on a hidden tab at render time, and a hidden element measures zero.
       if (at <= 8)       { labelEl.style.left = "0%";     labelEl.style.transform = "translateX(0)"; }
       else if (at >= 92) { labelEl.style.left = "100%";   labelEl.style.transform = "translateX(-100%)"; }
       else               { labelEl.style.left = `${at}%`; labelEl.style.transform = "translateX(-50%)"; }
