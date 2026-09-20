@@ -426,19 +426,11 @@ function renderResults(d) {
     b.classList.toggle("active", b.dataset.dcfSc === "base")
   );
 
-  // Collapse the drawer so a new ticker opens on its verdict, not inside the
-  // previous company's detail.
-  const drawer  = $("drawer");
-  const trigger = $("drawerTrigger");
-  if (drawer && drawer.classList.contains("open")) {
-    drawer.classList.remove("open");
-    if (trigger) {
-      trigger.classList.remove("open");
-      trigger.setAttribute("aria-expanded", "false");
-      const txt = $("drawerTriggerTxt");
-      if (txt) txt.textContent = "Assumptions";
-    }
-  }
+  // A new ticker opens on its valuation, not on whichever tab the previous
+  // company was left on.  _pendingTickerTab lets a #tab= deep link override
+  // this for the one analysis it was requested for.
+  switchTickerTab(_pendingTickerTab || "dcf");
+  _pendingTickerTab = null;
 
   // Zone 1 needs the valuation and nothing else, so it paints on its own and
   // the panels below can resolve in their own time.
@@ -452,6 +444,105 @@ function renderResults(d) {
     // Zone 3 after them: collapsed detail, never in the way of either zone.
     requestAnimationFrame(() => renderZone3(d));
   });
+}
+
+// ── Ticker-page tabs ────────────────────────────────────────────────────
+// Zone 3 used to be one endless scroll.  Its 16 cards are now partitioned by
+// a data-tab attribute in the markup (Valuation 10 / Lynch 1 / Analysis 5)
+// and this strip toggles which set is in flow.  Same .tab-btn + lazy-init
+// idiom as switchTemplatesTab, so there is one tab pattern on the page.
+const _TICKER_TABS = ["dcf", "lynch", "analysis"];
+let _activeTickerTab  = "dcf";
+let _pendingTickerTab = null;   // set by a #tab= deep link, consumed once
+
+// Financial statements are fetched on the Analysis tab's first open.  The
+// loader is rebound per analysis so a new ticker re-fetches rather than
+// showing the previous company's statements.
+let _statementsLoader = null;
+let _statementsLoaded = false;
+function _loadStatementsOnce() {
+  if (_statementsLoaded || typeof _statementsLoader !== "function") return;
+  _statementsLoaded = true;
+  try { _statementsLoader(); } catch (e) { console.error("[statements]", e); }
+}
+
+// Charts owned by each tab, resized when their tab becomes visible.
+function _resizeTabCharts(name) {
+  const byTab = {
+    dcf:      [dcfChartInstance, valuationHistoryChartInstance, valuationHistoryIVChartInstance],
+    analysis: [priceChartInstance],
+    lynch:    [],
+  };
+  for (const c of (byTab[name] || [])) {
+    if (c && typeof c.resize === "function") { try { c.resize(); } catch (e) {} }
+  }
+}
+
+function switchTickerTab(name) {
+  if (!_TICKER_TABS.includes(name)) name = "dcf";
+  _activeTickerTab = name;
+
+  document.querySelectorAll("[data-ticker-tab]").forEach(btn => {
+    const on = btn.dataset.tickerTab === name;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-selected", on ? "true" : "false");
+    // Only the selected tab stays in the tab order; arrows move between them.
+    btn.tabIndex = on ? 0 : -1;
+  });
+
+  const panels = $("tickerTabPanels");
+  if (panels) {
+    panels.querySelectorAll(":scope > .tabpanels__inner > .tabpanels__content > [data-tab]")
+      .forEach(el => { el.hidden = el.dataset.tab !== name; });
+    panels.setAttribute("aria-labelledby", `tickerTab-${name}`);
+  }
+
+  // Lazy work, once per analysis, on the tab that owns it.
+  if (name === "analysis") _loadStatementsOnce();
+
+  // Chart.js measures its container at construction, and these are built
+  // eagerly by renderDetailPanels while their tab may still be hidden -- a
+  // hidden container measures zero.  Resize on reveal, after layout settles.
+  requestAnimationFrame(() => _resizeTabCharts(name));
+
+  setTabHash(name);
+}
+
+// The tab lives in the hash so a view survives refresh and can be linked to.
+// replaceState, not pushState: flipping tabs is not navigation, and every
+// flip landing in history would make Back unusable.
+function setTabHash(name) {
+  const url = new URL(window.location.href);
+  url.hash = name && name !== "dcf" ? `tab=${name}` : "";
+  window.history.replaceState({}, "", url);
+}
+
+function readTabHash() {
+  const m = (window.location.hash || "").match(/^#tab=([a-z]+)$/i);
+  const t = m ? m[1].toLowerCase() : "";
+  return _TICKER_TABS.includes(t) ? t : "";
+}
+
+function setupTickerTabs() {
+  // Captured before bootFromURL() runs, because analyzing a ticker rewrites
+  // the URL and would otherwise drop the requested tab.
+  _pendingTickerTab = readTabHash() || null;
+
+  const strip = $("tickerTabs");
+  if (!strip) return;
+  strip.querySelectorAll("[data-ticker-tab]").forEach(btn => {
+    btn.onclick = () => switchTickerTab(btn.dataset.tickerTab);
+  });
+  // Left/Right move between tabs, the expected tablist behaviour.
+  strip.onkeydown = (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    const i = _TICKER_TABS.indexOf(_activeTickerTab);
+    const next = _TICKER_TABS[(i + (e.key === "ArrowRight" ? 1 : -1) + _TICKER_TABS.length) % _TICKER_TABS.length];
+    switchTickerTab(next);
+    const btn = strip.querySelector(`[data-ticker-tab="${next}"]`);
+    if (btn) btn.focus();
+    e.preventDefault();
+  };
 }
 
 // Everything tiered detail. Each step is isolated: one card failing leaves
@@ -474,7 +565,7 @@ function renderZone3(d) {
     () => renderEarningsQualityCard(d),
     () => renderInsiderCard(d.ticker),
     () => renderCongressCard(d.ticker),
-    () => renderDrawerContent(d),
+    () => renderDetailPanels(d),
     () => syncAddPortfolioButtonForCurrent(),
     () => syncAddWatchlistButtonForCurrent(),
     () => { if (typeof window._cdReset === "function") window._cdReset(); },
@@ -1833,24 +1924,14 @@ function renderMiniStats(d) {
    Drawer content (DCF assumptions + notes + charts + tables)
    ════════════════════════════════════════════════════════════════════════ */
 
-function renderDrawerContent(d) {
-  // ── Drawer toggle binding (FIRST, so it works even if other parts fail)
-  const trigger = $("drawerTrigger");
-  const drawer  = $("drawer");
-  const triggerTxt = $("drawerTriggerTxt");
-  if (trigger && drawer) {
-    trigger.onclick = () => {
-      const isOpen = drawer.classList.toggle("open");
-      trigger.classList.toggle("open", isOpen);
-      trigger.setAttribute("aria-expanded", isOpen ? "true" : "false");
-      if (triggerTxt) triggerTxt.textContent = isOpen ? "Hide assumptions" : "Assumptions";
-      // Lazy-load financial statements on first open (Yahoo-sourced)
-      if (isOpen && !drawer.dataset.statementsLoaded) {
-        renderFinancialsTabs(d).catch(() => {});
-        drawer.dataset.statementsLoaded = "1";
-      }
-    };
-  }
+function renderDetailPanels(d) {
+  // The financial statements are Yahoo-sourced and slow, so they stay lazy.
+  // They used to load on first drawer open -- but that trigger has been
+  // `display:none` since the drawer was pinned open, so nothing ever opened
+  // it and the statements never loaded at all.  They now load on the first
+  // open of the Analysis tab, which is the tab that contains them.
+  _statementsLoader = () => renderFinancialsTabs(d).catch(() => {});
+  _statementsLoaded = false;
 
   // ── Each renderer is wrapped so a single failure doesn't take down others
   try {
@@ -1895,9 +1976,10 @@ function renderDrawerContent(d) {
   } catch (e) { console.error("[dcfChart]", e); }
   try { fetchAndRenderValuationHistory(d.ticker); } catch (e) { console.error("[valHist]", e); }
   try { renderProjectionTable(d); } catch (e) { console.error("[projTable]", e); }
-  // Financial statements are now lazy-loaded on first drawer open (see above).
-  // Reset the flag for each new analysis so a fresh ticker re-fetches.
-  if (drawer) delete drawer.dataset.statementsLoaded;
+  // If the user is already sitting on the Analysis tab when a new ticker is
+  // analysed, there is no future "first open" to hang the fetch on, so pull
+  // the statements in now.
+  if (_activeTickerTab === "analysis") _loadStatementsOnce();
 }
 
 function renderNotes(d) {
@@ -7680,7 +7762,10 @@ function pushTickerToURL(ticker) {
   const url = new URL(window.location.href);
   url.searchParams.set("t", ticker);
   url.searchParams.delete("p");
-  url.hash = "";   // analyzing a ticker exits any view
+  // Analyzing a ticker exits any view (#portfolio / #watchlist / #leaderboard)
+  // but must preserve a #tab= deep link, which addresses the ticker page
+  // itself and is re-applied once the analysis paints.
+  if (!/^#tab=/i.test(window.location.hash || "")) url.hash = "";
   window.history.replaceState({}, "", url);
 }
 
@@ -7694,6 +7779,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupPortfolioPage();
   setupWatchlistPage();
   setupTemplatesTabs();
+  setupTickerTabs();
   setupTierGlossary();
   setupModalDismiss();
   setupOnboardingCallout();

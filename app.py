@@ -3622,6 +3622,21 @@ def _net_insider_sentiment(items):
     }
 
 
+# Single source of truth for the six verdict-tier display names.
+# _priced_for_verdict emits these, and _what_would_flip_verdict names the
+# neighbouring tiers with them.  Deriving a label from the tier key instead
+# (e.g. "deep_discount".title()) resurrects the pre-rename wording, which is
+# what the flip card used to show, so both sites read from this map.
+_TIER_LABELS = {
+    "deep_discount": "Deeply Undervalued",
+    "discount":      "Undervalued",
+    "fair_value":    "Fairly Valued",
+    "growth":        "Modestly Overvalued",
+    "excellence":    "Overvalued",
+    "miracle":       "Speculative",
+}
+
+
 def _what_would_flip_verdict(intrinsic_value, price, margin_of_safety,
                              priced_for_tier):
     """Concrete answer to "what price or growth would change the rating?"
@@ -3674,7 +3689,7 @@ def _what_would_flip_verdict(intrinsic_value, price, margin_of_safety,
         target_mos = nicer[0] + 0.1  # just inside the better tier
         rows.append({
             "key":     "better",
-            "label":   f"To upgrade to {nicer[2].replace('_', ' ').title()}",
+            "label":   f"To upgrade to {_TIER_LABELS.get(nicer[2], nicer[2])}",
             "needs":   f"Price falls to ${mos_to_price(target_mos):.2f}",
             "delta_pct": round((mos_to_price(target_mos) / px - 1.0) * 100, 1),
         })
@@ -3682,7 +3697,7 @@ def _what_would_flip_verdict(intrinsic_value, price, margin_of_safety,
         target_mos = worse[1] - 0.1
         rows.append({
             "key":     "worse",
-            "label":   f"To downgrade to {worse[2].replace('_', ' ').title()}",
+            "label":   f"To downgrade to {_TIER_LABELS.get(worse[2], worse[2])}",
             "needs":   f"Price rises to ${mos_to_price(target_mos):.2f}",
             "delta_pct": round((mos_to_price(target_mos) / px - 1.0) * 100, 1),
         })
@@ -4051,7 +4066,7 @@ def _priced_for_verdict(implied_g, sector_ceiling, price, iv, margin_of_safety=N
     # noisy on highly-leveraged or low-FCF stocks (e.g. Ford).
     if (mos < -10 and implied_g is not None and sector_ceiling
             and implied_g > sector_ceiling * 1.20):
-        return {"tier": "miracle", "label": "Speculative", "color": "red",
+        return {"tier": "miracle", "label": _TIER_LABELS["miracle"], "color": "red",
                 "narrative": (f"Market implies {implied_g*100:.1f}% growth, exceeds sector "
                               f"ceiling × 1.2; speculative.")}
 
@@ -4061,28 +4076,28 @@ def _priced_for_verdict(implied_g, sector_ceiling, price, iv, margin_of_safety=N
     # "Undervalued" tag on a moonshot.
     if (implied_g is not None and sector_ceiling
             and implied_g > sector_ceiling * 1.50):
-        return {"tier": "miracle", "label": "Speculative", "color": "red",
+        return {"tier": "miracle", "label": _TIER_LABELS["miracle"], "color": "red",
                 "narrative": (f"Market implies {implied_g*100:.1f}% growth, far above sector "
                               f"ceiling; treat output as low-confidence.")}
 
     if mos >= 40:
-        return {"tier": "deep_discount", "label": "Deeply Undervalued", "color": "green",
+        return {"tier": "deep_discount", "label": _TIER_LABELS["deep_discount"], "color": "green",
                 "narrative": f"Trading {mos:.0f}% below VALUS fair value, market overly pessimistic."}
     if mos >= 15:
-        return {"tier": "discount", "label": "Undervalued", "color": "green",
+        return {"tier": "discount", "label": _TIER_LABELS["discount"], "color": "green",
                 "narrative": f"Trading {mos:.0f}% below VALUS fair value, undervalued."}
     if mos >= -10:
-        return {"tier": "fair_value", "label": "Fairly Valued", "color": "blue",
+        return {"tier": "fair_value", "label": _TIER_LABELS["fair_value"], "color": "blue",
                 "narrative": "VALUS and market are aligned, fair value zone."}
     if mos >= -25:
-        return {"tier": "growth", "label": "Modestly Overvalued", "color": "amber",
+        return {"tier": "growth", "label": _TIER_LABELS["growth"], "color": "amber",
                 "narrative": (f"Market paying a growth premium, VALUS sees stock as "
                               f"overvalued by {abs(mos):.0f}%.")}
     if mos >= -50:
-        return {"tier": "excellence", "label": "Overvalued", "color": "amber",
+        return {"tier": "excellence", "label": _TIER_LABELS["excellence"], "color": "amber",
                 "narrative": (f"Market expecting flawless execution, VALUS sees stock as "
                               f"overvalued by {abs(mos):.0f}%.")}
-    return {"tier": "miracle", "label": "Speculative", "color": "red",
+    return {"tier": "miracle", "label": _TIER_LABELS["miracle"], "color": "red",
             "narrative": (f"Market pricing in extraordinary outcomes, VALUS sees stock as "
                           f"overvalued by {abs(mos):.0f}%.")}
 

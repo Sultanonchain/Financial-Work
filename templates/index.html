@@ -1025,7 +1025,7 @@
        1. Verdict card, six fields, painted as soon as the valuation resolves.
        2. Panels: catalyst, news, red flags, company facts. Each renders on its
           own and none of them blocks zone 1.
-       3. Assumptions drawer, collapsed, everything tiered detail.
+       3. Tabbed detail: Valuation / Lynch / Analysis.
      ──────────────────────────────────────────────────────────────────────── -->
 <main class="results hidden" id="results">
   <div class="container">
@@ -1187,20 +1187,28 @@
 
     </section>
 
-    <!-- ── ZONE 3 ─ ASSUMPTIONS DRAWER ────────────────────────────────────
-         Collapsed by default, open to everyone. Everything tiered detail
-         lives here, including the assumption editor and the sliders. -->
-    <button class="drawer-trigger" id="drawerTrigger" type="button" aria-expanded="false">
-      <span id="drawerTriggerTxt">Assumptions</span>
-      <span class="drawer-trigger__chev">▾</span>
-    </button>
+    <!-- ── ZONE 3 ─ TABBED DETAIL ─────────────────────────────────────────
+         Three tabs partition what used to be one endless scroll: Valuation
+         (the DCF machinery), Lynch, and Analysis.  Zone 2's four panels stay
+         above this strip; only the bodies below it swap.  The collapse drawer
+         that used to live here was already dead (`display:none` trigger), and
+         it took the financial-statements lazy-load down with it -- that now
+         hangs off the Analysis tab's first open. -->
+    <div class="tabs ticker-tabs" id="tickerTabs" role="tablist" aria-label="Detailed analysis">
+      <button class="tab-btn active" type="button" role="tab" id="tickerTab-dcf"
+              data-ticker-tab="dcf" aria-selected="true" aria-controls="tickerTabPanels">Valuation</button>
+      <button class="tab-btn" type="button" role="tab" id="tickerTab-lynch"
+              data-ticker-tab="lynch" aria-selected="false" aria-controls="tickerTabPanels">Lynch</button>
+      <button class="tab-btn" type="button" role="tab" id="tickerTab-analysis"
+              data-ticker-tab="analysis" aria-selected="false" aria-controls="tickerTabPanels">Analysis</button>
+    </div>
 
-    <div class="drawer" id="drawer">
-      <div class="drawer__inner">
-        <div class="drawer__content">
+    <div class="tabpanels" id="tickerTabPanels" role="tabpanel" aria-labelledby="tickerTab-dcf">
+      <div class="tabpanels__inner">
+        <div class="tabpanels__content">
 
           <!-- Valuation detail: the numbers that used to crowd the hero -->
-          <div class="card">
+          <div class="card" data-tab="dcf">
             <div class="section-title">Valuation detail</div>
             <div class="price-iv">
               <div class="pi-block">
@@ -1263,7 +1271,7 @@
           </div>
 
           <!-- Assumption editor: auto-calibrated by default, editable here -->
-          <div class="card assume-card">
+          <div class="card assume-card" data-tab="dcf">
             <div class="section-title-row">
               <div class="section-title">Assumptions used</div>
               <span class="assume-card__hint" id="assumeHint">Auto-calibrated. Change one and re-run.</span>
@@ -1305,7 +1313,7 @@
           </div>
 
           <!-- Custom DCF sliders -->
-          <div class="card custom-dcf">
+          <div class="card custom-dcf" data-tab="dcf">
             <div class="section-title-row">
               <div class="section-title">Try your own assumptions</div>
               <button class="copy-btn copy-btn--small" id="cdResetBtn" type="button">↺ Reset</button>
@@ -1372,7 +1380,7 @@
           </div>
 
           <!-- Scenario analysis -->
-          <section class="card scenarios">
+          <section class="card scenarios" data-tab="dcf">
             <div class="scenarios__head">
               <span class="scenarios__title">Scenario analysis</span>
               <span class="scenarios__weight-note" id="scWeightNote">N/A</span>
@@ -1386,7 +1394,7 @@
           </section>
 
           <!-- Sanity check, what-flips, reverse-DCF -->
-          <section class="verdict-grid hidden" id="verdictGrid">
+          <section class="verdict-grid hidden" id="verdictGrid" data-tab="analysis">
             <div class="card vg-card" id="sanityCard" hidden>
               <div class="vg-head">
                 <span class="vg-icon" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#vi-scale"></use></svg></span>
@@ -1439,7 +1447,7 @@
           </section>
 
           <!-- Mini stats -->
-          <section class="mini-stats">
+          <section class="mini-stats" data-tab="analysis">
             <div class="mini-stat">
               <span class="mini-stat__label">Market Cap</span>
               <span class="mini-stat__value numeric" id="mMcap">N/A</span>
@@ -1459,7 +1467,7 @@
           </section>
 
           <!-- Valuation history -->
-          <section class="card valuation-history hidden" id="valuationHistoryCard">
+          <section class="card valuation-history hidden" id="valuationHistoryCard" data-tab="dcf">
             <div class="vh-head">
               <div class="vh-title-block">
                 <div class="vh-title">Valuation History</div>
@@ -1485,7 +1493,7 @@
           </section>
 
           <!-- Lynch Lens -->
-          <section class="lynch-card card hidden" id="lynchCard">
+          <section class="lynch-card card hidden" id="lynchCard" data-tab="lynch">
             <div class="lynch-head">
               <div class="lynch-title">
                 Lynch Lens <span class="lynch-badge">AI</span>
@@ -1513,7 +1521,7 @@
           </section>
 
           <!-- Quality, moat, checklist, momentum, earnings quality, insider, congress -->
-          <section class="insights-grid hidden" id="insightsGrid">
+          <section class="insights-grid hidden" id="insightsGrid" data-tab="analysis">
             <div class="card insights-card" id="qualityCard" hidden>
               <div class="ic-head">
                 <div class="ic-title">Quality scorecard</div>
@@ -1594,7 +1602,7 @@
           </section>
 
           <!-- Comparables-based profitability model (early-stage names) -->
-          <div class="card cmp-card hidden" id="comparablesCard">
+          <div class="card cmp-card hidden" id="comparablesCard" data-tab="dcf">
             <div class="section-title-row">
               <div class="section-title">Comparables-based fair value</div>
               <span class="cmp-card__pill" id="cmpProb">N/A</span>
@@ -1643,7 +1651,7 @@
           </div>
 
           <!-- DCF projection chart + interactive year scrubber -->
-          <div class="card" id="dcfChartCard">
+          <div class="card" id="dcfChartCard" data-tab="dcf">
             <div class="section-title-row">
               <div class="section-title">10-year cash-flow projection</div>
               <div class="dcf-scenario-toggle" role="tablist" id="dcfScenarioToggle">
@@ -1687,19 +1695,19 @@
           </div>
 
           <!-- DCF assumptions (the model's actual values, for reference) -->
-          <div class="card">
+          <div class="card" data-tab="dcf">
             <div class="section-title">DCF assumptions used by VALUS</div>
             <div class="assumptions-grid" id="assumptionsGrid"></div>
           </div>
 
           <!-- Notes / flags -->
-          <div class="card" id="notesCard">
+          <div class="card" id="notesCard" data-tab="dcf">
             <div class="section-title">Model notes</div>
             <div class="notes-list" id="notesList"></div>
           </div>
 
           <!-- Price chart -->
-          <div class="card" id="priceChartCard">
+          <div class="card" id="priceChartCard" data-tab="analysis">
             <div class="price-chart-head">
               <div>
                 <div class="section-title" style="margin-bottom:4px;">Price history</div>
@@ -1718,7 +1726,7 @@
           </div>
 
           <!-- Projection table -->
-          <div class="card">
+          <div class="card" data-tab="dcf">
             <div class="section-title">FCF projection table</div>
             <div class="table-wrap">
               <table class="dt">
@@ -1737,7 +1745,7 @@
           </div>
 
           <!-- Financials -->
-          <div class="card">
+          <div class="card" data-tab="analysis">
             <div class="section-title">Financial statements</div>
             <div class="tabs" id="finTabs">
               <button class="tab-btn active" data-fin-tab="income">Income</button>
