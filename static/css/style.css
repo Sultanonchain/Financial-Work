@@ -3637,6 +3637,19 @@ a:focus-visible {
 .vh-title-block { display: flex; flex-direction: column; gap: 4px; }
 .vh-title { font-size: 17px; font-weight: 700; color: #f5f7fa; letter-spacing: -0.01em; }
 .vh-sub { font-size: 12px; color: #8892a3; }
+/* Qualifier beside the card title, so "Valuation History" is never read as
+   "what VALUS thinks today". */
+.vh-title__qual {
+  font-family: var(--font-mono);
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: #6b7382; border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 999px; padding: 2px 8px; margin-left: 8px;
+  vertical-align: middle; white-space: nowrap;
+}
+/* Why this chart disagrees with the headline. */
+.vh-note {
+  margin: 10px 0 0; font-size: 12px; line-height: 1.55; color: #8892a3;
+}
 .vh-stats { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .vh-pill {
   display: inline-flex; align-items: center; padding: 4px 10px;

@@ -1469,8 +1469,8 @@
           <section class="card valuation-history hidden" id="valuationHistoryCard" data-tab="dcf">
             <div class="vh-head">
               <div class="vh-title-block">
-                <div class="vh-title">Valuation History</div>
-                <div class="vh-sub" id="vhSub">5-year price vs. intrinsic value · point-in-time DCF replay</div>
+                <div class="vh-title">Valuation History <span class="vh-title__qual">point-in-time replay</span></div>
+                <div class="vh-sub" id="vhSub">Each point re-runs the DCF using only the figures filed by that date</div>
               </div>
               <div class="vh-stats" id="vhStats"></div>
             </div>
@@ -1482,10 +1482,19 @@
               <canvas id="valuationHistoryChart" aria-label="Valuation history chart"></canvas>
             </div>
             <div class="vh-legend">
-              <span class="vh-legend__item"><span class="vh-dot vh-dot--iv"></span><strong>VALUS Intrinsic Value</strong></span>
+              <span class="vh-legend__item"><span class="vh-dot vh-dot--iv"></span><strong>Intrinsic value as of each date</strong></span>
               <span class="vh-legend__item"><span class="vh-dot vh-dot--price"></span>Market price</span>
-              <span class="vh-legend__hint">When price dips below the mint line = undervalued window. IV is recomputed each year from data filed by that date.</span>
+              <span class="vh-legend__hint">When price dips below the mint line, the company looked undervalued at the time.</span>
             </div>
+            <!-- The last point of this line and the fair value in the verdict
+                 above are two different questions, and readers were left to
+                 reconcile a $105 replay against a $217 headline on their own. -->
+            <p class="vh-note">This line will not agree with the fair value above, and is not
+              meant to. It grows cash flow at the rate observable on each date and knows nothing
+              that was filed later; today's headline uses VALUS's current blended growth and
+              discount-rate assumptions. The replay shows how the valuation would have read at
+              the time, not what the company is worth now.</p>
+
             <div class="vh-empty hidden" id="vhEmpty">
               Historical valuation requires SEC EDGAR data, available for US-listed filers with sufficient history.
             </div>
