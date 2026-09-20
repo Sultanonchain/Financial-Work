@@ -5936,8 +5936,20 @@ def compute_blended_growth(stock, info, fcf_series, income_stmt,
     s2_pairs.append((industry_proxy * 0.5, 0.20))      # mature-rate anchor
     s2 = sum(v * w for v, w in s2_pairs) / sum(w for _, w in s2_pairs)
     # Cap Stage 2 at 65% of industry max_s1 (matches existing convention),
-    # floor at 2%, never above Stage 1.
-    s2 = max(min(s2, ind_params["max_s1"] * 0.65, s1), 0.02)
+    # floor at 2%, and at 55% of Stage 1.
+    #
+    # That last cap used to be Stage 1 itself, which defeated the mean
+    # reversion this block exists to apply: whenever the blend above came out
+    # at or above Stage 1, s2 was pinned to s1 and the model grew cash flow at
+    # one flat rate for ten straight years.  It fires on exactly the companies
+    # where it does the most damage -- JNJ's 10-year EPS CAGR of 21.9% and
+    # revenue CAGR of 20.4% drag the blend above its 11.26% Stage 1, so JNJ
+    # was compounding 11.26% through year ten with no decay at all.
+    #
+    # 55% is the ratio the fallback path a few hundred lines up already uses
+    # for the same purpose, so this is the existing convention rather than a
+    # new one.
+    s2 = max(min(s2, ind_params["max_s1"] * 0.65, s1 * 0.55), 0.02)
 
     # Terminal growth: soft-cap at min(industry max_tg, 6%); hard-cap at 8%;
     # always strictly below Stage 2.

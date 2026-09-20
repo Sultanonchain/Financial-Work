@@ -88,7 +88,7 @@ def report(base, ticker):
     print(f"    terminal            {num(tg)}%")
     if None not in (s1, s2):
         check("stage 2 differs from stage 1", abs(s1 - s2) > 1e-9,
-              f"both {num(s1)}%")
+              f"s1 {num(s1)}% vs s2 {num(s2)}%")
     if None not in (s2, tg):
         check("stage 2 >= terminal growth", s2 >= tg - 1e-9,
               f"s2 {num(s2)} vs tg {num(tg)}")
