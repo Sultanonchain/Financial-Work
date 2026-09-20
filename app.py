@@ -10877,7 +10877,21 @@ def analyze():
             wacc_data = calc_wacc(info, income_stmt, tax_rate, fx_rate)
             # Apply industry WACC floor (pure capital-structure math can give unrealistically
             # low WACC for junk-rated, highly-levered companies like airlines)
-            wacc = max(wacc_data["wacc"], ind_params["min_wacc"])
+            #
+            # The floor is capped at the cost of equity first.  WACC is a weighted
+            # average of Ke and after-tax Kd, and after-tax Kd is below Ke for every
+            # solvent issuer, so WACC can never exceed Ke.  A flat floor ignores that:
+            # on low-beta defensives whose Ke sits under the floor (JNJ Ke 6.8%, KO
+            # Ke 7.05%, both floored to 7.5%) it printed a "weighted average cost of
+            # capital" above every input it averages, and discounted those companies
+            # at a rate their own equity holders don't demand.  Capping at Ke leaves
+            # the floor doing its real job -- it still binds on the levered, junk-rated
+            # names it was written for, whose Ke is far above it.
+            _ke_cap = wacc_data.get("coe") or None
+            _wacc_floor = ind_params["min_wacc"]
+            if _ke_cap:
+                _wacc_floor = min(_wacc_floor, _ke_cap)
+            wacc = max(wacc_data["wacc"], _wacc_floor)
             wacc_data["wacc"] = wacc
 
             # Cap terminal growth at industry ceiling (GDP-aligned for mature sectors)
@@ -10889,8 +10903,9 @@ def analyze():
             # not a way to bypass sector-specific safety floors.
             if moat_detected:
                 _wacc_pre  = wacc
-                # Reduce WACC 1.5 pp to reflect lower institutional risk (floor: 7.5%)
-                wacc = max(wacc - 0.015, 0.075)
+                # Reduce WACC 1.5 pp to reflect lower institutional risk (floor: 7.5%,
+                # itself capped at Ke for the same reason as the industry floor above)
+                wacc = max(wacc - 0.015, min(0.075, _ke_cap) if _ke_cap else 0.075)
                 wacc_data["wacc"] = wacc
                 moat_wacc_delta = round(_wacc_pre - wacc, 4)
                 # Allow terminal growth up to 3.0% for backbone companies
