@@ -42,6 +42,13 @@ app = Flask(__name__)
 # influenced by a network request.
 _INTERNAL_CALL = contextvars.ContextVar("valus_internal", default=False)
 
+# Which branch _claude_lynch_verdict returned through on this request.  The
+# function has four exits that cost nothing (no key, in-process cache, Redis,
+# cooldown) and one that costs an Anthropic round trip, so a bare wall-clock
+# timer at the call site cannot tell an expensive call from a free one.  The
+# analyze() call site reads this to log the two apart.
+_LYNCH_PATH = contextvars.ContextVar("valus_lynch_path", default="")
+
 
 @contextlib.contextmanager
 def _internal_call():
@@ -1093,6 +1100,7 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         if not api_key:
             print("[valus] lynch: ANTHROPIC_API_KEY not set in this runtime, "
                   "using DCF fallback verdict")
+        _LYNCH_PATH.set("no_api_key" if not api_key else "no_ticker")
         return None
     # Cache bucket, re-key only at the next market open (9:30 ET) or close
     # (4:00 ET) on a trading day.  Same epoch persists through the weekend.
@@ -1107,6 +1115,7 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
     bucket = (ticker.upper(), epoch, "v5")
     cached = _LYNCH_CACHE.get(bucket)
     if cached and (time.time() - cached[0]) < _LYNCH_CACHE_TTL:
+        _LYNCH_PATH.set("mem_cache")
         return cached[1]
     redis_key = f"valus:lynch:v5:{bucket[0]}:{epoch}"
     if _kv:
@@ -1115,6 +1124,7 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
             if raw:
                 parsed = _json_top.loads(raw)
                 _LYNCH_CACHE[bucket] = (time.time(), parsed)
+                _LYNCH_PATH.set("redis_cache")
                 return parsed
         except Exception:
             pass
@@ -1124,6 +1134,7 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
     # minutes after one rate-limited call every ticker fell through to the DCF
     # fallback even when a good verdict was sitting in cache.
     if time.time() < _ANTHROPIC_COOLDOWN_UNTIL:
+        _LYNCH_PATH.set("cooldown")
         return None
 
     # Compact the inputs so the prompt stays small; a focused context makes the
@@ -1292,10 +1303,12 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
             _ANTHROPIC_COOLDOWN_UNTIL = time.time() + 300   # 5-min cooldown
             print(f"[valus] lynch {ticker}: Anthropic HTTP {resp.status_code} "
                   f"(rate-limit/overloaded), backing off 5 min. {resp.text[:200]}")
+            _LYNCH_PATH.set("rate_limited")
             return None
         if resp.status_code != 200:
             print(f"[valus] lynch {ticker}: Anthropic HTTP {resp.status_code}, "
                   f"{resp.text[:300]}")
+            _LYNCH_PATH.set("http_error")
             return None
         data = resp.json()
         txt = ""
@@ -1323,6 +1336,7 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         if not isinstance(parsed, dict):
             print(f"[valus] lynch {ticker}: no JSON object in model reply, "
                   f"{txt[:200]!r}")
+            _LYNCH_PATH.set("parse_error")
             return None
 
         _VALID_CATS = {"slowGrower", "stalwart", "fastGrower",
@@ -1429,6 +1443,7 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
                 _kv.setex(redis_key, _LYNCH_CACHE_TTL, _json_top.dumps(result))
             except Exception:
                 pass
+        _LYNCH_PATH.set("api_call")
         return result
     except Exception as e:
         # Most often a 10s requests timeout on a cold lambda, or a JSON
@@ -1436,6 +1451,7 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         # instead of silently dropping to the DCF fallback.
         print(f"[valus] lynch {ticker}: verdict generation failed, "
               f"{type(e).__name__}: {str(e)[:200]}")
+        _LYNCH_PATH.set("exception")
         return None
 
 
@@ -12013,8 +12029,21 @@ def analyze():
         _tape_for_lynch = None
         if not (_ua_is_bot and not _is_internal):
             try:
+                # Timing instrumentation.  This block only runs on the
+                # cold-cache path -- analyze() returns at the X-Valus-Cache HIT
+                # early-return well above here -- so every sample below is a
+                # page load that actually paid for its Lynch verdict.  The
+                # question this answers is what deferring Lynch off the
+                # page-load path would really buy, which is not visible
+                # locally: without ANTHROPIC_API_KEY the call returns on the
+                # no_api_key branch in microseconds and every arm looks equally
+                # fast.  `path` separates the one exit that costs an Anthropic
+                # round trip from the four that cost nothing.
+                _LYNCH_PATH.set("")
+                _t_lynch = time.perf_counter()
                 _qm_for_lynch = _build_quality_metrics(info, base_fcf, rev_ttm_usd)
                 _tape_for_lynch = _build_tape_signals(info, hist)
+                _t_lynch_call = time.perf_counter()
                 lynch_verdict = _claude_lynch_verdict(
                     ticker                 = ticker,
                     sector                 = sector,
@@ -12033,6 +12062,22 @@ def analyze():
                     priced_for_label       = (priced_for or {}).get("label") if priced_for else None,
                     tape_signals           = _tape_for_lynch,
                     info                   = info,
+                )
+                _now = time.perf_counter()
+                # print(), not app.logger.info(): Flask's logger sits at
+                # WARNING outside debug mode, so an info() line would never
+                # appear in the Vercel logs -- the only place this measurement
+                # exists to be read.  Every other lynch diagnostic here prints
+                # for the same reason.
+                print(
+                    f"[valus] lynch-timing ticker={ticker} "
+                    f"path={_LYNCH_PATH.get() or 'unknown'} "
+                    f"verdict_ms={(_now - _t_lynch_call) * 1000.0:.0f} "
+                    f"inputs_ms={(_t_lynch_call - _t_lynch) * 1000.0:.0f} "
+                    f"total_ms={(_now - _t_lynch) * 1000.0:.0f} "
+                    f"got_verdict={isinstance(lynch_verdict, dict)} "
+                    f"internal={_is_internal}",
+                    flush=True,
                 )
             except Exception:
                 lynch_verdict = None
