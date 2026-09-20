@@ -1874,6 +1874,10 @@ function renderScenarios(d) {
     const barW = Math.min(Math.max(w, 5), 100);
     const s1   = slot.s1   != null ? `<span><strong>g₁</strong> ${fmt(slot.s1, 1)}%</span>` : "";
     const wacc = slot.wacc != null ? `<span><strong>WACC</strong> ${fmt(slot.wacc, 1)}%</span>` : "";
+    // On the band path the card's copy talks about long-run growth moving half
+    // a point, so show that figure too rather than making the reader take it
+    // on trust.
+    const tg   = slot.tg   != null ? `<span><strong>g∞</strong> ${fmt(slot.tg, 1)}%</span>` : "";
 
     return `
       <div class="sc-card ${key}">
@@ -1885,7 +1889,7 @@ function renderScenarios(d) {
         <div class="sc-card__delta">${upside != null ? fmtPct(upside) + " vs current" : NA}</div>
         <div class="sc-card__bar"><div class="sc-card__bar-fill" style="--bar-width: ${barW}%; width: ${barW}%;"></div></div>
         <div class="sc-card__case">${escHtml(m.case)}</div>
-        <div class="sc-card__assumptions">${s1}${wacc}</div>
+        <div class="sc-card__assumptions">${s1}${wacc}${tg}</div>
       </div>
     `;
   });

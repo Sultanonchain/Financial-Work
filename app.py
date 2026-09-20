@@ -12387,13 +12387,30 @@ def analyze():
         # to the sensitivity band means the scenario strip and the headline
         # range can never tell the user two different stories.
         if scenarios is not None and iv_range_low and iv_range_high:
-            for _k, _v in (("bear", iv_range_low), ("base", intrinsic_value),
-                           ("bull", iv_range_high)):
+            # The assumptions shown on each card have to be the ones that
+            # produced its value.  This loop used to overwrite value/upside/basis
+            # and leave `wacc` and `s1` behind from the superseded FIN 415 runs,
+            # which priced bear at Ke+3 and bull at Ke-3.  The card then read
+            # "the same forecast, discounted one percentage point higher" above
+            # a WACC twelve points off the base (NVDA: bull labelled 15.3%
+            # against a 9.0% base, while showing a value *above* base -- a
+            # higher discount rate cannot produce a higher value, so the number
+            # visibly did not belong to the card it sat on).
+            #
+            # The band comes off the 3x3 grid, which moves WACC by +/-1pp and
+            # terminal growth by +/-0.5pp and holds both growth stages fixed.
+            # So each card is that corner, and says so.
+            for _k, _v, _dw, _dt in (("bear", iv_range_low,    +0.010, -0.005),
+                                     ("base", intrinsic_value,  0.000,  0.000),
+                                     ("bull", iv_range_high,   -0.010, +0.005)):
                 _slot = scenarios.get(_k) or {}
                 _slot["value"]  = round(float(_v), 2)
                 _slot["upside"] = (round((_v - price) / price * 100, 1)
                                    if price else None)
                 _slot["basis"]  = "sensitivity"
+                _slot["wacc"]   = round((wacc + _dw) * 100, 2) if wacc is not None else None
+                _slot["tg"]     = round((tg   + _dt) * 100, 2) if tg   is not None else None
+                _slot["s1"]     = round(s1 * 100, 2) if s1 is not None else None
                 scenarios[_k] = _slot
             _wb = (scenarios.get("base") or {}).get("weight", 60) / 100
             _wu = (scenarios.get("bull") or {}).get("weight", 20) / 100
