@@ -8613,7 +8613,15 @@ def _analyze_cache_key(ticker, args):
     # and serving those next to freshly-computed ones would put two different
     # valuations of the same company on the same screen (the portfolio MOS
     # column and the leaderboard read straight out of this cache).
-    return f"valus:analyze:v6:{ticker}|{relevant}"
+    #
+    # v7 supersedes payloads written before the verdict-tier rename.  The tier
+    # LABEL is baked into each cached payload as priced_for.label, and the
+    # frontend renders that field verbatim, so a ticker cached under v6 before
+    # the rename kept serving "Priced for Deep Discount" through code that no
+    # longer contains the string anywhere.  Redis is shared across
+    # deployments, so redeploying could not clear it either.  The rename
+    # should have bumped this and didn't.
+    return f"valus:analyze:v7:{ticker}|{relevant}"
 
 def _analyze_cache_get(key):
     # 1. Check Redis first (shared across all Vercel instances)
