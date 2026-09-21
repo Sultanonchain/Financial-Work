@@ -42,6 +42,13 @@ app = Flask(__name__)
 # influenced by a network request.
 _INTERNAL_CALL = contextvars.ContextVar("valus_internal", default=False)
 
+# Which branch _claude_lynch_verdict returned through on this request.  The
+# function has four exits that cost nothing (no key, in-process cache, Redis,
+# cooldown) and one that costs an Anthropic round trip, so a bare wall-clock
+# timer at the call site cannot tell an expensive call from a free one.  The
+# analyze() call site reads this to log the two apart.
+_LYNCH_PATH = contextvars.ContextVar("valus_lynch_path", default="")
+
 
 @contextlib.contextmanager
 def _internal_call():
@@ -85,9 +92,21 @@ def _compute_asset_version():
 
 _ASSET_VERSION = _compute_asset_version()
 
+# Lynch Lens is behind a flag and OFF by default.  Nothing is deleted:
+# _claude_lynch_verdict, its Redis cache and _lynch_fallback_verdict all stay
+# where they are and become unreachable, so turning the flag on restores the
+# feature with no code change.  When off, analyze() skips the whole block and
+# the payload keeps "lynch_verdict": None, which is the shape every consumer
+# already handles -- ai_adjusted_iv falls out as None with it, since the AI
+# adjustment rides on the verdict's dcf_tweaks.
+LYNCH_ENABLED = os.environ.get("LYNCH_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 @app.context_processor
 def _inject_asset_version():
-    return {"asset_v": _ASSET_VERSION}
+    # lynch_enabled reaches every template, so the Lynch tab and card are not
+    # rendered at all when off rather than rendered-and-hidden.
+    return {"asset_v": _ASSET_VERSION, "lynch_enabled": LYNCH_ENABLED}
 
 # Cookie session signing.
 #   - In production (Vercel) we REFUSE to start without SECRET_KEY. Each
@@ -1093,6 +1112,7 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         if not api_key:
             print("[valus] lynch: ANTHROPIC_API_KEY not set in this runtime, "
                   "using DCF fallback verdict")
+        _LYNCH_PATH.set("no_api_key" if not api_key else "no_ticker")
         return None
     # Cache bucket, re-key only at the next market open (9:30 ET) or close
     # (4:00 ET) on a trading day.  Same epoch persists through the weekend.
@@ -1107,6 +1127,7 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
     bucket = (ticker.upper(), epoch, "v5")
     cached = _LYNCH_CACHE.get(bucket)
     if cached and (time.time() - cached[0]) < _LYNCH_CACHE_TTL:
+        _LYNCH_PATH.set("mem_cache")
         return cached[1]
     redis_key = f"valus:lynch:v5:{bucket[0]}:{epoch}"
     if _kv:
@@ -1115,6 +1136,7 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
             if raw:
                 parsed = _json_top.loads(raw)
                 _LYNCH_CACHE[bucket] = (time.time(), parsed)
+                _LYNCH_PATH.set("redis_cache")
                 return parsed
         except Exception:
             pass
@@ -1124,6 +1146,7 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
     # minutes after one rate-limited call every ticker fell through to the DCF
     # fallback even when a good verdict was sitting in cache.
     if time.time() < _ANTHROPIC_COOLDOWN_UNTIL:
+        _LYNCH_PATH.set("cooldown")
         return None
 
     # Compact the inputs so the prompt stays small; a focused context makes the
@@ -1292,10 +1315,12 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
             _ANTHROPIC_COOLDOWN_UNTIL = time.time() + 300   # 5-min cooldown
             print(f"[valus] lynch {ticker}: Anthropic HTTP {resp.status_code} "
                   f"(rate-limit/overloaded), backing off 5 min. {resp.text[:200]}")
+            _LYNCH_PATH.set("rate_limited")
             return None
         if resp.status_code != 200:
             print(f"[valus] lynch {ticker}: Anthropic HTTP {resp.status_code}, "
                   f"{resp.text[:300]}")
+            _LYNCH_PATH.set("http_error")
             return None
         data = resp.json()
         txt = ""
@@ -1323,6 +1348,7 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         if not isinstance(parsed, dict):
             print(f"[valus] lynch {ticker}: no JSON object in model reply, "
                   f"{txt[:200]!r}")
+            _LYNCH_PATH.set("parse_error")
             return None
 
         _VALID_CATS = {"slowGrower", "stalwart", "fastGrower",
@@ -1429,6 +1455,7 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
                 _kv.setex(redis_key, _LYNCH_CACHE_TTL, _json_top.dumps(result))
             except Exception:
                 pass
+        _LYNCH_PATH.set("api_call")
         return result
     except Exception as e:
         # Most often a 10s requests timeout on a cold lambda, or a JSON
@@ -1436,6 +1463,7 @@ def _claude_lynch_verdict(ticker, sector, industry, price, iv, mos,
         # instead of silently dropping to the DCF fallback.
         print(f"[valus] lynch {ticker}: verdict generation failed, "
               f"{type(e).__name__}: {str(e)[:200]}")
+        _LYNCH_PATH.set("exception")
         return None
 
 
@@ -2329,6 +2357,64 @@ def calc_multiples_val(info, sector, industry, fx_rate, ebitda_ttm=None, moat_pr
 # whichever is higher.  Catches both the "19,000% MOS" upper-tail nonsense and
 # the "IV = 0.01 on a healthy stock" lower-tail nonsense, a single function
 # every IV-generating path goes through, eliminating bypass routes.
+def _company_facts(info):
+    """
+    Plain company facts for the ticker page's company panel. Straight from the
+    data layer, no model: sector and industry already ship at the top level, so
+    this carries the rows that did not exist in the payload before.
+    """
+    if not isinstance(info, dict):
+        return {}
+    hq = ", ".join([x for x in (info.get("city"), info.get("state"), info.get("country")) if x])
+    employees = info.get("fullTimeEmployees")
+    try:
+        employees = int(employees) if employees is not None else None
+    except (TypeError, ValueError):
+        employees = None
+    summary = (info.get("longBusinessSummary") or "").strip()
+    return {
+        "employees":    employees,
+        "headquarters": hq or None,
+        "ceo":          _company_ceo(info.get("companyOfficers")),
+        "summary":      (summary[:420].rstrip() + "...") if len(summary) > 420 else (summary or None),
+    }
+
+
+# Titles that make someone chief executive of a division, an adviser to the
+# CEO, or a former one. None of them is the company's CEO.
+_NOT_COMPANY_CEO = re.compile(
+    r"\b(?:former|interim|deputy|vice)\b|\b(?:to|of)\s+the\s+ceo\b|"
+    r"\bceo\s+of\s+(?!the\s+company\b)\w|\bchief\s+executive\s+officer\s+of\s+\w",
+    re.I,
+)
+_IS_CEO = re.compile(r"\bceo\b|\bchief\s+executive\s+officer\b", re.I)
+
+
+def _company_ceo(officers):
+    """The officer who is chief executive of the whole company, or None."""
+    if not isinstance(officers, list):
+        return None
+    names = []
+    for o in officers:
+        if not isinstance(o, dict):
+            continue
+        title = str(o.get("title") or "")
+        name = str(o.get("name") or "").strip()
+        if not name or not _IS_CEO.search(title) or _NOT_COMPANY_CEO.search(title):
+            continue
+        # Drop honorifics and trailing credentials: "Mr. Tim  Cook" -> "Tim Cook".
+        name = re.sub(r"^(?:Mr|Mrs|Ms|Miss|Dr|Prof)\.?\s+", "", name)
+        name = re.sub(r",?\s+(?:Ph\.?D|M\.?B\.?A|CFA|CPA|J\.?D|M\.?D)\.?$", "", name, flags=re.I)
+        names.append(re.sub(r"\s{2,}", " ", name).strip())
+    if len(names) == 1:
+        return names[0]
+    # Co-CEOs are listed together; any other ambiguity omits the row.
+    if len(names) == 2 and all(re.search(r"\bco[- ]ceo\b", str(o.get("title") or ""), re.I)
+                               for o in officers if str(o.get("name") or "").strip() in names):
+        return " and ".join(names)
+    return None
+
+
 def _clamp_iv(iv, price, analyst_target=None):
     """
     Returns clamped IV, or None if inputs are unusable.
@@ -3564,6 +3650,21 @@ def _net_insider_sentiment(items):
     }
 
 
+# Single source of truth for the six verdict-tier display names.
+# _priced_for_verdict emits these, and _what_would_flip_verdict names the
+# neighbouring tiers with them.  Deriving a label from the tier key instead
+# (e.g. "deep_discount".title()) resurrects the pre-rename wording, which is
+# what the flip card used to show, so both sites read from this map.
+_TIER_LABELS = {
+    "deep_discount": "Deeply Undervalued",
+    "discount":      "Undervalued",
+    "fair_value":    "Fairly Valued",
+    "growth":        "Modestly Overvalued",
+    "excellence":    "Overvalued",
+    "miracle":       "Speculative",
+}
+
+
 def _what_would_flip_verdict(intrinsic_value, price, margin_of_safety,
                              priced_for_tier):
     """Concrete answer to "what price or growth would change the rating?"
@@ -3616,7 +3717,7 @@ def _what_would_flip_verdict(intrinsic_value, price, margin_of_safety,
         target_mos = nicer[0] + 0.1  # just inside the better tier
         rows.append({
             "key":     "better",
-            "label":   f"To upgrade to {nicer[2].replace('_', ' ').title()}",
+            "label":   f"To upgrade to {_TIER_LABELS.get(nicer[2], nicer[2])}",
             "needs":   f"Price falls to ${mos_to_price(target_mos):.2f}",
             "delta_pct": round((mos_to_price(target_mos) / px - 1.0) * 100, 1),
         })
@@ -3624,7 +3725,7 @@ def _what_would_flip_verdict(intrinsic_value, price, margin_of_safety,
         target_mos = worse[1] - 0.1
         rows.append({
             "key":     "worse",
-            "label":   f"To downgrade to {worse[2].replace('_', ' ').title()}",
+            "label":   f"To downgrade to {_TIER_LABELS.get(worse[2], worse[2])}",
             "needs":   f"Price rises to ${mos_to_price(target_mos):.2f}",
             "delta_pct": round((mos_to_price(target_mos) / px - 1.0) * 100, 1),
         })
@@ -3974,7 +4075,7 @@ def _priced_for_verdict(implied_g, sector_ceiling, price, iv, margin_of_safety=N
 
     This matches what the top card shows: positive MOS → undervalued tiers,
     negative MOS → overvalued tiers.  Eliminates the inconsistency where
-    an OVERVALUED stock could be tagged "Priced for Discount".
+    an OVERVALUED stock could be tagged "Undervalued".
 
     Returns dict: {tier, label, color, narrative}
     """
@@ -3993,38 +4094,38 @@ def _priced_for_verdict(implied_g, sector_ceiling, price, iv, margin_of_safety=N
     # noisy on highly-leveraged or low-FCF stocks (e.g. Ford).
     if (mos < -10 and implied_g is not None and sector_ceiling
             and implied_g > sector_ceiling * 1.20):
-        return {"tier": "miracle", "label": "Priced for Miracle", "color": "red",
+        return {"tier": "miracle", "label": _TIER_LABELS["miracle"], "color": "red",
                 "narrative": (f"Market implies {implied_g*100:.1f}% growth, exceeds sector "
                               f"ceiling × 1.2; speculative.")}
 
     # Hard speculative override, independent of MOS sign.  When implied
     # growth blows past ceiling × 1.5, the model is fragile regardless of
     # which direction MOS leans; surface it so investors don't see a
-    # "Priced for Discount" tag on a moonshot.
+    # "Undervalued" tag on a moonshot.
     if (implied_g is not None and sector_ceiling
             and implied_g > sector_ceiling * 1.50):
-        return {"tier": "miracle", "label": "Priced for Miracle", "color": "red",
+        return {"tier": "miracle", "label": _TIER_LABELS["miracle"], "color": "red",
                 "narrative": (f"Market implies {implied_g*100:.1f}% growth, far above sector "
                               f"ceiling; treat output as low-confidence.")}
 
     if mos >= 40:
-        return {"tier": "deep_discount", "label": "Priced for Deep Discount", "color": "green",
+        return {"tier": "deep_discount", "label": _TIER_LABELS["deep_discount"], "color": "green",
                 "narrative": f"Trading {mos:.0f}% below VALUS fair value, market overly pessimistic."}
     if mos >= 15:
-        return {"tier": "discount", "label": "Priced for Discount", "color": "green",
+        return {"tier": "discount", "label": _TIER_LABELS["discount"], "color": "green",
                 "narrative": f"Trading {mos:.0f}% below VALUS fair value, undervalued."}
     if mos >= -10:
-        return {"tier": "fair_value", "label": "Priced for Fair Value", "color": "blue",
+        return {"tier": "fair_value", "label": _TIER_LABELS["fair_value"], "color": "blue",
                 "narrative": "VALUS and market are aligned, fair value zone."}
     if mos >= -25:
-        return {"tier": "growth", "label": "Priced for Growth", "color": "amber",
+        return {"tier": "growth", "label": _TIER_LABELS["growth"], "color": "amber",
                 "narrative": (f"Market paying a growth premium, VALUS sees stock as "
                               f"overvalued by {abs(mos):.0f}%.")}
     if mos >= -50:
-        return {"tier": "excellence", "label": "Priced for Excellence", "color": "amber",
+        return {"tier": "excellence", "label": _TIER_LABELS["excellence"], "color": "amber",
                 "narrative": (f"Market expecting flawless execution, VALUS sees stock as "
                               f"overvalued by {abs(mos):.0f}%.")}
-    return {"tier": "miracle", "label": "Priced for Miracle", "color": "red",
+    return {"tier": "miracle", "label": _TIER_LABELS["miracle"], "color": "red",
             "narrative": (f"Market pricing in extraordinary outcomes, VALUS sees stock as "
                           f"overvalued by {abs(mos):.0f}%.")}
 
@@ -5847,8 +5948,20 @@ def compute_blended_growth(stock, info, fcf_series, income_stmt,
     s2_pairs.append((industry_proxy * 0.5, 0.20))      # mature-rate anchor
     s2 = sum(v * w for v, w in s2_pairs) / sum(w for _, w in s2_pairs)
     # Cap Stage 2 at 65% of industry max_s1 (matches existing convention),
-    # floor at 2%, never above Stage 1.
-    s2 = max(min(s2, ind_params["max_s1"] * 0.65, s1), 0.02)
+    # floor at 2%, and at 55% of Stage 1.
+    #
+    # That last cap used to be Stage 1 itself, which defeated the mean
+    # reversion this block exists to apply: whenever the blend above came out
+    # at or above Stage 1, s2 was pinned to s1 and the model grew cash flow at
+    # one flat rate for ten straight years.  It fires on exactly the companies
+    # where it does the most damage -- JNJ's 10-year EPS CAGR of 21.9% and
+    # revenue CAGR of 20.4% drag the blend above its 11.26% Stage 1, so JNJ
+    # was compounding 11.26% through year ten with no decay at all.
+    #
+    # 55% is the ratio the fallback path a few hundred lines up already uses
+    # for the same purpose, so this is the existing convention rather than a
+    # new one.
+    s2 = max(min(s2, ind_params["max_s1"] * 0.65, s1 * 0.55), 0.02)
 
     # Terminal growth: soft-cap at min(industry max_tg, 6%); hard-cap at 8%;
     # always strictly below Stage 2.
@@ -8500,7 +8613,15 @@ def _analyze_cache_key(ticker, args):
     # and serving those next to freshly-computed ones would put two different
     # valuations of the same company on the same screen (the portfolio MOS
     # column and the leaderboard read straight out of this cache).
-    return f"valus:analyze:v6:{ticker}|{relevant}"
+    #
+    # v7 supersedes payloads written before the verdict-tier rename.  The tier
+    # LABEL is baked into each cached payload as priced_for.label, and the
+    # frontend renders that field verbatim, so a ticker cached under v6 before
+    # the rename kept serving "Priced for Deep Discount" through code that no
+    # longer contains the string anywhere.  Redis is shared across
+    # deployments, so redeploying could not clear it either.  The rename
+    # should have bumped this and didn't.
+    return f"valus:analyze:v7:{ticker}|{relevant}"
 
 def _analyze_cache_get(key):
     # 1. Check Redis first (shared across all Vercel instances)
@@ -10176,7 +10297,10 @@ def api_valuations():
             "price":    payload.get("current_price"),
             "iv":       payload.get("intrinsic_value"),
             "mos":      mos if reliable else None,
-            "tier":     (payload.get("priced_for") or {}).get("label"),
+            # The stable tier KEY, not the label.  Stored rows keep the key and
+            # derive the display label at read time, so renaming a label reaches
+            # existing portfolio / watchlist rows with no migration.
+            "tier":     (payload.get("priced_for") or {}).get("tier"),
             "grade":    (payload.get("valus_grade") or {}).get("grade") if reliable else None,
             "reliable": reliable,
             # Peter Lynch classification (slowGrower/stalwart/fastGrower/cyclical/
@@ -10801,7 +10925,21 @@ def analyze():
             wacc_data = calc_wacc(info, income_stmt, tax_rate, fx_rate)
             # Apply industry WACC floor (pure capital-structure math can give unrealistically
             # low WACC for junk-rated, highly-levered companies like airlines)
-            wacc = max(wacc_data["wacc"], ind_params["min_wacc"])
+            #
+            # The floor is capped at the cost of equity first.  WACC is a weighted
+            # average of Ke and after-tax Kd, and after-tax Kd is below Ke for every
+            # solvent issuer, so WACC can never exceed Ke.  A flat floor ignores that:
+            # on low-beta defensives whose Ke sits under the floor (JNJ Ke 6.8%, KO
+            # Ke 7.05%, both floored to 7.5%) it printed a "weighted average cost of
+            # capital" above every input it averages, and discounted those companies
+            # at a rate their own equity holders don't demand.  Capping at Ke leaves
+            # the floor doing its real job -- it still binds on the levered, junk-rated
+            # names it was written for, whose Ke is far above it.
+            _ke_cap = wacc_data.get("coe") or None
+            _wacc_floor = ind_params["min_wacc"]
+            if _ke_cap:
+                _wacc_floor = min(_wacc_floor, _ke_cap)
+            wacc = max(wacc_data["wacc"], _wacc_floor)
             wacc_data["wacc"] = wacc
 
             # Cap terminal growth at industry ceiling (GDP-aligned for mature sectors)
@@ -10813,8 +10951,9 @@ def analyze():
             # not a way to bypass sector-specific safety floors.
             if moat_detected:
                 _wacc_pre  = wacc
-                # Reduce WACC 1.5 pp to reflect lower institutional risk (floor: 7.5%)
-                wacc = max(wacc - 0.015, 0.075)
+                # Reduce WACC 1.5 pp to reflect lower institutional risk (floor: 7.5%,
+                # itself capped at Ke for the same reason as the industry floor above)
+                wacc = max(wacc - 0.015, min(0.075, _ke_cap) if _ke_cap else 0.075)
                 wacc_data["wacc"] = wacc
                 moat_wacc_delta = round(_wacc_pre - wacc, 4)
                 # Allow terminal growth up to 3.0% for backbone companies
@@ -11820,7 +11959,7 @@ def analyze():
 
         # Strategic Discount override, when a strategic asset prints a
         # negative MOS but the market signal says "discount, not warning,"
-        # the standard "Priced for Growth/Excellence/Miracle" tier mislabels
+        # the standard Modestly Overvalued / Overvalued / Speculative tier mislabels
         # it.  Promote to a "Strategic Discount" tier (green) with narrative.
         #
         # Two trigger paths:
@@ -11920,10 +12059,25 @@ def analyze():
         _is_internal = _INTERNAL_CALL.get()
         lynch_verdict = None
         _tape_for_lynch = None
-        if not (_ua_is_bot and not _is_internal):
+        # LYNCH_ENABLED is the outer gate: off, nothing below runs and
+        # lynch_verdict stays None all the way into the payload.
+        if LYNCH_ENABLED and not (_ua_is_bot and not _is_internal):
             try:
+                # Timing instrumentation.  This block only runs on the
+                # cold-cache path -- analyze() returns at the X-Valus-Cache HIT
+                # early-return well above here -- so every sample below is a
+                # page load that actually paid for its Lynch verdict.  The
+                # question this answers is what deferring Lynch off the
+                # page-load path would really buy, which is not visible
+                # locally: without ANTHROPIC_API_KEY the call returns on the
+                # no_api_key branch in microseconds and every arm looks equally
+                # fast.  `path` separates the one exit that costs an Anthropic
+                # round trip from the four that cost nothing.
+                _LYNCH_PATH.set("")
+                _t_lynch = time.perf_counter()
                 _qm_for_lynch = _build_quality_metrics(info, base_fcf, rev_ttm_usd)
                 _tape_for_lynch = _build_tape_signals(info, hist)
+                _t_lynch_call = time.perf_counter()
                 lynch_verdict = _claude_lynch_verdict(
                     ticker                 = ticker,
                     sector                 = sector,
@@ -11943,13 +12097,34 @@ def analyze():
                     tape_signals           = _tape_for_lynch,
                     info                   = info,
                 )
+                _now = time.perf_counter()
+                # print(), not app.logger.info(): Flask's logger sits at
+                # WARNING outside debug mode, so an info() line would never
+                # appear in the Vercel logs -- the only place this measurement
+                # exists to be read.  Every other lynch diagnostic here prints
+                # for the same reason.
+                print(
+                    f"[valus] lynch-timing ticker={ticker} "
+                    f"path={_LYNCH_PATH.get() or 'unknown'} "
+                    f"verdict_ms={(_now - _t_lynch_call) * 1000.0:.0f} "
+                    f"inputs_ms={(_t_lynch_call - _t_lynch) * 1000.0:.0f} "
+                    f"total_ms={(_now - _t_lynch) * 1000.0:.0f} "
+                    f"got_verdict={isinstance(lynch_verdict, dict)} "
+                    f"internal={_is_internal}",
+                    flush=True,
+                )
             except Exception:
                 lynch_verdict = None
 
         # Always-render fallback: if Claude returned nothing (no key, error,
         # parse fail, or bot UA), build a verdict from DCF + strategic facts
         # so the Lynch card never silently hides on the frontend.
-        if not isinstance(lynch_verdict, dict):
+        #
+        # Gated on LYNCH_ENABLED as well.  This fallback is why the flag needs
+        # two gates rather than one: it manufactures a verdict dict whenever
+        # the real call produced nothing, so leaving it live would keep
+        # lynch_verdict non-None with the feature supposedly off.
+        if LYNCH_ENABLED and not isinstance(lynch_verdict, dict):
             lynch_verdict = _lynch_fallback_verdict(
                 ticker, sector, margin_of_safety, strategic,
                 (_tape_for_lynch or {}).get("regime") if _tape_for_lynch else None,
@@ -12296,13 +12471,30 @@ def analyze():
         # to the sensitivity band means the scenario strip and the headline
         # range can never tell the user two different stories.
         if scenarios is not None and iv_range_low and iv_range_high:
-            for _k, _v in (("bear", iv_range_low), ("base", intrinsic_value),
-                           ("bull", iv_range_high)):
+            # The assumptions shown on each card have to be the ones that
+            # produced its value.  This loop used to overwrite value/upside/basis
+            # and leave `wacc` and `s1` behind from the superseded FIN 415 runs,
+            # which priced bear at Ke+3 and bull at Ke-3.  The card then read
+            # "the same forecast, discounted one percentage point higher" above
+            # a WACC twelve points off the base (NVDA: bull labelled 15.3%
+            # against a 9.0% base, while showing a value *above* base -- a
+            # higher discount rate cannot produce a higher value, so the number
+            # visibly did not belong to the card it sat on).
+            #
+            # The band comes off the 3x3 grid, which moves WACC by +/-1pp and
+            # terminal growth by +/-0.5pp and holds both growth stages fixed.
+            # So each card is that corner, and says so.
+            for _k, _v, _dw, _dt in (("bear", iv_range_low,    +0.010, -0.005),
+                                     ("base", intrinsic_value,  0.000,  0.000),
+                                     ("bull", iv_range_high,   -0.010, +0.005)):
                 _slot = scenarios.get(_k) or {}
                 _slot["value"]  = round(float(_v), 2)
                 _slot["upside"] = (round((_v - price) / price * 100, 1)
                                    if price else None)
                 _slot["basis"]  = "sensitivity"
+                _slot["wacc"]   = round((wacc + _dw) * 100, 2) if wacc is not None else None
+                _slot["tg"]     = round((tg   + _dt) * 100, 2) if tg   is not None else None
+                _slot["s1"]     = round(s1 * 100, 2) if s1 is not None else None
                 scenarios[_k] = _slot
             _wb = (scenarios.get("base") or {}).get("weight", 60) / 100
             _wu = (scenarios.get("bull") or {}).get("weight", 20) / 100
@@ -12356,6 +12548,8 @@ def analyze():
             "industry":     industry,
             "currency":     info.get("currency", "USD"),
             "exchange":     info.get("exchange", ""),
+            # Company panel on the ticker page: data-layer facts, no model.
+            "company_facts": _company_facts(info),
             # Price
             "current_price": f2(price),
             "52w_high":      f2(info.get("fiftyTwoWeekHigh")),

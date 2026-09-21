@@ -67,13 +67,12 @@ Every analyzed ticker gets one of these verdict tiers, based primarily on MOS an
 
 | Tier | When it fires |
 |---|---|
-| 🟢 **Priced for Deep Discount** | MOS ≥ +40% — market overly pessimistic; high conviction undervalued |
-| 🟢 **Priced for Discount** | MOS +15% to +40% — market mildly pessimistic; undervalued |
-| 🟢 **Strategic Discount** | Strategic asset trading below model fair value; sovereign-capital backstop intact |
-| 🔵 **Priced for Fair Value** | MOS −10% to +15% — model and market are aligned |
-| 🟡 **Priced for Growth** | MOS −10% to −25% — market paying a growth premium; modestly overvalued |
-| 🟡 **Priced for Excellence** | MOS −25% to −50% — market expecting flawless execution; meaningfully overvalued |
-| 🔴 **Priced for Miracle** | MOS < −50% OR implied growth blows past the sector ceiling; speculative |
+| 🟢 **Deeply Undervalued** | MOS ≥ +40% — market overly pessimistic; high conviction undervalued |
+| 🟢 **Undervalued** | MOS +15% to +40% — market mildly pessimistic; undervalued |
+| 🔵 **Fairly Valued** | MOS −10% to +15% — model and market are aligned |
+| 🟡 **Modestly Overvalued** | MOS −10% to −25% — market paying a growth premium; modestly overvalued |
+| 🟡 **Overvalued** | MOS −25% to −50% — market expecting flawless execution; meaningfully overvalued |
+| 🔴 **Speculative** | MOS < −50% OR implied growth blows past the sector ceiling; speculative |
 
 ---
 
@@ -176,7 +175,7 @@ For the curious — here's the order in which VALUS produces a verdict:
 7. **Sector overrides**: banking-DCF, biotech blend, network-effect, distressed P/B fallback.
 8. **Premium stacking**: moat, cash-rich, debt-momentum, momentum-catalyst (gated when low confidence).
 9. **Sanity envelope**: clamp IV to `[price × 0.05, max(price × 6, analyst_target × 2.5)]`.
-10. **Verdict tier**: based on MOS + implied growth vs sector ceiling, with Strategic Discount override for low-multiple sovereign names.
+10. **Verdict tier**: based on MOS + implied growth vs sector ceiling.  Strategic names may carry an explanatory note, but it does not change the tier or the fair value.
 11. **Confidence chip**: high (DCF), medium (multiples blend), low (emergency cascade — analyst target / cash-only / distressed P/B / P/Revenue).
 
 ---

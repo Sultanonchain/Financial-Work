@@ -117,13 +117,12 @@ A positive MOS means the model thinks the stock is undervalued; negative means o
 Every analyzed ticker gets one of these verdict tiers, based primarily on MOS and secondarily on implied growth vs sector ceiling:
 </p>
 
-<div class="tier-row"><span class="tier-pill green">Priced for Deep Discount</span> <span>MOS ≥ +40%, market overly pessimistic; high conviction undervalued.</span></div>
-<div class="tier-row"><span class="tier-pill green">Priced for Discount</span> <span>MOS +15% to +40%, market mildly pessimistic; undervalued.</span></div>
-<div class="tier-row"><span class="tier-pill green">Strategic Discount</span> <span>Strategic asset trading below model fair value; sovereign-capital backstop intact.</span></div>
-<div class="tier-row"><span class="tier-pill blue">Priced for Fair Value</span> <span>MOS −10% to +15%, model and market are aligned.</span></div>
-<div class="tier-row"><span class="tier-pill amber">Priced for Growth</span> <span>MOS −10% to −25%, market paying a growth premium; modestly overvalued.</span></div>
-<div class="tier-row"><span class="tier-pill amber">Priced for Excellence</span> <span>MOS −25% to −50%, market expecting flawless execution; meaningfully overvalued.</span></div>
-<div class="tier-row"><span class="tier-pill red">Priced for Miracle</span> <span>MOS &lt; −50% OR implied growth blows past the sector ceiling; speculative.</span></div>
+<div class="tier-row"><span class="tier-pill green">Deeply Undervalued</span> <span>MOS ≥ +40%, market overly pessimistic; high conviction undervalued.</span></div>
+<div class="tier-row"><span class="tier-pill green">Undervalued</span> <span>MOS +15% to +40%, market mildly pessimistic; undervalued.</span></div>
+<div class="tier-row"><span class="tier-pill blue">Fairly Valued</span> <span>MOS −10% to +15%, model and market are aligned.</span></div>
+<div class="tier-row"><span class="tier-pill amber">Modestly Overvalued</span> <span>MOS −10% to −25%, market paying a growth premium; modestly overvalued.</span></div>
+<div class="tier-row"><span class="tier-pill amber">Overvalued</span> <span>MOS −25% to −50%, market expecting flawless execution; meaningfully overvalued.</span></div>
+<div class="tier-row"><span class="tier-pill red">Speculative</span> <span>MOS &lt; −50% OR implied growth blows past the sector ceiling; speculative.</span></div>
 
 <h2>The Strategic Asset Layer</h2>
 
@@ -193,7 +192,7 @@ For the curious, here's the order in which VALUS produces a verdict:
   <li><strong>Sector overrides</strong>: banking-DCF, biotech blend, network-effect, distressed P/B fallback.</li>
   <li><strong>Premium stacking</strong>: moat, cash-rich, debt-momentum, momentum-catalyst (gated when low confidence).</li>
   <li><strong>Sanity envelope</strong>: clamp IV to <code>[price × 0.05, max(price × 6, analyst_target × 2.5)]</code>.</li>
-  <li><strong>Verdict tier</strong>: based on MOS + implied growth vs sector ceiling, with Strategic Discount override for low-multiple sovereign names.</li>
+  <li><strong>Verdict tier</strong>: based on MOS + implied growth vs sector ceiling. Strategic names may carry an explanatory note, but it does not change the tier or the fair value.</li>
   <li><strong>Confidence chip</strong>: high (DCF), medium (multiples blend), low (emergency cascade, analyst target / cash-only / distressed P/B / P/Revenue).</li>
 </ol>
 
