@@ -1103,15 +1103,25 @@
     <!-- ── ZONE 2 ─ PANELS ────────────────────────────────────────────────
          Fixed order: catalyst, news, red flags, company. Each panel owns its
          loading and unavailable state via data-state, and reserves its own
-         body height so resolving one never moves the others. -->
+         body height so resolving one never moves the others.
+
+         Each title is the pill that opens and closes its section: same
+         .copy-btn as the Add to Portfolio / Watchlist / Copy row, and the
+         count reuses .ticker-chip, so no new pill styling exists. They behave
+         as an accordion -- opening one closes the others, because four open
+         sections is the scroll this replaces. Catalysts is open on arrival.
+         Company carries no count: a row count is not information. -->
     <section class="panels" id="zonePanels">
 
       <section class="panel" id="panelCatalyst" data-state="loading">
         <div class="panel__head">
-          <h3 class="panel__title">Catalysts</h3>
+          <button class="copy-btn panel__toggle" type="button" data-panel-toggle
+                  aria-expanded="true" aria-controls="panelCatalystBody">Catalysts<span
+                  class="ticker-chip" data-panel-count hidden></span><span
+                  class="panel__caret" aria-hidden="true">&#9662;</span></button>
           <span class="panel__status" data-panel-status></span>
         </div>
-        <div class="panel__body">
+        <div class="panel__body" id="panelCatalystBody">
           <div class="panel__skeleton" aria-hidden="true"><span></span><span></span><span></span></div>
           <p class="panel__msg" data-panel-msg></p>
           <div class="panel__content">
@@ -1131,10 +1141,13 @@
 
       <section class="panel" id="panelNews" data-state="loading">
         <div class="panel__head">
-          <h3 class="panel__title">News</h3>
+          <button class="copy-btn panel__toggle" type="button" data-panel-toggle
+                  aria-expanded="false" aria-controls="panelNewsBody">News<span
+                  class="ticker-chip" data-panel-count hidden></span><span
+                  class="panel__caret" aria-hidden="true">&#9662;</span></button>
           <span class="panel__status" data-panel-status></span>
         </div>
-        <div class="panel__body">
+        <div class="panel__body" id="panelNewsBody" hidden>
           <div class="panel__skeleton" aria-hidden="true"><span></span><span></span><span></span></div>
           <p class="panel__msg" data-panel-msg></p>
           <div class="panel__content">
@@ -1154,10 +1167,13 @@
 
       <section class="panel" id="panelRedflags" data-state="loading">
         <div class="panel__head">
-          <h3 class="panel__title">Red flags</h3>
+          <button class="copy-btn panel__toggle" type="button" data-panel-toggle
+                  aria-expanded="false" aria-controls="panelRedflagsBody">Red flags<span
+                  class="ticker-chip" data-panel-count hidden></span><span
+                  class="panel__caret" aria-hidden="true">&#9662;</span></button>
           <span class="panel__status" data-panel-status></span>
         </div>
-        <div class="panel__body">
+        <div class="panel__body" id="panelRedflagsBody" hidden>
           <div class="panel__skeleton" aria-hidden="true"><span></span><span></span><span></span></div>
           <p class="panel__msg" data-panel-msg></p>
           <div class="panel__content">
@@ -1170,10 +1186,12 @@
 
       <section class="panel" id="panelCompany" data-state="loading">
         <div class="panel__head">
-          <h3 class="panel__title">Company &amp; key figures</h3>
+          <button class="copy-btn panel__toggle" type="button" data-panel-toggle
+                  aria-expanded="false" aria-controls="panelCompanyBody">Company &amp; key figures<span
+                  class="panel__caret" aria-hidden="true">&#9662;</span></button>
           <span class="panel__status" data-panel-status></span>
         </div>
-        <div class="panel__body">
+        <div class="panel__body" id="panelCompanyBody" hidden>
           <div class="panel__skeleton" aria-hidden="true"><span></span><span></span><span></span></div>
           <p class="panel__msg" data-panel-msg></p>
           <div class="panel__content">

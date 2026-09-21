@@ -5880,7 +5880,9 @@ button:disabled { cursor: not-allowed; }
   flex-direction: column;
   gap: var(--space-3);
 }
-.panel__head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.panel__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.panel__caret { font-size: 9px; opacity: 0.7; transition: transform 0.2s; }
+.panel__toggle[aria-expanded="true"] .panel__caret { transform: rotate(-180deg); }
 .panel__title { font-size: 14px; font-weight: 600; margin: 0; letter-spacing: 0.01em; }
 .panel__status { font-size: 11px; color: var(--ink-muted); text-transform: lowercase; }
 /* Reserve the body height so one panel resolving never moves another. */
