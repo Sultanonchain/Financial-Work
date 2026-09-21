@@ -249,7 +249,7 @@
 
     <!-- Peter Lynch classification allocation (#11) -->
     <div class="card pf-allocation hidden" id="pfLynchCard">
-      <div class="section-title">Lynch classification</div>
+      <div class="section-title">{% if lynch_enabled %}Lynch classification{% else %}Valuation verdict{% endif %}</div>
       <div class="pf-allocation__body">
         <div class="pf-allocation__pie-wrap">
           <canvas id="pfLynchPie" aria-label="Peter Lynch classification pie chart"></canvas>
@@ -1025,7 +1025,7 @@
        1. Verdict card, six fields, painted as soon as the valuation resolves.
        2. Panels: catalyst, news, red flags, company facts. Each renders on its
           own and none of them blocks zone 1.
-       3. Tabbed detail: Valuation / Lynch / Analysis.
+       3. Tabbed detail: Valuation / Analysis (/ Lynch when enabled).
      ──────────────────────────────────────────────────────────────────────── -->
 <main class="results hidden" id="results">
   <div class="container">
@@ -1215,9 +1215,9 @@
     <div class="tabs ticker-tabs" id="tickerTabs" role="tablist" aria-label="Detailed analysis">
       <button class="tab-btn active" type="button" role="tab" id="tickerTab-dcf"
               data-ticker-tab="dcf" aria-selected="true" aria-controls="tickerTabPanels">Valuation</button>
-      <button class="tab-btn" type="button" role="tab" id="tickerTab-lynch"
+{% if lynch_enabled %}      <button class="tab-btn" type="button" role="tab" id="tickerTab-lynch"
               data-ticker-tab="lynch" aria-selected="false" aria-controls="tickerTabPanels">Lynch</button>
-      <button class="tab-btn" type="button" role="tab" id="tickerTab-analysis"
+{% endif %}      <button class="tab-btn" type="button" role="tab" id="tickerTab-analysis"
               data-ticker-tab="analysis" aria-selected="false" aria-controls="tickerTabPanels">Analysis</button>
     </div>
 
@@ -1518,6 +1518,7 @@
             </div>
           </section>
 
+{% if lynch_enabled %}
           <!-- Lynch Lens -->
           <section class="lynch-card card hidden" id="lynchCard" data-tab="lynch">
             <div class="lynch-head">
@@ -1546,6 +1547,7 @@
             <div class="lynch-backstop hidden" id="lynchBackstop"></div>
           </section>
 
+{% endif %}
           <!-- Quality, moat, checklist, momentum, earnings quality, insider, congress -->
           <section class="insights-grid hidden" id="insightsGrid" data-tab="analysis">
             <div class="card insights-card" id="qualityCard" hidden>
@@ -1797,6 +1799,7 @@
   </div>
 </footer>
 
+<script>window.VALUS_LYNCH_ENABLED = {{ 'true' if lynch_enabled else 'false' }};</script>
 <script src="/static/js/main.js?v={{ asset_v }}"></script>
 </body>
 </html>

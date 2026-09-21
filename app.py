@@ -92,9 +92,21 @@ def _compute_asset_version():
 
 _ASSET_VERSION = _compute_asset_version()
 
+# Lynch Lens is behind a flag and OFF by default.  Nothing is deleted:
+# _claude_lynch_verdict, its Redis cache and _lynch_fallback_verdict all stay
+# where they are and become unreachable, so turning the flag on restores the
+# feature with no code change.  When off, analyze() skips the whole block and
+# the payload keeps "lynch_verdict": None, which is the shape every consumer
+# already handles -- ai_adjusted_iv falls out as None with it, since the AI
+# adjustment rides on the verdict's dcf_tweaks.
+LYNCH_ENABLED = os.environ.get("LYNCH_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 @app.context_processor
 def _inject_asset_version():
-    return {"asset_v": _ASSET_VERSION}
+    # lynch_enabled reaches every template, so the Lynch tab and card are not
+    # rendered at all when off rather than rendered-and-hidden.
+    return {"asset_v": _ASSET_VERSION, "lynch_enabled": LYNCH_ENABLED}
 
 # Cookie session signing.
 #   - In production (Vercel) we REFUSE to start without SECRET_KEY. Each
@@ -12039,7 +12051,9 @@ def analyze():
         _is_internal = _INTERNAL_CALL.get()
         lynch_verdict = None
         _tape_for_lynch = None
-        if not (_ua_is_bot and not _is_internal):
+        # LYNCH_ENABLED is the outer gate: off, nothing below runs and
+        # lynch_verdict stays None all the way into the payload.
+        if LYNCH_ENABLED and not (_ua_is_bot and not _is_internal):
             try:
                 # Timing instrumentation.  This block only runs on the
                 # cold-cache path -- analyze() returns at the X-Valus-Cache HIT
@@ -12097,7 +12111,12 @@ def analyze():
         # Always-render fallback: if Claude returned nothing (no key, error,
         # parse fail, or bot UA), build a verdict from DCF + strategic facts
         # so the Lynch card never silently hides on the frontend.
-        if not isinstance(lynch_verdict, dict):
+        #
+        # Gated on LYNCH_ENABLED as well.  This fallback is why the flag needs
+        # two gates rather than one: it manufactures a verdict dict whenever
+        # the real call produced nothing, so leaving it live would keep
+        # lynch_verdict non-None with the feature supposedly off.
+        if LYNCH_ENABLED and not isinstance(lynch_verdict, dict):
             lynch_verdict = _lynch_fallback_verdict(
                 ticker, sector, margin_of_safety, strategic,
                 (_tape_for_lynch or {}).get("regime") if _tape_for_lynch else None,

@@ -451,7 +451,12 @@ function renderResults(d) {
 // a data-tab attribute in the markup (Valuation 10 / Lynch 1 / Analysis 5)
 // and this strip toggles which set is in flow.  Same .tab-btn + lazy-init
 // idiom as switchTemplatesTab, so there is one tab pattern on the page.
-const _TICKER_TABS = ["dcf", "lynch", "analysis"];
+// Lynch is behind LYNCH_ENABLED (server-side, injected by the template). With
+// it off the tab is never rendered, so it is not a tab that exists and is
+// hidden -- it is absent from this list, which is what makes #tab=lynch fail
+// readTabHash's membership check and fall back to DCF with no special case.
+const _LYNCH_ENABLED = (typeof window !== "undefined" && window.VALUS_LYNCH_ENABLED === true);
+const _TICKER_TABS = _LYNCH_ENABLED ? ["dcf", "lynch", "analysis"] : ["dcf", "analysis"];
 let _activeTickerTab  = "dcf";
 let _pendingTickerTab = null;   // set by a #tab= deep link, consumed once
 
@@ -471,7 +476,7 @@ function _resizeTabCharts(name) {
   const byTab = {
     dcf:      [dcfChartInstance, valuationHistoryChartInstance, valuationHistoryIVChartInstance],
     analysis: [priceChartInstance],
-    lynch:    [],
+    lynch:    [],            // no charts; kept so an enabled Lynch tab is a no-op here
   };
   for (const c of (byTab[name] || [])) {
     if (c && typeof c.resize === "function") { try { c.resize(); } catch (e) {} }
@@ -4906,6 +4911,13 @@ function destroyLynchPie() {
     _pfLynchPieInstance = null;
   }
 }
+// The portfolio pie groups by Lynch category when Lynch is enabled, and by
+// verdict tier when it is not -- same pie, same legend, real data either way.
+// tierLabelFor reads TIER_META, the frontend mirror of app.py's _TIER_LABELS
+// (identical strings for all six tiers), and /api/valuations already returns
+// the stable tier key on every holding, so nothing new has to be fetched.
+// Grouping by tier rather than dropping the card is what keeps this from
+// becoming an empty panel.
 function renderLynchAllocation(items) {
   const card    = $("pfLynchCard");
   const legend  = $("pfLynchLegend");
@@ -4914,9 +4926,9 @@ function renderLynchAllocation(items) {
   const byCat = {};
   let classified = 0;
   (items || []).forEach(it => {
-    const c = it.lynchCategory;
-    if (!c) return;   // skip holdings with no Lynch classification yet
-    const label = LYNCH_LABELS[c] || c;
+    const c = _LYNCH_ENABLED ? it.lynchCategory : it.tier;
+    if (!c) return;   // skip holdings not classified yet
+    const label = _LYNCH_ENABLED ? (LYNCH_LABELS[c] || c) : tierLabelFor(c);
     byCat[label] = (byCat[label] || 0) + 1;
     classified++;
   });
