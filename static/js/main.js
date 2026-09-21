@@ -1108,53 +1108,6 @@ function renderValuationDetail(d) {
    never stops the next one, and none of them can hold up zone 1.
    ════════════════════════════════════════════════════════════════════════ */
 
-// Zone 2 panel headers are pills that open and close their own section, as an
-// accordion: opening one closes the others, because four sections open at once
-// is the scroll this replaces. Catalysts is open on arrival.
-const _PANEL_IDS = ["panelCatalyst", "panelNews", "panelRedflags", "panelCompany"];
-const _PANEL_OPEN_BY_DEFAULT = "panelCatalyst";
-
-function _setPanelOpen(panel, open) {
-  if (!panel) return;
-  const btn  = panel.querySelector("[data-panel-toggle]");
-  const body = panel.querySelector(".panel__body");
-  if (body) body.hidden = !open;
-  if (btn) btn.setAttribute("aria-expanded", open ? "true" : "false");
-}
-
-// Count badge inside the pill, e.g. "NEWS 6". Hidden when there is nothing to
-// count, so a panel never shows a bare zero.
-function _setPanelCount(id, n) {
-  const panel = document.getElementById(id);
-  if (!panel) return;
-  const badge = panel.querySelector("[data-panel-count]");
-  if (!badge) return;
-  const val = Number(n) || 0;
-  badge.textContent = val > 0 ? String(val) : "";
-  badge.hidden = val <= 0;
-}
-
-function setupPanelToggles() {
-  for (const id of _PANEL_IDS) {
-    const panel = document.getElementById(id);
-    if (!panel) continue;
-    const btn = panel.querySelector("[data-panel-toggle]");
-    if (!btn) continue;
-    btn.onclick = () => {
-      const body = panel.querySelector(".panel__body");
-      const opening = body ? body.hidden : true;
-      // Accordion: close every other section first, so at most one is open.
-      // Closing the current one leaves them all shut, which is allowed.
-      if (opening) {
-        for (const other of _PANEL_IDS) {
-          if (other !== id) _setPanelOpen(document.getElementById(other), false);
-        }
-      }
-      _setPanelOpen(panel, opening);
-    };
-  }
-}
-
 function setPanelState(id, state, message) {
   const panel = document.getElementById(id);
   if (!panel) return;
@@ -1166,13 +1119,8 @@ function setPanelState(id, state, message) {
 }
 
 function resetPanels() {
-  for (const id of _PANEL_IDS) {
+  for (const id of ["panelCatalyst", "panelNews", "panelRedflags", "panelCompany"]) {
     setPanelState(id, "loading", "");
-    // A new ticker starts from the default arrangement rather than inheriting
-    // whatever the previous company was left open on, and drops the previous
-    // company's counts so a stale number never sits under a loading skeleton.
-    _setPanelOpen(document.getElementById(id), id === _PANEL_OPEN_BY_DEFAULT);
-    _setPanelCount(id, 0);
   }
 }
 
@@ -1228,8 +1176,6 @@ function renderCatalystPanel(d) {
     ).join("");
   }
 
-  _setPanelCount("panelCatalyst", rows.length);
-
   const hasBanner = !!(d.is_strategic && d.strategic_label);
   return (rows.length || hasBanner) ? null : "No dated catalysts in view for this ticker.";
 }
@@ -1251,7 +1197,6 @@ function renderNewsPanel(d) {
   }
 
   const headlines = (d.news_interpretation || []).length || (d.catalyst_insights || []).length;
-  _setPanelCount("panelNews", headlines);
   return (headlines || items.length) ? null : "No recent coverage found for this ticker.";
 }
 
@@ -1272,7 +1217,6 @@ function renderRedflagPanel(d) {
     summary.innerHTML = `<span class="risk-pill risk-pill--clean">Clean read, no material risk flags</span>`;
     chips.innerHTML = "";
     bullets.innerHTML = "";
-    _setPanelCount("panelRedflags", 0);   // a clean read shows no badge, not "0"
     return null;
   }
 
@@ -1288,7 +1232,6 @@ function renderRedflagPanel(d) {
     ...head.map(h => `<span class="risk-chip risk-chip--neg">Policy headwind: ${escHtml(h)}</span>`),
   ].join("");
   bullets.innerHTML = warns.slice(0, 5).map(w => `<li>${escHtml(w)}</li>`).join("");
-  _setPanelCount("panelRedflags", risks.length + head.length + warns.slice(0, 5).length);
   return null;
 }
 
@@ -7883,7 +7826,6 @@ document.addEventListener("DOMContentLoaded", () => {
   setupWatchlistPage();
   setupTemplatesTabs();
   setupTickerTabs();
-  setupPanelToggles();
   setupTierGlossary();
   setupModalDismiss();
   setupOnboardingCallout();
